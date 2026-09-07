@@ -43,6 +43,7 @@ const tickCallbacks = new Map<string, (tick: DerivTick) => void>();
 const contractCallbacks = new Map<number, (result: DerivTradeResult) => void>();
 let authState: DerivAuthState = 'disconnected';
 let authToken: string | null = null;
+let appId: string | null = null;
 let accountInfo: DerivAccount | null = null;
 const stateListeners = new Set<(state: DerivAuthState) => void>();
 const accountListeners = new Set<(account: DerivAccount | null) => void>();
@@ -72,34 +73,79 @@ function setAccountInfo(account: DerivAccount | null) {
   accountListeners.forEach((cb) => cb(account));
 }
 
-function getWs(): Promise<WebSocket> {
-  if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve(ws);
-  if (ws && ws.readyState === WebSocket.CONNECTING) {
-    return new Promise((resolve, reject) => {
-      const check = () => {
-        if (ws && ws.readyState === WebSocket.OPEN) resolve(ws);
-        else if (ws && ws.readyState === WebSocket.CLOSED) reject('WebSocket closed');
-        else setTimeout(check, 100);
-      };
-      check();
-    });
+function isPatToken(token: string): boolean {
+  return token.startsWith('pat_');
+}
+
+function isLegacyAppId(id: string): boolean {
+  return /^\d+$/.test(id);
+}
+
+async function getOptionsAccounts(token: string, app: string): Promise<{ id: string; currency: string; balance: number; is_virtual: boolean; account_type: string }[]> {
+  const response = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Deriv-App-ID': app,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Failed to get accounts (${response.status})${text ? ': ' + text : ''}`);
   }
+  const data = await response.json();
+  const accounts = data.data ?? data.accounts ?? [];
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    throw new Error('No trading accounts found for this token');
+  }
+  return accounts.map((a: Record<string, unknown>) => ({
+    id: String(a.id ?? a.loginid ?? a.account_id ?? ''),
+    currency: String(a.currency ?? 'USD'),
+    balance: Number(a.balance ?? 0),
+    is_virtual: Boolean(a.is_virtual ?? a.demo ?? (a.account_type === 'demo')),
+    account_type: String(a.account_type ?? 'demo'),
+  }));
+}
+
+async function getOtpWebSocketUrl(token: string, app: string, accountId: string): Promise<string> {
+  const response = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Deriv-App-ID': app,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Failed to get WebSocket URL (${response.status})${text ? ': ' + text : ''}`);
+  }
+  const data = await response.json();
+  const url = data.data?.url ?? data.url;
+  if (!url) throw new Error('No WebSocket URL in OTP response');
+  return String(url);
+}
+
+function connectWs(url: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     try {
-      ws = new WebSocket('wss://ws.derivws.com/websockets/v2?app_id=34khJS0KsSP29i9G8kCiJ');
-      ws.onopen = () => { resolve(ws!); };
-      ws.onclose = () => {
-        ws = null;
-        setAuthState('disconnected');
-        setAccountInfo(null);
+      const socket = new WebSocket(url);
+      const timeout = setTimeout(() => {
+        reject(new Error('WebSocket connection timed out'));
+      }, 15000);
+      socket.onopen = () => {
+        clearTimeout(timeout);
+        socket.onopen = null;
+        socket.onerror = null;
+        resolve(socket);
       };
-      ws.onerror = () => {
-        if (ws) ws.close();
-        reject('WebSocket connection failed');
+      socket.onerror = () => {
+        clearTimeout(timeout);
+        reject(new Error('WebSocket connection failed'));
       };
-      ws.onmessage = handleMessage;
     } catch {
-      reject('Could not open WebSocket');
+      reject(new Error('Could not open WebSocket'));
     }
   });
 }
@@ -119,6 +165,13 @@ function handleMessage(event: MessageEvent) {
   if (pendingReq) {
     pendingReq.resolve(data);
     pending.delete(data.req_id);
+  }
+
+  if (data.msg_type === 'balance' && data.balance) {
+    if (accountInfo) {
+      const updated = { ...accountInfo, balance: data.balance.balance, currency: data.balance.currency ?? accountInfo.currency };
+      setAccountInfo(updated);
+    }
   }
 
   if (data.msg_type === 'tick' && data.tick) {
@@ -144,12 +197,12 @@ function handleMessage(event: MessageEvent) {
 }
 
 async function send<T = unknown>(payload: Record<string, unknown>): Promise<T> {
-  const socket = await getWs();
+  if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('WebSocket not connected');
   const id = reqId++;
   const message = { ...payload, req_id: id };
   return new Promise<T>((resolve, reject) => {
     pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
-    socket.send(JSON.stringify(message));
+    ws!.send(JSON.stringify(message));
     setTimeout(() => {
       if (pending.has(id)) {
         pending.delete(id);
@@ -159,24 +212,70 @@ async function send<T = unknown>(payload: Record<string, unknown>): Promise<T> {
   });
 }
 
-export async function authorize(token: string): Promise<DerivAccount> {
+export async function authorize(token: string, app: string): Promise<DerivAccount> {
   authToken = token;
+  appId = app;
   setAuthState('connecting');
+
   try {
-    const data = await send<{ authorize?: { loginid: string; currency: string; balance: number; is_virtual: boolean }; error?: { message: string } }>({ authorize: token });
-    if (data.authorize) {
-      setAuthState('connected');
-      const account: DerivAccount = {
-        loginid: data.authorize.loginid,
-        currency: data.authorize.currency,
-        balance: data.authorize.balance,
-        is_virtual: data.authorize.is_virtual,
+    if (isPatToken(token) || !isLegacyAppId(app)) {
+      // PAT flow: REST -> OTP -> Options WebSocket
+      const accounts = await getOptionsAccounts(token, app);
+      const account = accounts[0];
+      const wsUrl = await getOtpWebSocketUrl(token, app, account.id);
+
+      const socket = await connectWs(wsUrl);
+      if (ws) { ws.close(); ws = null; }
+      ws = socket;
+      ws.onmessage = handleMessage;
+      ws.onclose = () => {
+        ws = null;
+        setAuthState('disconnected');
+        setAccountInfo(null);
       };
-      setAccountInfo(account);
-      return account;
+
+      setAuthState('connected');
+      const derivAccount: DerivAccount = {
+        loginid: account.id,
+        currency: account.currency,
+        balance: account.balance,
+        is_virtual: account.is_virtual,
+      };
+      setAccountInfo(derivAccount);
+
+      // Subscribe to balance updates
+      void send({ balance: 1, subscribe: 1 }).catch(() => {});
+
+      return derivAccount;
+    } else {
+      // Legacy flow: authorize via WebSocket
+      const url = `wss://ws.derivws.com/websockets/v2?app_id=${app}`;
+      const socket = await connectWs(url);
+      if (ws) { ws.close(); ws = null; }
+      ws = socket;
+      ws.onmessage = handleMessage;
+      ws.onclose = () => {
+        ws = null;
+        setAuthState('disconnected');
+        setAccountInfo(null);
+      };
+
+      setAuthState('authorizing');
+      const data = await send<{ authorize?: { loginid: string; currency: string; balance: number; is_virtual: boolean }; error?: { message: string } }>({ authorize: token });
+      if (data.authorize) {
+        setAuthState('connected');
+        const account: DerivAccount = {
+          loginid: data.authorize.loginid,
+          currency: data.authorize.currency,
+          balance: data.authorize.balance,
+          is_virtual: data.authorize.is_virtual,
+        };
+        setAccountInfo(account);
+        return account;
+      }
+      setAuthState('error');
+      throw data.error?.message ?? 'Authorization failed';
     }
-    setAuthState('error');
-    throw data.error?.message ?? 'Authorization failed';
   } catch (err) {
     setAuthState('error');
     throw err;
@@ -185,6 +284,7 @@ export async function authorize(token: string): Promise<DerivAccount> {
 
 export function disconnect() {
   authToken = null;
+  appId = null;
   setAuthState('disconnected');
   setAccountInfo(null);
   tickCallbacks.clear();
@@ -202,7 +302,7 @@ export async function getProposal(params: {
   stake: number;
   duration: number;
 }): Promise<DerivProposal> {
-  const data = await send<{ proposal?: { id: string; ask_price: number; payout: number; spot: number }; error?: { message: string } }>({
+  const payload: Record<string, unknown> = {
     proposal: 1,
     amount: params.stake,
     basis: 'stake',
@@ -211,7 +311,13 @@ export async function getProposal(params: {
     duration: params.duration,
     duration_unit: 't',
     symbol: params.symbol,
-  });
+  };
+  // Options API requires underlying_symbol instead of symbol
+  if (authToken && isPatToken(authToken)) {
+    payload.underlying_symbol = params.symbol;
+    delete payload.symbol;
+  }
+  const data = await send<{ proposal?: { id: string; ask_price: number; payout: number; spot: number }; error?: { message: string } }>(payload);
   if (data.proposal) return { id: data.proposal.id, ask_price: data.proposal.ask_price, payout: data.proposal.payout, spot: data.proposal.spot };
   throw data.error?.message ?? 'Could not get proposal';
 }

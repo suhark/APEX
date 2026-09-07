@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { AlertCircle, Check, Link2, Loader2, LogOut, ShieldCheck, Unlink, Wallet } from 'lucide-react';
 import { type DerivAuthState, type DerivAccount } from './deriv-client';
 
+const DEFAULT_APP_ID = '34khJS0KsSP29i9G8kCiJ';
+
 export function DerivConnectionPanel({
   authState,
   account,
@@ -10,10 +12,11 @@ export function DerivConnectionPanel({
 }: {
   authState: DerivAuthState;
   account: DerivAccount | null;
-  onConnect: (token: string) => void;
+  onConnect: (token: string, appId: string) => void;
   onDisconnect: () => void;
 }) {
   const [token, setToken] = useState('');
+  const [appId, setAppId] = useState(DEFAULT_APP_ID);
   const [showToken, setShowToken] = useState(false);
 
   if (authState === 'connected' && account) {
@@ -69,7 +72,7 @@ export function DerivConnectionPanel({
       {authState === 'error' && (
         <div className="deriv-error">
           <AlertCircle size={16} />
-          <span>Could not connect. Check your API token and try again.</span>
+          <span>Could not connect. Check your API token and App ID, then try again.</span>
         </div>
       )}
       <label className="deriv-token-label">
@@ -78,7 +81,7 @@ export function DerivConnectionPanel({
           <input
             type={showToken ? 'text' : 'password'}
             value={token}
-            placeholder="Paste your Deriv API token"
+            placeholder="Paste your Deriv API token (pat_...)"
             onChange={(e) => setToken(e.target.value)}
             disabled={connecting}
           />
@@ -87,10 +90,22 @@ export function DerivConnectionPanel({
           </button>
         </div>
       </label>
+      <label className="deriv-token-label">
+        Deriv App ID
+        <div className="deriv-token-input">
+          <input
+            type="text"
+            value={appId}
+            placeholder="Your registered Deriv App ID"
+            onChange={(e) => setAppId(e.target.value)}
+            disabled={connecting}
+          />
+        </div>
+      </label>
       <button
         className="primary"
-        disabled={!token.trim() || connecting}
-        onClick={() => onConnect(token.trim())}
+        disabled={!token.trim() || !appId.trim() || connecting}
+        onClick={() => onConnect(token.trim(), appId.trim())}
       >
         {connecting ? <><Loader2 size={16} className="spin" /> Connecting…</> : <><Link2 size={16} /> Connect to Deriv</>}
       </button>
@@ -101,7 +116,11 @@ export function DerivConnectionPanel({
           <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer">
             Deriv API Token settings
           </a>
-          . Enable the <b>Read</b>, <b>Trade</b>, and <b>Trading information</b> scopes.
+          . Enable the <b>Read</b>, <b>Trade</b>, and <b>Trading information</b> scopes. Register your app at{' '}
+          <a href="https://developers.deriv.com" target="_blank" rel="noopener noreferrer">
+            developers.deriv.com
+          </a>
+          .
         </span>
       </div>
     </div>
