@@ -110,7 +110,7 @@ function handleMessage(event: MessageEvent) {
 
   if (data.error) {
     if (pendingReq) {
-      pending.reject(data.error.message);
+      pendingReq.reject(data.error.message);
       pending.delete(data.req_id);
     }
     return;
@@ -162,20 +162,25 @@ async function send<T = unknown>(payload: Record<string, unknown>): Promise<T> {
 export async function authorize(token: string): Promise<DerivAccount> {
   authToken = token;
   setAuthState('connecting');
-  const data = await send<{ authorize?: { loginid: string; currency: string; balance: number; is_virtual: boolean }; error?: { message: string } }>({ authorize: token });
-  if (data.authorize) {
-    setAuthState('connected');
-    const account: DerivAccount = {
-      loginid: data.authorize.loginid,
-      currency: data.authorize.currency,
-      balance: data.authorize.balance,
-      is_virtual: data.authorize.is_virtual,
-    };
-    setAccountInfo(account);
-    return account;
+  try {
+    const data = await send<{ authorize?: { loginid: string; currency: string; balance: number; is_virtual: boolean }; error?: { message: string } }>({ authorize: token });
+    if (data.authorize) {
+      setAuthState('connected');
+      const account: DerivAccount = {
+        loginid: data.authorize.loginid,
+        currency: data.authorize.currency,
+        balance: data.authorize.balance,
+        is_virtual: data.authorize.is_virtual,
+      };
+      setAccountInfo(account);
+      return account;
+    }
+    setAuthState('error');
+    throw data.error?.message ?? 'Authorization failed';
+  } catch (err) {
+    setAuthState('error');
+    throw err;
   }
-  setAuthState('error');
-  throw data.error?.message ?? 'Authorization failed';
 }
 
 export function disconnect() {

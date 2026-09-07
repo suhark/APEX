@@ -17,11 +17,12 @@ export function useDerivConnection() {
   useEffect(() => onAuthStateChange(setAuthState), []);
   useEffect(() => onAccountChange(setAccount), []);
 
-  const connect = async (token: string) => {
+  const connect = async (token: string): Promise<{ ok: boolean; account?: DerivAccount; error?: string }> => {
     try {
-      await authorize(token);
-    } catch {
-      // state will be 'error'
+      const account = await authorize(token);
+      return { ok: true, account };
+    } catch (err) {
+      return { ok: false, error: typeof err === 'string' ? err : 'Authorization failed' };
     }
   };
 

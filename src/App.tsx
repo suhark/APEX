@@ -66,15 +66,18 @@ function App() {
   };
 
   const handleDerivConnect = async (token: string) => {
-    await deriv.connect(token);
-    if (deriv.authState === 'connected' && deriv.account) {
+    setNotice('Connecting to Deriv…');
+    const result = await deriv.connect(token);
+    if (result.ok && result.account) {
       await updateWorkspace({
         deriv_connected: true,
-        deriv_loginid: deriv.account.loginid,
-        deriv_is_virtual: deriv.account.is_virtual,
-        deriv_balance: deriv.account.balance,
+        deriv_loginid: result.account.loginid,
+        deriv_is_virtual: result.account.is_virtual,
+        deriv_balance: result.account.balance,
       });
-      setNotice(`Connected to Deriv (${deriv.account.loginid}).`);
+      setNotice(`Connected to Deriv (${result.account.loginid}). Live trading enabled.`);
+    } else {
+      setNotice(`Could not connect: ${result.error ?? 'Unknown error'}. Check your API token.`);
     }
   };
 
