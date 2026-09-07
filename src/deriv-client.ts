@@ -86,7 +86,7 @@ function getWs(): Promise<WebSocket> {
   }
   return new Promise((resolve, reject) => {
     try {
-      ws = new WebSocket('wss://ws.derivws.com/websockets/v2?app_id=1089');
+      ws = new WebSocket('wss://ws.derivws.com/websockets/v2?app_id=34khJS0KsSP29i9G8kCiJ');
       ws.onopen = () => { resolve(ws!); };
       ws.onclose = () => {
         ws = null;
