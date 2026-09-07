@@ -291,3 +291,179 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   color: #86efac;
 }
 
+/* Topbar disconnect button */
+.topbar-disconnect-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+  color: #fca5a5;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.topbar-disconnect-btn:hover {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: #ef4444;
+  color: #fee2e2;
+}
+
+/* Switch to Real button in topbar */
+.arm-action-btn.switch-real {
+  background: #1e1b4b;
+  border: 1px solid #4338ca;
+  color: #c7d2fe;
+}
+.arm-action-btn.switch-real:hover {
+  background: #312e81;
+  color: #ffffff;
+}
+
+/* Trade Result Alert Banner */
+.trade-result-alert {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  animation: slideInDown 0.25s ease-out;
+  position: relative;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.trade-result-alert.won {
+  background: linear-gradient(135deg, #062f1a 0%, #0a1f16 100%);
+  border: 1px solid #10b981;
+  color: #ecfdf5;
+}
+.trade-result-alert.lost {
+  background: linear-gradient(135deg, #2f0e0e 0%, #1f0a0a 100%);
+  border: 1px solid #ef4444;
+  color: #fef2f2;
+}
+.trade-alert-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.trade-result-alert.won .trade-alert-icon {
+  color: #34d399;
+}
+.trade-result-alert.lost .trade-alert-icon {
+  color: #f87171;
+}
+.trade-alert-body {
+  flex: 1;
+}
+.trade-alert-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 3px;
+}
+.trade-alert-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+.trade-alert-badge.won {
+  background: #047857;
+  color: #d1fae5;
+}
+.trade-alert-badge.lost {
+  background: #b91c1c;
+  color: #fee2e2;
+}
+.trade-alert-profit {
+  font-family: 'DM Mono', monospace;
+  font-weight: 700;
+  font-size: 15px;
+}
+.trade-alert-profit.won {
+  color: #34d399;
+}
+.trade-alert-profit.lost {
+  color: #f87171;
+}
+.trade-alert-details {
+  font-size: 11px;
+  color: #94a3b8;
+}
+.trade-alert-details b {
+  color: #f1f5f9;
+}
+.trade-alert-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+.trade-alert-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* Settings quick account switcher bar */
+.account-quick-switch-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #0b1514;
+  border: 1px solid #1a2f2b;
+  border-radius: 6px;
+}
+.account-switch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mini-acc-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  border: 1px solid #233e38;
+  background: #0d1a18;
+  color: #cbd5e1;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.mini-acc-toggle:hover:not(:disabled) {
+  border-color: #2dd4bf;
+  background: #132623;
+}
+.mini-acc-toggle.active {
+  border-color: #2dd4bf;
+  background: #11342e;
+  color: #5eead4;
+  cursor: default;
+}
+.mini-acc-toggle small {
+  font-family: 'DM Mono', monospace;
+  color: #94a3b8;
+}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, Check, ChevronRight, Clock3, Code as Code2, LayoutDashboard, ChartLine as LineChart, ListFilter, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, Wallet, X, Zap } from 'lucide-react';
+import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
 import { executeTrade, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
@@ -14,6 +14,17 @@ type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | '
 type Trade = { id: string; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number };
 type Workspace = { id: string; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null };
+
+type TradeAlert = {
+  id: number;
+  status: 'won' | 'lost';
+  direction: string;
+  instrument: string;
+  profit: number;
+  stake: number;
+  botName?: string;
+  accountType: 'Demo' | 'Real';
+};
 
 const instruments = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
 const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
@@ -36,12 +47,16 @@ function App() {
   const [tick, setTick] = useState(8);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
+  const [tradeAlert, setTradeAlert] = useState<TradeAlert | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
   const deriv = useDerivConnection();
 
   const derivConnected = deriv.authState === 'connected' && deriv.account !== null;
   const isDerivReal = derivConnected && !deriv.account?.is_virtual;
   const isDerivDemo = derivConnected && Boolean(deriv.account?.is_virtual);
+  const linkedRealAccount = deriv.accounts.find((a) => !a.is_virtual);
+  const linkedDemoAccount = deriv.accounts.find((a) => a.is_virtual);
+  const botPendingTradesRef = useRef<Set<string>>(new Set());
 
   // Safety & Arming controls
   const [liveArmed, setLiveArmed] = useState(false);
@@ -81,7 +96,8 @@ function App() {
   };
   useEffect(() => { void load(); }, []);
   useEffect(() => { const interval = window.setInterval(() => setTick((value) => value + 1), 1600); return () => window.clearInterval(interval); }, []);
-  useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 3200); return () => window.clearTimeout(timeout); }, [notice]);
+  useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 4000); return () => window.clearTimeout(timeout); }, [notice]);
+  useEffect(() => { if (!tradeAlert) return; const timeout = window.setTimeout(() => setTradeAlert(null), 6000); return () => window.clearTimeout(timeout); }, [tradeAlert]);
 
   const updateWorkspace = async (changes: Partial<Workspace>) => {
     if (!workspace) return;
@@ -92,10 +108,33 @@ function App() {
   };
 
   const armLiveTrading = () => {
-    if (!isDerivReal || !deriv.account) {
-      setNotice('Cannot arm live trading: You must be connected to a real Deriv account.');
+    if (!deriv.account) {
+      setNotice('Cannot arm live trading: You must be connected to Deriv.');
       return;
     }
+
+    if (isDerivDemo) {
+      const realAcc = deriv.accounts.find((a) => !a.is_virtual);
+      if (realAcc) {
+        const switchAndArm = window.confirm(
+          `You are currently trading on Demo (${deriv.account.loginid}).\n\n` +
+          `Switch to your Real account (${realAcc.loginid} · ${realAcc.currency} ${realAcc.balance.toFixed(2)}) and ARM live trading?`
+        );
+        if (switchAndArm) {
+          void (async () => {
+            await handleDerivSwitchAccount(realAcc.loginid);
+            sessionStartingBalRef.current = realAcc.balance;
+            setLiveArmed(true);
+            setNotice(`Switched to Real account (${realAcc.loginid}) and LIVE TRADING ARMED.`);
+          })();
+        }
+        return;
+      } else {
+        setNotice('No real Deriv account found on this token. Connect an API token that has real account access.');
+        return;
+      }
+    }
+
     const maxStake = ((deriv.account.balance * maxBalancePercent) / 100).toFixed(2);
     const confirmed = window.confirm(
       `ARM LIVE REAL-MONEY TRADING?\n\n` +
@@ -180,6 +219,10 @@ function App() {
     const ws = workspaceRef.current;
     if (!ws) return;
 
+    if (details.botName && botPendingTradesRef.current.has(details.botName)) {
+      return;
+    }
+
     const isBot = details.source === 'bot' || details.source === 'quick_bot' || details.source === 'bulk' || Boolean(details.botName);
     const currentlyArmed = liveArmedRef.current;
     const botLiveAllowed = allowBotLiveRef.current;
@@ -228,6 +271,10 @@ function App() {
       const symbol = symbolMap[details.instrument];
       if (!symbol) { setNotice('Unknown instrument for Deriv.'); return; }
 
+      if (details.botName) {
+        botPendingTradesRef.current.add(details.botName);
+      }
+
       try {
         const result = await executeTrade({
           symbol: symbol as DerivSymbol,
@@ -248,7 +295,11 @@ function App() {
           exit_price: null,
         };
         const { data, error } = await supabase.from('trading_trades').insert(trade).select().maybeSingle();
-        if (error) { setNotice('Trade could not be recorded.'); return; }
+        if (error) {
+          if (details.botName) botPendingTradesRef.current.delete(details.botName);
+          setNotice('Trade could not be recorded.');
+          return;
+        }
         if (data) setTrades((current) => [data as Trade, ...current]);
 
         subscribeContract(result.contractId, (poc: DerivTradeResult) => {
@@ -262,7 +313,9 @@ function App() {
             setTrades((current) => current.map((t) => t.id === (data as Trade).id
               ? { ...t, result: poc.status, profit: finalProfit, exit_price: poc.entry_price }
               : t));
+
             if (details.botName) {
+              botPendingTradesRef.current.delete(details.botName);
               const bot = botsRef.current.find((item) => item.name === details.botName);
               if (bot) {
                 const win = poc.status === 'won';
@@ -278,6 +331,18 @@ function App() {
               }
             }
 
+            // High-visibility Won/Lost alert banner
+            setTradeAlert({
+              id: Date.now(),
+              status: poc.status,
+              direction: details.direction,
+              instrument: details.instrument,
+              profit: finalProfit,
+              stake: details.stake,
+              botName: details.botName,
+              accountType: deriv.account?.is_virtual ? 'Demo' : 'Real',
+            });
+
             if (isDerivReal) {
               const postBal = deriv.account?.balance ?? 0;
               const startingBal = sessionStartingBalRef.current ?? postBal;
@@ -285,15 +350,16 @@ function App() {
                 setLiveArmed(false);
                 setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. Live trading disarmed.`);
               } else {
-                setNotice(`${details.direction} trade ${poc.status} ${money(finalProfit)}.`);
+                setNotice(`${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`);
               }
             } else {
-              setNotice(`${details.direction} trade ${poc.status} ${money(finalProfit)}.`);
+              setNotice(`${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`);
             }
           }
         });
         setNotice(`${details.direction} contract purchased on Deriv (${deriv.account.loginid} · ${deriv.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`);
       } catch (err) {
+        if (details.botName) botPendingTradesRef.current.delete(details.botName);
         setNotice(`Deriv trade failed: ${err}`);
       }
       return;
@@ -319,7 +385,17 @@ function App() {
         setBots((current) => current.map((item) => item.id === bot.id ? { ...item, ...next } : item));
       }
     }
-    setNotice(`${details.direction} trade ${win ? 'won' : 'lost'} ${money(profit)}.`);
+    setTradeAlert({
+      id: Date.now(),
+      status: win ? 'won' : 'lost',
+      direction: details.direction,
+      instrument: details.instrument,
+      profit,
+      stake: details.stake,
+      botName: details.botName,
+      accountType: 'Demo',
+    });
+    setNotice(`${win ? '🎉' : '📉'} ${details.direction} trade ${win ? 'WON' : 'LOST'} ${win ? '+' : ''}${money(profit)}`);
   };
   const toggleBot = async (bot: BotRow) => {
     const active = !bot.active;
@@ -335,6 +411,7 @@ function App() {
       if (!activeBots.length || !ws) return;
       const currentTick = tickRef.current;
       activeBots.forEach((bot, i) => {
+        if (botPendingTradesRef.current.has(bot.name)) return;
         void runTradeRef.current({
           instrument: instruments[(currentTick + i) % instruments.length],
           direction: (currentTick + i) % 2 ? 'CALL' : 'PUT',
@@ -409,6 +486,11 @@ function App() {
             <ShieldCheck size={17} />
             <div><b>Loss guard active</b><span>Auto-protect enabled</span></div>
           </div>
+          {derivConnected && (
+            <button className="mini-settings disconnect" onClick={handleDerivDisconnect}>
+              <LogOut size={16} /> Disconnect Deriv
+            </button>
+          )}
           <button className="mini-settings" onClick={() => setPage('settings')}>
             <Settings2 size={16} /> Workspace settings
           </button>
@@ -440,6 +522,16 @@ function App() {
                 {liveArmed ? 'ARMED (Click to Disarm)' : 'Arm Live Trading'}
               </button>
             )}
+            {isDerivDemo && linkedRealAccount && (
+              <button
+                type="button"
+                className="arm-action-btn switch-real"
+                onClick={() => void handleDerivSwitchAccount(linkedRealAccount.loginid)}
+                title={`Switch active trading account to Real (${linkedRealAccount.loginid})`}
+              >
+                <Wallet size={13} /> Switch to Real ({linkedRealAccount.loginid})
+              </button>
+            )}
             {deriv.accounts.length > 1 && (
               <div className="topbar-account-switch">
                 <Wallet size={12} />
@@ -454,6 +546,16 @@ function App() {
                   ))}
                 </select>
               </div>
+            )}
+            {derivConnected && (
+              <button
+                type="button"
+                className="topbar-disconnect-btn"
+                onClick={handleDerivDisconnect}
+                title="Disconnect Deriv account"
+              >
+                <LogOut size={13} /> Disconnect
+              </button>
             )}
             <button className="refresh" onClick={() => void load()}><RefreshCw size={15} /> Sync</button>
             <div className="balance">
@@ -476,6 +578,35 @@ function App() {
           })}
         </div>
         <div className="page-content">
+          {tradeAlert && (
+            <div className={`trade-result-alert ${tradeAlert.status}`}>
+              <div className="trade-alert-icon">
+                {tradeAlert.status === 'won' ? <CheckCircle2 size={24} /> : <AlertCircle size={24} />}
+              </div>
+              <div className="trade-alert-body">
+                <div className="trade-alert-headline">
+                  <span className={`trade-alert-badge ${tradeAlert.status}`}>
+                    {tradeAlert.status === 'won' ? 'TRADE WON' : 'TRADE LOST'}
+                  </span>
+                  <span className={`trade-alert-profit ${tradeAlert.status}`}>
+                    {tradeAlert.status === 'won' ? `+${money(tradeAlert.profit)}` : `-${money(Math.abs(tradeAlert.profit))}`}
+                  </span>
+                </div>
+                <div className="trade-alert-details">
+                  <b>{tradeAlert.direction}</b> on <b>{tradeAlert.instrument}</b> · Stake: {money(tradeAlert.stake)} · {tradeAlert.accountType}
+                  {tradeAlert.botName ? ` · Bot: ${tradeAlert.botName}` : ' · Manual'}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="trade-alert-close"
+                onClick={() => setTradeAlert(null)}
+                title="Dismiss alert"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
           {notice && <div className="toast"><Check size={16} /> {notice}<button onClick={() => setNotice('')}><X size={14} /></button></div>}
           {content}
         </div>
@@ -698,6 +829,28 @@ function Settings({
           <p className="muted" style={{ marginBottom: '14px' }}>
             For safety, connecting Deriv always leaves live execution disarmed in demo mode until explicitly armed here or in the topbar.
           </p>
+          {derivConnected && deriv.accounts.length > 1 && (
+            <div className="account-quick-switch-bar" style={{ marginBottom: '14px' }}>
+              <span className="muted">Active account: <b>{deriv.account?.loginid}</b> ({deriv.account?.is_virtual ? 'Demo' : 'Real'})</span>
+              <div className="account-switch-actions">
+                {deriv.accounts.map((acc) => (
+                  <button
+                    key={acc.loginid}
+                    type="button"
+                    className={`mini-acc-toggle ${acc.loginid === deriv.account?.loginid ? 'active' : ''}`}
+                    disabled={acc.loginid === deriv.account?.loginid}
+                    onClick={() => void onDerivSwitchAccount(acc.loginid)}
+                  >
+                    <span className={`badge-tag ${acc.is_virtual ? 'demo' : 'real'}`}>
+                      {acc.is_virtual ? 'DEMO' : 'REAL'}
+                    </span>
+                    <b>{acc.loginid}</b>
+                    <small>{acc.currency} {acc.balance.toFixed(2)}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="mode-toggle">
             <button
               type="button"
@@ -714,18 +867,14 @@ function Settings({
               type="button"
               className={liveArmed ? 'selected' : ''}
               onClick={() => {
-                if (!isDerivReal) {
-                  setNotice('You must connect and select a real Deriv account to arm live trading.');
-                } else {
-                  armLiveTrading();
-                }
+                armLiveTrading();
               }}
             >
               <div>
-                <strong>{liveArmed ? 'LIVE EXECUTION ARMED' : 'Arm Live Trading'}</strong>
-                <span>{isDerivReal ? `Real orders execute on ${deriv.account?.loginid}` : 'Requires real Deriv account'}</span>
+                <strong>{liveArmed ? 'LIVE EXECUTION ARMED' : isDerivReal ? 'Arm Live Trading' : 'Arm Live (Switch to Real)'}</strong>
+                <span>{isDerivReal ? `Real orders execute on ${deriv.account?.loginid}` : (deriv.accounts.find((a) => !a.is_virtual) ? `Click to switch to ${deriv.accounts.find((a) => !a.is_virtual)?.loginid} & arm` : 'Connect a token with real account access')}</span>
               </div>
-              {liveArmed ? <Check size={17} /> : !isDerivReal ? <span className="soon">Real Only</span> : null}
+              {liveArmed && <Check size={17} />}
             </button>
           </div>
         </section>

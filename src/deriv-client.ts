@@ -7,6 +7,7 @@ export interface DerivAccount {
   currency: string;
   balance: number;
   is_virtual: boolean;
+  token?: string;
 }
 
 export interface DerivTick {
@@ -90,11 +91,12 @@ function setAvailableAccounts(accounts: DerivAccount[]) {
 export function isAccountVirtual(account: Record<string, unknown>, id?: string): boolean {
   const loginid = String(id ?? account.id ?? account.loginid ?? account.account_id ?? '').toUpperCase();
   if (loginid.startsWith('VR')) return true;
-  if (loginid.startsWith('CR') || loginid.startsWith('MF') || loginid.startsWith('MX')) return false;
   if (account.is_virtual === true || account.is_virtual === 1 || account.is_virtual === '1') return true;
   if (account.is_virtual === false || account.is_virtual === 0 || account.is_virtual === '0') return false;
   const type = String(account.account_type ?? account.type ?? '').toLowerCase();
   if (type === 'demo' || type === 'virtual') return true;
+  if (type === 'real') return false;
+  if (loginid.length >= 2 && !loginid.startsWith('VR')) return false;
   return false;
 }
 
@@ -209,16 +211,34 @@ function handleMessage(event: MessageEvent) {
 
   if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
     const poc = data.proposal_open_contract;
-    const cb = contractCallbacks.get(poc.contract_id);
+    const cid = Number(poc.contract_id);
+    const cb = contractCallbacks.get(cid);
     if (cb) {
-      const status = poc.is_sold ? (poc.status === 'won' ? 'won' : 'lost') : 'open';
+      const isFinished =
+        poc.status === 'won' ||
+        poc.status === 'lost' ||
+        poc.is_sold === 1 ||
+        poc.is_sold === true ||
+        poc.is_expired === 1 ||
+        poc.is_settleable === 1;
+
+      let status: 'open' | 'won' | 'lost' = 'open';
+      if (isFinished) {
+        if (poc.status === 'won') status = 'won';
+        else if (poc.status === 'lost') status = 'lost';
+        else {
+          const profit = Number(poc.profit ?? 0);
+          status = profit >= 0 ? 'won' : 'lost';
+        }
+      }
+
       cb({
-        contract_id: poc.contract_id,
-        buy_price: poc.buy_price,
-        entry_price: poc.entry_spot ?? 0,
+        contract_id: cid,
+        buy_price: Number(poc.buy_price ?? 0),
+        entry_price: Number(poc.entry_spot ?? 0),
         status,
-        payout: poc.payout ?? 0,
-        profit: poc.profit ?? 0,
+        payout: Number(poc.payout ?? 0),
+        profit: Number(poc.profit ?? 0),
       });
     }
   }
@@ -434,9 +454,116 @@ export async function buyContract(proposalId: string, price: number): Promise<{ 
   throw data.error?.message ?? 'Buy failed';
 }
 
-export async function subscribeContract(contractId: number, cb: (result: DerivTradeResult) => void): Promise<void> {
-  contractCallbacks.set(contractId, cb);
-  await send({ proposal_open_contract: 1, contract_id: contractId, subscribe: 1 });
+export function subscribeContract(contractId: number, cb: (result: DerivTradeResult) => void): () => void {
+  const normalizedId = Number(contractId);
+  let resolved = false;
+  let pollInterval: number | null = null;
+  let safetyTimeout: number | null = null;
+
+  const processPoc = (poc: Record<string, unknown>) => {
+    if (resolved) return;
+    const isFinished =
+      poc.status === 'won' ||
+      poc.status === 'lost' ||
+      poc.is_sold === 1 ||
+      poc.is_sold === true ||
+      poc.is_expired === 1 ||
+      poc.is_settleable === 1;
+
+    let status: 'open' | 'won' | 'lost' = 'open';
+    if (isFinished) {
+      if (poc.status === 'won') status = 'won';
+      else if (poc.status === 'lost') status = 'lost';
+      else {
+        const profit = Number(poc.profit ?? 0);
+        status = profit >= 0 ? 'won' : 'lost';
+      }
+    }
+
+    const tradeResult: DerivTradeResult = {
+      contract_id: normalizedId,
+      buy_price: Number(poc.buy_price ?? 0),
+      entry_price: Number(poc.entry_spot ?? 0),
+      status,
+      payout: Number(poc.payout ?? 0),
+      profit: Number(poc.profit ?? 0),
+    };
+
+    if (status === 'won' || status === 'lost') {
+      resolved = true;
+      if (pollInterval) clearInterval(pollInterval);
+      if (safetyTimeout) clearTimeout(safetyTimeout);
+      contractCallbacks.delete(normalizedId);
+      // Refresh balance after contract settles
+      void send({ balance: 1 }).catch(() => {});
+      cb(tradeResult);
+    }
+  };
+
+  contractCallbacks.set(normalizedId, (res: DerivTradeResult) => {
+    if (res.status === 'won' || res.status === 'lost') {
+      if (!resolved) {
+        resolved = true;
+        if (pollInterval) clearInterval(pollInterval);
+        if (safetyTimeout) clearTimeout(safetyTimeout);
+        contractCallbacks.delete(normalizedId);
+        void send({ balance: 1 }).catch(() => {});
+        cb(res);
+      }
+    }
+  });
+
+  // 1. Send subscription
+  send<{ proposal_open_contract?: Record<string, unknown> }>({
+    proposal_open_contract: 1,
+    contract_id: normalizedId,
+    subscribe: 1,
+  })
+    .then((res) => {
+      if (res?.proposal_open_contract) {
+        processPoc(res.proposal_open_contract);
+      }
+    })
+    .catch(() => {});
+
+  // 2. Active 1.2-second polling to ensure we never miss completion
+  pollInterval = window.setInterval(async () => {
+    if (resolved || !ws || ws.readyState !== WebSocket.OPEN) {
+      if (pollInterval) clearInterval(pollInterval);
+      return;
+    }
+    try {
+      const data = await send<{ proposal_open_contract?: Record<string, unknown> }>({
+        proposal_open_contract: 1,
+        contract_id: normalizedId,
+      });
+      if (data?.proposal_open_contract) {
+        processPoc(data.proposal_open_contract);
+      }
+    } catch {}
+  }, 1200);
+
+  // 3. Safety timeout after 18 seconds
+  safetyTimeout = window.setTimeout(async () => {
+    if (resolved) return;
+    if (pollInterval) clearInterval(pollInterval);
+    try {
+      const data = await send<{ proposal_open_contract?: Record<string, unknown> }>({
+        proposal_open_contract: 1,
+        contract_id: normalizedId,
+      });
+      if (data?.proposal_open_contract) {
+        processPoc(data.proposal_open_contract);
+      }
+    } catch {}
+  }, 18000);
+
+  return () => {
+    resolved = true;
+    if (pollInterval) clearInterval(pollInterval);
+    if (safetyTimeout) clearTimeout(safetyTimeout);
+    contractCallbacks.delete(normalizedId);
+  };
 }
 
 export async function executeTrade(params: {
