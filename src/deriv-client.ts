@@ -45,11 +45,14 @@ let authState: DerivAuthState = 'disconnected';
 let authToken: string | null = null;
 let appId: string | null = null;
 let accountInfo: DerivAccount | null = null;
+let availableAccounts: DerivAccount[] = [];
 const stateListeners = new Set<(state: DerivAuthState) => void>();
 const accountListeners = new Set<(account: DerivAccount | null) => void>();
+const availableAccountsListeners = new Set<(accounts: DerivAccount[]) => void>();
 
 export function getAuthState() { return authState; }
 export function getAccountInfo() { return accountInfo; }
+export function getAvailableAccounts() { return availableAccounts; }
 
 export function onAuthStateChange(cb: (state: DerivAuthState) => void) {
   stateListeners.add(cb);
@@ -63,6 +66,12 @@ export function onAccountChange(cb: (account: DerivAccount | null) => void) {
   return () => { accountListeners.delete(cb); };
 }
 
+export function onAvailableAccountsChange(cb: (accounts: DerivAccount[]) => void) {
+  availableAccountsListeners.add(cb);
+  cb(availableAccounts);
+  return () => { availableAccountsListeners.delete(cb); };
+}
+
 function setAuthState(state: DerivAuthState) {
   authState = state;
   stateListeners.forEach((cb) => cb(state));
@@ -73,6 +82,22 @@ function setAccountInfo(account: DerivAccount | null) {
   accountListeners.forEach((cb) => cb(account));
 }
 
+function setAvailableAccounts(accounts: DerivAccount[]) {
+  availableAccounts = accounts;
+  availableAccountsListeners.forEach((cb) => cb(accounts));
+}
+
+export function isAccountVirtual(account: Record<string, unknown>, id?: string): boolean {
+  const loginid = String(id ?? account.id ?? account.loginid ?? account.account_id ?? '').toUpperCase();
+  if (loginid.startsWith('VR')) return true;
+  if (loginid.startsWith('CR') || loginid.startsWith('MF') || loginid.startsWith('MX')) return false;
+  if (account.is_virtual === true || account.is_virtual === 1 || account.is_virtual === '1') return true;
+  if (account.is_virtual === false || account.is_virtual === 0 || account.is_virtual === '0') return false;
+  const type = String(account.account_type ?? account.type ?? '').toLowerCase();
+  if (type === 'demo' || type === 'virtual') return true;
+  return false;
+}
+
 function isPatToken(token: string): boolean {
   return token.startsWith('pat_');
 }
@@ -81,7 +106,7 @@ function isLegacyAppId(id: string): boolean {
   return /^\d+$/.test(id);
 }
 
-async function getOptionsAccounts(token: string, app: string): Promise<{ id: string; currency: string; balance: number; is_virtual: boolean; account_type: string }[]> {
+async function getOptionsAccounts(token: string, app: string): Promise<DerivAccount[]> {
   const response = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
     method: 'GET',
     headers: {
@@ -99,13 +124,16 @@ async function getOptionsAccounts(token: string, app: string): Promise<{ id: str
   if (!Array.isArray(accounts) || accounts.length === 0) {
     throw new Error('No trading accounts found for this token');
   }
-  return accounts.map((a: Record<string, unknown>) => ({
-    id: String(a.id ?? a.loginid ?? a.account_id ?? ''),
-    currency: String(a.currency ?? 'USD'),
-    balance: Number(a.balance ?? 0),
-    is_virtual: Boolean(a.is_virtual ?? a.demo ?? (a.account_type === 'demo')),
-    account_type: String(a.account_type ?? 'demo'),
-  }));
+  return accounts.map((a: Record<string, unknown>) => {
+    const id = String(a.id ?? a.loginid ?? a.account_id ?? '');
+    const isVirtual = isAccountVirtual(a, id);
+    return {
+      loginid: id,
+      currency: String(a.currency ?? 'USD'),
+      balance: Number(a.balance ?? 0),
+      is_virtual: isVirtual,
+    };
+  });
 }
 
 async function getOtpWebSocketUrl(token: string, app: string, accountId: string): Promise<string> {
@@ -221,11 +249,20 @@ export async function authorize(token: string, app: string): Promise<DerivAccoun
     if (isPatToken(token) || !isLegacyAppId(app)) {
       // PAT flow: REST -> OTP -> Options WebSocket
       const accounts = await getOptionsAccounts(token, app);
-      const account = accounts[0];
-      const wsUrl = await getOtpWebSocketUrl(token, app, account.id);
+      setAvailableAccounts(accounts);
 
+      // Default to Demo account for safety if available, otherwise first account
+      const demoAccount = accounts.find((a) => a.is_virtual);
+      const selectedAccount = demoAccount || accounts[0];
+
+      const wsUrl = await getOtpWebSocketUrl(token, app, selectedAccount.loginid);
       const socket = await connectWs(wsUrl);
-      if (ws) { ws.close(); ws = null; }
+      if (ws) {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+        ws = null;
+      }
       ws = socket;
       ws.onmessage = handleMessage;
       ws.onclose = () => {
@@ -235,23 +272,22 @@ export async function authorize(token: string, app: string): Promise<DerivAccoun
       };
 
       setAuthState('connected');
-      const derivAccount: DerivAccount = {
-        loginid: account.id,
-        currency: account.currency,
-        balance: account.balance,
-        is_virtual: account.is_virtual,
-      };
-      setAccountInfo(derivAccount);
+      setAccountInfo(selectedAccount);
 
       // Subscribe to balance updates
       void send({ balance: 1, subscribe: 1 }).catch(() => {});
 
-      return derivAccount;
+      return selectedAccount;
     } else {
       // Legacy flow: authorize via WebSocket
       const url = `wss://ws.derivws.com/websockets/v2?app_id=${app}`;
       const socket = await connectWs(url);
-      if (ws) { ws.close(); ws = null; }
+      if (ws) {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+        ws = null;
+      }
       ws = socket;
       ws.onmessage = handleMessage;
       ws.onclose = () => {
@@ -261,17 +297,49 @@ export async function authorize(token: string, app: string): Promise<DerivAccoun
       };
 
       setAuthState('authorizing');
-      const data = await send<{ authorize?: { loginid: string; currency: string; balance: number; is_virtual: boolean }; error?: { message: string } }>({ authorize: token });
+      const data = await send<{
+        authorize?: {
+          loginid: string;
+          currency: string;
+          balance: number;
+          is_virtual: boolean | number;
+          account_list?: Array<Record<string, unknown>>;
+        };
+        error?: { message: string };
+      }>({ authorize: token });
+
       if (data.authorize) {
-        setAuthState('connected');
-        const account: DerivAccount = {
+        const primaryVirtual = isAccountVirtual(data.authorize as Record<string, unknown>, data.authorize.loginid);
+        const primaryAccount: DerivAccount = {
           loginid: data.authorize.loginid,
           currency: data.authorize.currency,
-          balance: data.authorize.balance,
-          is_virtual: data.authorize.is_virtual,
+          balance: Number(data.authorize.balance ?? 0),
+          is_virtual: primaryVirtual,
         };
-        setAccountInfo(account);
-        return account;
+
+        let accountsList: DerivAccount[] = [primaryAccount];
+        if (Array.isArray(data.authorize.account_list) && data.authorize.account_list.length > 0) {
+          accountsList = data.authorize.account_list.map((raw) => {
+            const lid = String(raw.loginid ?? raw.id ?? '');
+            const isVirt = isAccountVirtual(raw, lid);
+            return {
+              loginid: lid,
+              currency: String(raw.currency ?? 'USD'),
+              balance: lid === primaryAccount.loginid ? primaryAccount.balance : 0,
+              is_virtual: isVirt,
+            };
+          });
+          if (!accountsList.some((a) => a.loginid === primaryAccount.loginid)) {
+            accountsList.unshift(primaryAccount);
+          }
+        }
+
+        setAvailableAccounts(accountsList);
+        setAuthState('connected');
+        setAccountInfo(primaryAccount);
+
+        void send({ balance: 1, subscribe: 1 }).catch(() => {});
+        return primaryAccount;
       }
       setAuthState('error');
       throw data.error?.message ?? 'Authorization failed';
@@ -282,15 +350,50 @@ export async function authorize(token: string, app: string): Promise<DerivAccoun
   }
 }
 
+export async function switchAccount(loginid: string): Promise<DerivAccount> {
+  const target = availableAccounts.find((a) => a.loginid === loginid);
+  if (!target) throw new Error(`Account ${loginid} not found`);
+  if (!authToken || !appId) throw new Error('Deriv is not connected');
+
+  if (isPatToken(authToken) || !isLegacyAppId(appId)) {
+    const wsUrl = await getOtpWebSocketUrl(authToken, appId, target.loginid);
+    const socket = await connectWs(wsUrl);
+    if (ws) {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.close();
+      ws = null;
+    }
+    ws = socket;
+    ws.onmessage = handleMessage;
+    ws.onclose = () => {
+      ws = null;
+      setAuthState('disconnected');
+      setAccountInfo(null);
+    };
+
+    setAccountInfo(target);
+    contractCallbacks.clear();
+    void send({ balance: 1, subscribe: 1 }).catch(() => {});
+    return target;
+  } else {
+    setAccountInfo(target);
+    return target;
+  }
+}
+
 export function disconnect() {
   authToken = null;
   appId = null;
   setAuthState('disconnected');
   setAccountInfo(null);
+  setAvailableAccounts([]);
   tickCallbacks.clear();
   contractCallbacks.clear();
   pending.clear();
   if (ws) {
+    ws.onclose = null;
+    ws.onerror = null;
     ws.close();
     ws = null;
   }
@@ -307,7 +410,7 @@ export async function getProposal(params: {
     amount: params.stake,
     basis: 'stake',
     contract_type: params.contract_type,
-    currency: 'USD',
+    currency: accountInfo?.currency || 'USD',
     duration: params.duration,
     duration_unit: 't',
     symbol: params.symbol,
@@ -360,8 +463,16 @@ export function getBalance(): number {
   return accountInfo?.balance ?? 0;
 }
 
+export function isConnected(): boolean {
+  return authState === 'connected';
+}
+
+export function isRealAccount(): boolean {
+  return authState === 'connected' && !!accountInfo && !accountInfo.is_virtual;
+}
+
 export function isLive(): boolean {
-  return authState === 'connected' && !!authToken;
+  return authState === 'connected' && !!accountInfo && !accountInfo.is_virtual;
 }
 
 export const symbolMap: Record<string, DerivSymbol> = {

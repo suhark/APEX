@@ -113,3 +113,181 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 @media (max-width: 1050px) { .sidebar { width: 215px; }.page-content { padding-left: 22px; padding-right: 22px; }.topbar, .ticker { padding-left: 22px; padding-right: 22px; }.bot-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 760px) { .sidebar { position: fixed; z-index: 20; left: -250px; transition: left .2s ease; box-shadow: 15px 0 35px #0007; }.sidebar.open { left: 0; }.menu-button { display: block; }.topbar { padding: 0 16px; }.crumb { font-size: 11px; }.refresh { display: none; }.balance { padding-left: 0; border: 0; }.ticker { padding: 0 16px; }.page-content { padding: 25px 16px 55px; }.page-header { align-items: flex-start; flex-direction: column; }.page-header .primary, .page-header .secondary { width: 100%; }.stats-grid, .record-summary { grid-template-columns: repeat(2, 1fr); }.grid-2, .builder-grid, .signal-layout, .bulk-grid, .trade-layout { grid-template-columns: 1fr; }.bot-grid, .quick-grid, .settings-grid { grid-template-columns: 1fr; }.record-summary { grid-template-columns: 1fr; }.apex-banner { align-items: flex-start; flex-direction: column; gap: 22px; }.apex-score { padding: 17px 0 0; border-top: 1px solid #5c4829; border-left: 0; width: 100%; text-align: left; }.session-panel { align-items: flex-start; flex-direction: column; gap: 18px; }.session-stats { padding: 0; border: 0; text-align: left; }.toast { right: 16px; left: 16px; top: 75px; }.chart-panel { min-height: 350px; }.price-chart { height: 220px; }.bot-stats.wide { grid-template-columns: repeat(3, 1fr); }.pagination { flex-direction: column; gap: 10px; } }
 @media (max-width: 440px) { .stats-grid { grid-template-columns: 1fr; }.top-actions { gap: 6px; }.balance strong { font-size: 12px; }.balance span { display: none; }.page-content { padding-left: 12px; padding-right: 12px; }.panel, .bot-card, .quick-card { padding: 16px; } }
+
+/* Deriv Demo vs Real & Safety Badges */
+.deriv-status-badge.demo { border: 1px solid #1e5a52; color: #2dd4bf; background: #0c2723; }
+.deriv-status-badge.disarmed { border: 1px solid #784c16; color: #fbbf24; background: #281a07; }
+.deriv-status-badge.armed { border: 1px solid #166534; color: #4ade80; background: #052e16; }
+
+.deriv-pill.demo { color: #2dd4bf; background: #0c2723; border: 1px solid #1e5a52; }
+.deriv-pill.disarmed { color: #fbbf24; background: #281a07; border: 1px solid #784c16; }
+.deriv-pill.armed-live { color: #4ade80; background: #052e16; border: 1px solid #166534; }
+
+.live-pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 10px #4ade80; }
+  100% { transform: scale(0.9); opacity: 0.8; }
+}
+
+.deriv-accounts-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #1b2e2a;
+}
+.deriv-accounts-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: #7a948e;
+}
+.deriv-accounts-title small {
+  color: #526b65;
+  font-size: 10px;
+}
+.deriv-accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.deriv-account-card {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  border: 1px solid #203631;
+  border-radius: 6px;
+  background: #0b1715;
+  text-align: left;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.deriv-account-card:hover:not(:disabled) {
+  border-color: #38bdf8;
+  background: #0e201d;
+}
+.deriv-account-card.active {
+  border-color: #2dd4bf;
+  background: #112824;
+  cursor: default;
+}
+.account-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.deriv-acc-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: .05em;
+}
+.deriv-acc-badge.demo {
+  color: #2dd4bf;
+  background: #0f3832;
+}
+.deriv-acc-badge.real {
+  color: #fbbf24;
+  background: #39270e;
+}
+.active-tag {
+  font-size: 9px;
+  color: #5eead4;
+  font-weight: 600;
+}
+.account-card-id {
+  font-size: 11px;
+  color: #d1e2de;
+  font-family: 'DM Mono', monospace;
+}
+.account-card-bal {
+  font-size: 10px;
+  color: #79958f;
+  margin-top: 2px;
+}
+
+.arm-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.arm-action-btn.disarmed {
+  background: #2d1a08;
+  border: 1px solid #b45309;
+  color: #fcd34d;
+}
+.arm-action-btn.disarmed:hover {
+  background: #3d230b;
+  border-color: #f59e0b;
+  color: #fff;
+}
+.arm-action-btn.armed {
+  background: #064e3b;
+  border: 1px solid #059669;
+  color: #6ee7b7;
+}
+.arm-action-btn.armed:hover {
+  background: #450a0a;
+  border-color: #dc2626;
+  color: #fca5a5;
+}
+
+.topbar-account-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid #233e38;
+  background: #0a1715;
+  color: #9db5af;
+  font-size: 10px;
+  cursor: pointer;
+}
+.topbar-account-switch select {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  cursor: pointer;
+  outline: none;
+}
+.safety-notice-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 11px;
+  margin-bottom: 14px;
+}
+.safety-notice-banner.safe-mode {
+  background: #251b0a;
+  border: 1px solid #854d0e;
+  color: #fde047;
+}
+.safety-notice-banner.armed {
+  background: #042f1a;
+  border: 1px solid #15803d;
+  color: #86efac;
+}
+

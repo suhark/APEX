@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Activity, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, Check, ChevronRight, Clock3, Code as Code2, LayoutDashboard, ChartLine as LineChart, ListFilter, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, Wallet, X, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, Check, ChevronRight, Clock3, Code as Code2, LayoutDashboard, ChartLine as LineChart, ListFilter, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
 import { executeTrade, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
@@ -41,7 +41,31 @@ function App() {
 
   const derivConnected = deriv.authState === 'connected' && deriv.account !== null;
   const isDerivReal = derivConnected && !deriv.account?.is_virtual;
-  const liveMode = derivConnected;
+  const isDerivDemo = derivConnected && Boolean(deriv.account?.is_virtual);
+
+  // Safety & Arming controls
+  const [liveArmed, setLiveArmed] = useState(false);
+  const [allowBotLiveTrading, setAllowBotLiveTrading] = useState(false);
+  const [maxBalancePercent, setMaxBalancePercent] = useState(2);
+  const sessionStartingBalRef = useRef<number | null>(null);
+
+  // Auto-disarm live execution if disconnected or switched to Demo
+  useEffect(() => {
+    if (!derivConnected || isDerivDemo) {
+      setLiveArmed(false);
+    }
+  }, [derivConnected, isDerivDemo]);
+
+  // Track session starting balance for loss limit calculations
+  useEffect(() => {
+    if (deriv.account) {
+      if (sessionStartingBalRef.current === null) {
+        sessionStartingBalRef.current = deriv.account.balance;
+      }
+    } else if (workspace) {
+      sessionStartingBalRef.current = workspace.starting_balance;
+    }
+  }, [deriv.account, workspace]);
 
   const load = async () => {
     setLoading(true);
@@ -67,40 +91,143 @@ function App() {
     if (error) setNotice('Could not save that workspace change.');
   };
 
+  const armLiveTrading = () => {
+    if (!isDerivReal || !deriv.account) {
+      setNotice('Cannot arm live trading: You must be connected to a real Deriv account.');
+      return;
+    }
+    const maxStake = ((deriv.account.balance * maxBalancePercent) / 100).toFixed(2);
+    const confirmed = window.confirm(
+      `ARM LIVE REAL-MONEY TRADING?\n\n` +
+      `Account: ${deriv.account.loginid} (Real Funds)\n` +
+      `Balance: ${deriv.account.currency} ${deriv.account.balance.toFixed(2)}\n` +
+      `Session Loss Limit: ${money(workspace?.loss_limit ?? 50)}\n` +
+      `Max Stake Cap: ${maxBalancePercent}% (${money(Number(maxStake))})\n` +
+      `Automated Bot Trading: ${allowBotLiveTrading ? 'ALLOWED' : 'BLOCKED (Default)'}\n\n` +
+      `Real money will be moved on Deriv. Do you wish to proceed?`
+    );
+    if (confirmed) {
+      sessionStartingBalRef.current = deriv.account.balance;
+      setLiveArmed(true);
+      setNotice(`LIVE TRADING ARMED on account ${deriv.account.loginid}. Real funds active.`);
+    }
+  };
+
+  const disarmLiveTrading = () => {
+    setLiveArmed(false);
+    setNotice('Live trading disarmed. Switched to safe mode.');
+  };
+
   const handleDerivConnect = async (token: string, appId: string) => {
     setNotice('Connecting to Deriv…');
+    setLiveArmed(false); // ALWAYS start in safe demo mode!
     const result = await deriv.connect(token, appId);
     if (result.ok && result.account) {
+      sessionStartingBalRef.current = result.account.balance;
       await updateWorkspace({
         deriv_connected: true,
         deriv_loginid: result.account.loginid,
         deriv_is_virtual: result.account.is_virtual,
         deriv_balance: result.account.balance,
       });
-      setNotice(`Connected to Deriv (${result.account.loginid}). ${result.account.is_virtual ? 'Demo' : 'Live'} trading enabled.`);
+      setNotice(`Connected to Deriv (${result.account.loginid}) [${result.account.is_virtual ? 'Demo' : 'Real'}]. Live trading stays disarmed for safety.`);
     } else {
       setNotice(`Could not connect: ${result.error ?? 'Unknown error'}. Check your API token.`);
     }
   };
 
+  const handleDerivSwitchAccount = async (loginid: string) => {
+    setLiveArmed(false); // Always disarm on switch!
+    setNotice(`Switching to account ${loginid}…`);
+    const result = await deriv.switchAccount(loginid);
+    if (result.ok && result.account) {
+      sessionStartingBalRef.current = result.account.balance;
+      await updateWorkspace({
+        deriv_loginid: result.account.loginid,
+        deriv_is_virtual: result.account.is_virtual,
+        deriv_balance: result.account.balance,
+      });
+      setNotice(`Switched to ${result.account.is_virtual ? 'Demo' : 'Real'} account (${result.account.loginid}). Live trading is disarmed.`);
+    } else {
+      setNotice(`Could not switch account: ${result.error ?? 'Unknown error'}`);
+    }
+  };
+
   const handleDerivDisconnect = () => {
+    setLiveArmed(false);
     deriv.disconnect();
+    sessionStartingBalRef.current = null;
     void updateWorkspace({ deriv_connected: false, deriv_loginid: null, deriv_is_virtual: null, deriv_balance: null });
     setNotice('Disconnected from Deriv. Switched to demo mode.');
   };
+
+  const liveArmedRef = useRef(liveArmed);
+  const allowBotLiveRef = useRef(allowBotLiveTrading);
+  const maxBalancePercentRef = useRef(maxBalancePercent);
+  const workspaceRef = useRef(workspace);
+  const botsRef = useRef(bots);
+  const tickRef = useRef(tick);
+
+  workspaceRef.current = workspace;
+  botsRef.current = bots;
+  tickRef.current = tick;
+  liveArmedRef.current = liveArmed;
+  allowBotLiveRef.current = allowBotLiveTrading;
+  maxBalancePercentRef.current = maxBalancePercent;
 
   const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => {
     if (!workspace) return;
     const ws = workspaceRef.current;
     if (!ws) return;
 
-    if (liveMode && deriv.account) {
+    const isBot = details.source === 'bot' || details.source === 'quick_bot' || details.source === 'bulk' || Boolean(details.botName);
+    const currentlyArmed = liveArmedRef.current;
+    const botLiveAllowed = allowBotLiveRef.current;
+    const maxPercent = maxBalancePercentRef.current;
+
+    if (derivConnected && deriv.account) {
+      // Safety checks for REAL accounts:
+      if (isDerivReal) {
+        if (!currentlyArmed) {
+          if (isBot) {
+            setNotice('Bot trading on real account is disarmed for safety. Switch to Demo account to test bots.');
+          } else {
+            setNotice('Live execution is disarmed. Arm live trading in Topbar or Settings to place real trades.');
+          }
+          return;
+        }
+
+        if (isBot && !botLiveAllowed) {
+          setNotice('Automated bot live trading is blocked by default. Enable in Settings if you want bots to trade real money.');
+          return;
+        }
+
+        // 1. Session loss limit check
+        const startingBal = sessionStartingBalRef.current ?? deriv.account.balance;
+        const currentLoss = Math.max(0, startingBal - deriv.account.balance);
+        if (currentLoss >= ws.loss_limit) {
+          setLiveArmed(false);
+          setNotice(`Live trading blocked: Session loss limit of ${money(ws.loss_limit)} reached! Live trading auto-disarmed for safety.`);
+          return;
+        }
+
+        // 2. Stake cap (% of balance)
+        const maxAllowedStake = Math.max(1, Number(((deriv.account.balance * maxPercent) / 100).toFixed(2)));
+        if (details.stake > maxAllowedStake) {
+          setNotice(`Trade blocked: Stake (${money(details.stake)}) exceeds maximum allowed risk cap of ${maxPercent}% of balance (${money(maxAllowedStake)}).`);
+          return;
+        }
+      }
+
+      // Check stake validity
       if (details.stake <= 0 || details.stake > deriv.account.balance) {
         setNotice('Stake must be greater than zero and within your Deriv balance.');
         return;
       }
+
       const symbol = symbolMap[details.instrument];
       if (!symbol) { setNotice('Unknown instrument for Deriv.'); return; }
+
       try {
         const result = await executeTrade({
           symbol: symbol as DerivSymbol,
@@ -108,6 +235,7 @@ function App() {
           stake: details.stake,
           duration: 5,
         });
+
         const trade = {
           instrument: details.instrument,
           direction: details.direction,
@@ -149,16 +277,29 @@ function App() {
                 setBots((current) => current.map((item) => item.id === bot.id ? { ...item, ...botUpdate } : item));
               }
             }
-            setNotice(`${details.direction} trade ${poc.status} ${money(finalProfit)}.`);
+
+            if (isDerivReal) {
+              const postBal = deriv.account?.balance ?? 0;
+              const startingBal = sessionStartingBalRef.current ?? postBal;
+              if (Math.max(0, startingBal - postBal) >= ws.loss_limit) {
+                setLiveArmed(false);
+                setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. Live trading disarmed.`);
+              } else {
+                setNotice(`${details.direction} trade ${poc.status} ${money(finalProfit)}.`);
+              }
+            } else {
+              setNotice(`${details.direction} trade ${poc.status} ${money(finalProfit)}.`);
+            }
           }
         });
-        setNotice(`${details.direction} contract purchased on Deriv. Waiting for result…`);
+        setNotice(`${details.direction} contract purchased on Deriv (${deriv.account.loginid} · ${deriv.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`);
       } catch (err) {
         setNotice(`Deriv trade failed: ${err}`);
       }
       return;
     }
 
+    // Fallback: Synthetic simulation when Deriv is not connected
     if (details.stake <= 0 || details.stake > ws.balance) { setNotice('Stake must be greater than zero and within your balance.'); return; }
     const index = instruments.indexOf(details.instrument);
     const entry = priceFor(Math.max(index, 0), tick);
@@ -187,13 +328,6 @@ function App() {
     setNotice(active ? `${bot.name} is live and watching conditions.` : `${bot.name} paused.`);
   };
 
-  const workspaceRef = useRef(workspace);
-  const botsRef = useRef(bots);
-  const tickRef = useRef(tick);
-  workspaceRef.current = workspace;
-  botsRef.current = bots;
-  tickRef.current = tick;
-
   useEffect(() => {
     const interval = window.setInterval(() => {
       const activeBots = botsRef.current.filter((bot) => bot.active);
@@ -204,7 +338,7 @@ function App() {
         void runTradeRef.current({
           instrument: instruments[(currentTick + i) % instruments.length],
           direction: (currentTick + i) % 2 ? 'CALL' : 'PUT',
-          stake: Math.min(10, ws.balance / activeBots.length),
+          stake: 10,
           source: 'bot',
           botName: bot.name,
         });
@@ -216,19 +350,191 @@ function App() {
   const runTradeRef = useRef(runTrade);
   runTradeRef.current = runTrade;
 
-  const content = loading ? <div className="loading"><RefreshCw className="spin" size={18} /> Loading workspace…</div> : <PageView page={page} workspace={workspace} bots={bots} trades={trades} tick={tick} runTrade={runTrade} toggleBot={toggleBot} updateWorkspace={updateWorkspace} setPage={setPage} setNotice={setNotice} deriv={deriv} onDerivConnect={handleDerivConnect} onDerivDisconnect={handleDerivDisconnect} derivConnected={derivConnected} isDerivReal={isDerivReal} />;
-  return <div className="app-shell">
-    <aside className={mobileNav ? 'sidebar open' : 'sidebar'}>
-      <div className="brand"><div className="brand-mark"><Activity size={19} /></div><div><strong>APEX</strong><span>TRADING LAB</span></div></div>
-      <div className="workspace-chip"><span className="live-dot" /> {derivConnected ? 'Deriv connected' : 'Synthetic workspace'} <b>{derivConnected ? (isDerivReal ? 'LIVE' : 'DEMO') : 'DEMO'}</b></div>
-      <nav>{nav.map(({ key, label, icon: Icon }) => <button key={key} className={page === key ? 'nav-item active' : 'nav-item'} onClick={() => { setPage(key); setMobileNav(false); }}><Icon size={17} />{label}{key === 'apex' && <span className="pro">PRO</span>}</button>)}</nav>
-      <div className="sidebar-footer"><div className="guard"><ShieldCheck size={17} /><div><b>Loss guard active</b><span>Auto-protect enabled</span></div></div><button className="mini-settings" onClick={() => setPage('settings')}><Settings2 size={16} /> Workspace settings</button></div>
-    </aside>
-    <main className="main"><header className="topbar"><button className="menu-button" onClick={() => setMobileNav(!mobileNav)}><Menu size={20} /></button><div className="crumb">Workspace <ChevronRight size={14} /> <b>{nav.find((item) => item.key === page)?.label}</b></div><div className="top-actions">{liveMode && <DerivStatusBadge authState={deriv.authState} />}<button className="refresh" onClick={() => void load()}><RefreshCw size={15} /> Sync</button><div className="balance"><span>{derivConnected ? (isDerivReal ? 'Deriv live balance' : 'Deriv demo balance') : 'Demo balance'}</span><strong>{money(derivConnected ? (deriv.account?.balance ?? 0) : (workspace?.balance ?? 0))}</strong></div></div></header><div className="ticker">{instruments.map((instrument, index) => { const value = priceFor(index, tick); const up = index % 2 === 0 ? tick % 3 !== 0 : tick % 3 === 0; return <div className="ticker-item" key={instrument}><span>{instrument.replace(' Index', '')}</span><b>{value.toFixed(2)}</b><em className={up ? 'positive' : 'negative'}>{up ? '+' : '-'}{(0.12 + index * 0.08).toFixed(2)}%</em></div>; })}</div><div className="page-content">{notice && <div className="toast"><Check size={16} /> {notice}<button onClick={() => setNotice('')}><X size={14} /></button></div>}{content}</div></main>
-  </div>;
+  const content = loading ? (
+    <div className="loading"><RefreshCw className="spin" size={18} /> Loading workspace…</div>
+  ) : (
+    <PageView
+      page={page}
+      workspace={workspace}
+      bots={bots}
+      trades={trades}
+      tick={tick}
+      runTrade={runTrade}
+      toggleBot={toggleBot}
+      updateWorkspace={updateWorkspace}
+      setPage={setPage}
+      setNotice={setNotice}
+      deriv={deriv}
+      onDerivConnect={handleDerivConnect}
+      onDerivDisconnect={handleDerivDisconnect}
+      onDerivSwitchAccount={handleDerivSwitchAccount}
+      derivConnected={derivConnected}
+      isDerivReal={isDerivReal}
+      isDerivDemo={isDerivDemo}
+      liveArmed={liveArmed}
+      armLiveTrading={armLiveTrading}
+      disarmLiveTrading={disarmLiveTrading}
+      allowBotLiveTrading={allowBotLiveTrading}
+      setAllowBotLiveTrading={setAllowBotLiveTrading}
+      maxBalancePercent={maxBalancePercent}
+      setMaxBalancePercent={setMaxBalancePercent}
+    />
+  );
+
+  return (
+    <div className="app-shell">
+      <aside className={mobileNav ? 'sidebar open' : 'sidebar'}>
+        <div className="brand">
+          <div className="brand-mark"><Activity size={19} /></div>
+          <div><strong>APEX</strong><span>TRADING LAB</span></div>
+        </div>
+        <div className="workspace-chip">
+          <span className="live-dot" />{' '}
+          {derivConnected ? (isDerivReal ? (liveArmed ? 'Deriv Live (ARMED)' : 'Deriv Real (Safe)') : 'Deriv Demo') : 'Synthetic workspace'}{' '}
+          <b>{derivConnected ? (isDerivReal ? (liveArmed ? 'LIVE' : 'SAFE') : 'DEMO') : 'DEMO'}</b>
+        </div>
+        <nav>
+          {nav.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              className={page === key ? 'nav-item active' : 'nav-item'}
+              onClick={() => { setPage(key); setMobileNav(false); }}
+            >
+              <Icon size={17} />{label}{key === 'apex' && <span className="pro">PRO</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <div className="guard">
+            <ShieldCheck size={17} />
+            <div><b>Loss guard active</b><span>Auto-protect enabled</span></div>
+          </div>
+          <button className="mini-settings" onClick={() => setPage('settings')}>
+            <Settings2 size={16} /> Workspace settings
+          </button>
+        </div>
+      </aside>
+
+      <main className="main">
+        <header className="topbar">
+          <button className="menu-button" onClick={() => setMobileNav(!mobileNav)}>
+            <Menu size={20} />
+          </button>
+          <div className="crumb">Workspace <ChevronRight size={14} /> <b>{nav.find((item) => item.key === page)?.label}</b></div>
+          <div className="top-actions">
+            {derivConnected && (
+              <DerivStatusBadge
+                authState={deriv.authState}
+                account={deriv.account}
+                isArmed={liveArmed}
+              />
+            )}
+            {isDerivReal && (
+              <button
+                type="button"
+                className={`arm-action-btn ${liveArmed ? 'armed' : 'disarmed'}`}
+                onClick={liveArmed ? disarmLiveTrading : armLiveTrading}
+                title={liveArmed ? 'Click to Disarm live execution' : 'Click to Arm live trading'}
+              >
+                {liveArmed ? <ShieldCheck size={13} /> : <AlertTriangle size={13} />}
+                {liveArmed ? 'ARMED (Click to Disarm)' : 'Arm Live Trading'}
+              </button>
+            )}
+            {deriv.accounts.length > 1 && (
+              <div className="topbar-account-switch">
+                <Wallet size={12} />
+                <select
+                  value={deriv.account?.loginid || ''}
+                  onChange={(e) => void handleDerivSwitchAccount(e.target.value)}
+                >
+                  {deriv.accounts.map((acc) => (
+                    <option key={acc.loginid} value={acc.loginid}>
+                      {acc.loginid} ({acc.is_virtual ? 'Demo' : 'Real'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button className="refresh" onClick={() => void load()}><RefreshCw size={15} /> Sync</button>
+            <div className="balance">
+              <span>{derivConnected ? (isDerivReal ? (liveArmed ? 'Deriv live (ARMED)' : 'Deriv real (Safe Mode)') : 'Deriv demo balance') : 'Demo balance'}</span>
+              <strong>{money(derivConnected ? (deriv.account?.balance ?? 0) : (workspace?.balance ?? 0))}</strong>
+            </div>
+          </div>
+        </header>
+        <div className="ticker">
+          {instruments.map((instrument, index) => {
+            const value = priceFor(index, tick);
+            const up = index % 2 === 0 ? tick % 3 !== 0 : tick % 3 === 0;
+            return (
+              <div className="ticker-item" key={instrument}>
+                <span>{instrument.replace(' Index', '')}</span>
+                <b>{value.toFixed(2)}</b>
+                <em className={up ? 'positive' : 'negative'}>{up ? '+' : '-'}{(0.12 + index * 0.08).toFixed(2)}%</em>
+              </div>
+            );
+          })}
+        </div>
+        <div className="page-content">
+          {notice && <div className="toast"><Check size={16} /> {notice}<button onClick={() => setNotice('')}><X size={14} /></button></div>}
+          {content}
+        </div>
+      </main>
+    </div>
+  );
 }
 
-function PageView({ page, workspace, bots, trades, tick, runTrade, toggleBot, updateWorkspace, setPage, setNotice, deriv, onDerivConnect, onDerivDisconnect, derivConnected, isDerivReal }: { page: Page; workspace: Workspace | null; bots: BotRow[]; trades: Trade[]; tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>; toggleBot: (bot: BotRow) => Promise<void>; updateWorkspace: (changes: Partial<Workspace>) => Promise<void>; setPage: (page: Page) => void; setNotice: (notice: string) => void; deriv: ReturnType<typeof useDerivConnection>; onDerivConnect: (token: string, appId: string) => void; onDerivDisconnect: () => void; derivConnected: boolean; isDerivReal: boolean }) {
+function PageView({
+  page,
+  workspace,
+  bots,
+  trades,
+  tick,
+  runTrade,
+  toggleBot,
+  updateWorkspace,
+  setPage,
+  setNotice,
+  deriv,
+  onDerivConnect,
+  onDerivDisconnect,
+  onDerivSwitchAccount,
+  derivConnected,
+  isDerivReal,
+  isDerivDemo,
+  liveArmed,
+  armLiveTrading,
+  disarmLiveTrading,
+  allowBotLiveTrading,
+  setAllowBotLiveTrading,
+  maxBalancePercent,
+  setMaxBalancePercent,
+}: {
+  page: Page;
+  workspace: Workspace | null;
+  bots: BotRow[];
+  trades: Trade[];
+  tick: number;
+  runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>;
+  toggleBot: (bot: BotRow) => Promise<void>;
+  updateWorkspace: (changes: Partial<Workspace>) => Promise<void>;
+  setPage: (page: Page) => void;
+  setNotice: (notice: string) => void;
+  deriv: ReturnType<typeof useDerivConnection>;
+  onDerivConnect: (token: string, appId: string) => void;
+  onDerivDisconnect: () => void;
+  onDerivSwitchAccount: (loginid: string) => void;
+  derivConnected: boolean;
+  isDerivReal: boolean;
+  isDerivDemo: boolean;
+  liveArmed: boolean;
+  armLiveTrading: () => void;
+  disarmLiveTrading: () => void;
+  allowBotLiveTrading: boolean;
+  setAllowBotLiveTrading: (allowed: boolean) => void;
+  maxBalancePercent: number;
+  setMaxBalancePercent: (percent: number) => void;
+}) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
   if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} />;
   if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} />;
@@ -239,7 +545,27 @@ function PageView({ page, workspace, bots, trades, tick, runTrade, toggleBot, up
   if (page === 'quick') return <Quick tick={tick} runTrade={runTrade} />;
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
   if (page === 'record') return <Record trades={trades} />;
-  return <Settings workspace={workspace} updateWorkspace={updateWorkspace} setNotice={setNotice} deriv={deriv} onDerivConnect={onDerivConnect} onDerivDisconnect={onDerivDisconnect} derivConnected={derivConnected} isDerivReal={isDerivReal} />;
+  return (
+    <Settings
+      workspace={workspace}
+      updateWorkspace={updateWorkspace}
+      setNotice={setNotice}
+      deriv={deriv}
+      onDerivConnect={onDerivConnect}
+      onDerivDisconnect={onDerivDisconnect}
+      onDerivSwitchAccount={onDerivSwitchAccount}
+      derivConnected={derivConnected}
+      isDerivReal={isDerivReal}
+      isDerivDemo={isDerivDemo}
+      liveArmed={liveArmed}
+      armLiveTrading={armLiveTrading}
+      disarmLiveTrading={disarmLiveTrading}
+      allowBotLiveTrading={allowBotLiveTrading}
+      setAllowBotLiveTrading={setAllowBotLiveTrading}
+      maxBalancePercent={maxBalancePercent}
+      setMaxBalancePercent={setMaxBalancePercent}
+    />
+  );
 }
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) { return <div className="page-header"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action}</div>; }
@@ -301,7 +627,207 @@ function TradeTable({ trades, pageSize = 8 }: { trades: Trade[]; pageSize?: numb
   return <><div className="table-wrap"><table><thead><tr><th>Instrument</th><th>Direction</th><th>Stake</th><th>Result</th><th>P/L</th><th>Source</th><th>When</th></tr></thead><tbody>{current.map((trade) => <tr key={trade.id}><td><b>{trade.instrument.replace('Volatility ', '')}</b></td><td><span className={trade.direction === 'CALL' ? 'direction call-text' : 'direction put-text'}>{trade.direction}</span></td><td>{money(Number(trade.stake))}</td><td><span className={trade.result === 'won' ? 'result won' : trade.result === 'lost' ? 'result lost' : 'result pending'}>{trade.result}</span></td><td className={trade.profit >= 0 ? 'positive' : 'negative'}>{money(Number(trade.profit))}</td><td>{trade.bot_name ?? trade.source.replace('_', ' ')}</td><td className="muted">{timeAgo(trade.created_at)}</td></tr>)}</tbody></table></div>{totalPages > 1 && <div className="pagination"><span className="page-info">Page {page + 1} of {totalPages} · {trades.length} trades</span><div className="page-buttons"><button className="page-btn" disabled={page === 0} onClick={() => setPage(page - 1)}>Prev</button>{Array.from({ length: totalPages }, (_, i) => <button key={i} className={page === i ? 'page-btn active' : 'page-btn'} onClick={() => setPage(i)}>{i + 1}</button>)}<button className="page-btn" disabled={page === totalPages - 1} onClick={() => setPage(page + 1)}>Next</button></div></div>}</>;
 }
 
-function Settings({ workspace, updateWorkspace, setNotice, deriv, onDerivConnect, onDerivDisconnect, derivConnected, isDerivReal }: { workspace: Workspace; updateWorkspace: (changes: Partial<Workspace>) => Promise<void>; setNotice: (notice: string) => void; deriv: ReturnType<typeof useDerivConnection>; onDerivConnect: (token: string, appId: string) => void; onDerivDisconnect: () => void; derivConnected: boolean; isDerivReal: boolean }) { const [limit, setLimit] = useState(workspace.loss_limit); const modeLabel = derivConnected ? (isDerivReal ? 'Deriv live account' : 'Deriv demo account') : 'Synthetic demo'; return <><PageHeader eyebrow="Workspace controls" title="Settings" description="Connect Deriv for live trading, manage your loss limits, and keep your account mode clear." /><div className="settings-grid"><section className="panel deriv-panel"><div className="panel-title"><div><span className="eyebrow">Deriv connection</span><h2>Live trading</h2></div></div><DerivConnectionPanel authState={deriv.authState} account={deriv.account} onConnect={onDerivConnect} onDisconnect={onDerivDisconnect} /></section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Account mode</span><h2>Demo or live</h2></div><ShieldCheck className="success-icon" size={22} /></div><div className="mode-toggle"><button className={(!derivConnected && workspace.mode === 'demo') ? 'selected' : ''} onClick={() => void updateWorkspace({ mode: 'demo' })}><div><strong>Demo mode</strong><span>Safe synthetic execution</span></div>{!derivConnected && <Check size={17} />}</button><button className={derivConnected ? 'selected' : ''} onClick={() => derivConnected ? void updateWorkspace({ mode: isDerivReal ? 'live' : 'demo' }) : setNotice('Connect Deriv first to enable live mode.')}><div><strong>{derivConnected ? (isDerivReal ? 'Live mode' : 'Deriv demo') : 'Live mode'}</strong><span>{derivConnected ? (isDerivReal ? 'Real Deriv account connected' : 'Virtual Deriv account connected') : 'Requires Deriv connection'}</span></div>{derivConnected ? <Check size={17} /> : <span className="soon">Connect</span>}</button></div></section><section className="panel"><span className="eyebrow">Risk guardrails</span><h2>Session loss limit</h2><p className="muted">New trades stop when your loss reaches this amount. Your current balance is {money(derivConnected ? (deriv.account?.balance ?? workspace.balance) : workspace.balance)}.</p><div className="input-prefix big"><span>$</span><input type="number" value={limit} onChange={(event) => setLimit(Number(event.target.value))} /></div><button className="primary" onClick={() => void updateWorkspace({ loss_limit: limit })}>Save loss limit</button></section><section className="panel reset-panel"><span className="eyebrow">Reset controls</span><h2>Start a clean demo session</h2><p className="muted">Resetting returns the demo balance to $10,000. Your track record stays available for review.</p><button className="secondary" onClick={() => { void updateWorkspace({ balance: workspace.starting_balance }); setNotice('Demo balance reset to $10,000.'); }}><RefreshCw size={16} /> Reset balance</button></section></div></>; }
+function Settings({
+  workspace,
+  updateWorkspace,
+  setNotice,
+  deriv,
+  onDerivConnect,
+  onDerivDisconnect,
+  onDerivSwitchAccount,
+  derivConnected,
+  isDerivReal,
+  isDerivDemo,
+  liveArmed,
+  armLiveTrading,
+  disarmLiveTrading,
+  allowBotLiveTrading,
+  setAllowBotLiveTrading,
+  maxBalancePercent,
+  setMaxBalancePercent,
+}: {
+  workspace: Workspace;
+  updateWorkspace: (changes: Partial<Workspace>) => Promise<void>;
+  setNotice: (notice: string) => void;
+  deriv: ReturnType<typeof useDerivConnection>;
+  onDerivConnect: (token: string, appId: string) => void;
+  onDerivDisconnect: () => void;
+  onDerivSwitchAccount: (loginid: string) => void;
+  derivConnected: boolean;
+  isDerivReal: boolean;
+  isDerivDemo: boolean;
+  liveArmed: boolean;
+  armLiveTrading: () => void;
+  disarmLiveTrading: () => void;
+  allowBotLiveTrading: boolean;
+  setAllowBotLiveTrading: (allowed: boolean) => void;
+  maxBalancePercent: number;
+  setMaxBalancePercent: (percent: number) => void;
+}) {
+  const [limit, setLimit] = useState(workspace.loss_limit);
+  const activeBalance = derivConnected && deriv.account ? deriv.account.balance : workspace.balance;
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Workspace controls"
+        title="Settings"
+        description="Connect Deriv, switch accounts, configure safety arming, manage your loss limits, and control bot automation."
+      />
+      <div className="settings-grid">
+        <section className="panel deriv-panel">
+          <div className="panel-title">
+            <div><span className="eyebrow">Deriv connection</span><h2>Linked Deriv Accounts</h2></div>
+          </div>
+          <DerivConnectionPanel
+            authState={deriv.authState}
+            account={deriv.account}
+            accounts={deriv.accounts}
+            onConnect={onDerivConnect}
+            onDisconnect={onDerivDisconnect}
+            onSwitchAccount={onDerivSwitchAccount}
+            isArmed={liveArmed}
+          />
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <div><span className="eyebrow">Live Execution Safety</span><h2>Live Arming Control</h2></div>
+            <ShieldCheck className="success-icon" size={22} />
+          </div>
+          <p className="muted" style={{ marginBottom: '14px' }}>
+            For safety, connecting Deriv always leaves live execution disarmed in demo mode until explicitly armed here or in the topbar.
+          </p>
+          <div className="mode-toggle">
+            <button
+              type="button"
+              className={!liveArmed ? 'selected' : ''}
+              onClick={disarmLiveTrading}
+            >
+              <div>
+                <strong>Disarmed (Safe / Demo Mode)</strong>
+                <span>Real funds are protected. Virtual or demo execution only.</span>
+              </div>
+              {!liveArmed && <Check size={17} />}
+            </button>
+            <button
+              type="button"
+              className={liveArmed ? 'selected' : ''}
+              onClick={() => {
+                if (!isDerivReal) {
+                  setNotice('You must connect and select a real Deriv account to arm live trading.');
+                } else {
+                  armLiveTrading();
+                }
+              }}
+            >
+              <div>
+                <strong>{liveArmed ? 'LIVE EXECUTION ARMED' : 'Arm Live Trading'}</strong>
+                <span>{isDerivReal ? `Real orders execute on ${deriv.account?.loginid}` : 'Requires real Deriv account'}</span>
+              </div>
+              {liveArmed ? <Check size={17} /> : !isDerivReal ? <span className="soon">Real Only</span> : null}
+            </button>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <div><span className="eyebrow">Automated Trading Safety</span><h2>Bot Live Trading Guard</h2></div>
+            <Bot size={22} />
+          </div>
+          <p className="muted" style={{ marginBottom: '14px' }}>
+            Automated live trading is blocked by default. Keep blocked so active bots only trade on Demo without risking real funds.
+          </p>
+          <div className="mode-toggle">
+            <button
+              type="button"
+              className={!allowBotLiveTrading ? 'selected' : ''}
+              onClick={() => {
+                setAllowBotLiveTrading(false);
+                setNotice('Automated bot live trading blocked. Bots will not trade real funds.');
+              }}
+            >
+              <div>
+                <strong>Blocked (Default / Recommended)</strong>
+                <span>Active bots will never touch real money.</span>
+              </div>
+              {!allowBotLiveTrading && <Check size={17} />}
+            </button>
+            <button
+              type="button"
+              className={allowBotLiveTrading ? 'selected' : ''}
+              onClick={() => {
+                const confirmed = window.confirm('ALLOW AUTOMATED BOT LIVE TRADING?\n\nActive bots will place trades automatically on your real Deriv account when live mode is armed.\n\nRisk caps (Session loss limit & balance percentage) will be strictly enforced.\n\nProceed?');
+                if (confirmed) {
+                  setAllowBotLiveTrading(true);
+                  setNotice('Automated bot live trading enabled. Bots can place live trades when armed.');
+                }
+              }}
+            >
+              <div>
+                <strong>Allow Bot Live Trading</strong>
+                <span>Active bots can place live trades when armed.</span>
+              </div>
+              {allowBotLiveTrading && <Check size={17} />}
+            </button>
+          </div>
+        </section>
+
+        <section className="panel">
+          <span className="eyebrow">Risk guardrails</span>
+          <h2>Max Risk per Trade (% Balance)</h2>
+          <p className="muted">
+            Live trade stakes are strictly capped at this percentage of your active account balance.
+          </p>
+          <div className="stake-row" style={{ marginTop: '12px' }}>
+            {[1, 2, 3, 5].map((pct) => (
+              <button
+                key={pct}
+                type="button"
+                className={maxBalancePercent === pct ? 'selected' : ''}
+                onClick={() => {
+                  setMaxBalancePercent(pct);
+                  setNotice(`Risk cap set to ${pct}% of balance (${money((activeBalance * pct) / 100)} max stake).`);
+                }}
+              >
+                {pct}% {pct === 2 ? '(Safe)' : ''}
+              </button>
+            ))}
+          </div>
+          <div className="guard-note" style={{ marginTop: '14px' }}>
+            Current maximum live stake allowed: <b>{money((activeBalance * maxBalancePercent) / 100)}</b> ({maxBalancePercent}% of {money(activeBalance)}).
+          </div>
+        </section>
+
+        <section className="panel">
+          <span className="eyebrow">Risk guardrails</span>
+          <h2>Session loss limit</h2>
+          <p className="muted">New trades stop and live trading disarms automatically when your session loss reaches this amount.</p>
+          <div className="input-prefix big">
+            <span>$</span>
+            <input type="number" value={limit} onChange={(event) => setLimit(Number(event.target.value))} />
+          </div>
+          <button className="primary" onClick={() => void updateWorkspace({ loss_limit: limit })}>Save loss limit</button>
+        </section>
+
+        <section className="panel reset-panel">
+          <span className="eyebrow">Reset controls</span>
+          <h2>Start a clean demo session</h2>
+          <p className="muted">Resetting returns the demo balance to $10,000. Your track record stays available for review.</p>
+          <button
+            className="secondary"
+            onClick={() => {
+              void updateWorkspace({ balance: workspace.starting_balance });
+              setNotice('Demo balance reset to $10,000.');
+            }}
+          >
+            <RefreshCw size={16} /> Reset balance
+          </button>
+        </section>
+      </div>
+    </>
+  );
+}
 
 function EmptyState({ title, text, action }: { title: string; text: string; action?: React.ReactNode }) { return <div className="empty"><div className="empty-icon"><Activity size={18} /></div><strong>{title}</strong><span>{text}</span>{action}</div>; }
 
