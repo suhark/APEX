@@ -914,9 +914,11 @@ function App() {
   if (authChecking) {
     return (
       <div className="auth-loading-screen">
-        <div className="auth-brand-mark spin">
-          <Activity size={32} />
-        </div>
+        <img
+          src="/apex-logo.png"
+          alt="APEX Trading Lab"
+          className="auth-loading-logo"
+        />
         <p>Initializing APEX Trading Lab…</p>
       </div>
     );
@@ -954,8 +956,11 @@ function App() {
     <div className="app-shell">
       <aside className={mobileNav ? 'sidebar open' : 'sidebar'}>
         <div className="brand">
-          <div className="brand-mark"><Activity size={19} /></div>
-          <div><strong>APEX</strong><span>TRADING LAB</span></div>
+          <img
+            src="/apex-logo.png"
+            alt="APEX Trading Lab"
+            className="sidebar-brand-logo"
+          />
         </div>
         <div className="workspace-chip">
           <span className="live-dot" />{' '}

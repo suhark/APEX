@@ -246,10 +246,13 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
       {/* Main Navigation */}
       <header className="blueprint-nav">
         <div className="nav-container">
-          <div className="nav-brand">
-            <span className="brand-logo-text">APEX</span>
-            <span className="brand-sub-text">TRADING LAB</span>
-          </div>
+          <a href="#" className="nav-brand" aria-label="APEX Trading Lab Home">
+            <img
+              src="/apex-logo.png"
+              alt="APEX Trading Lab"
+              className="landing-nav-logo"
+            />
+          </a>
 
           <nav className="nav-menu">
             <a href="#modules">Automation</a>
@@ -569,7 +572,11 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
         <div className="footer-container">
           <div className="footer-top-row">
             <div className="footer-brand-col">
-              <strong className="footer-logo font-mono">APEX</strong>
+              <img
+                src="/apex-logo.png"
+                alt="APEX Trading Lab"
+                className="landing-footer-logo"
+              />
               <p className="footer-desc">
                 Algorithmic execution interface for synthetic volatility indices. Direct
                 client-side Deriv WebSocket connection.

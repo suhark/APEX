@@ -11,7 +11,8 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 .app-shell { display: flex; min-height: 100vh; background: #08100f; }
 .sidebar { width: 246px; min-height: 100vh; display: flex; flex-direction: column; padding: 25px 16px 18px; background: #0c1514; border-right: 1px solid #1c2926; flex-shrink: 0; }
-.brand { display: flex; align-items: center; gap: 11px; padding: 0 10px 28px; }
+.brand { display: flex; align-items: center; padding: 0 4px 22px; }
+.sidebar-brand-logo { max-width: 170px; height: 36px; object-fit: contain; object-position: left center; display: block; }
 .brand-mark { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 10px; color: #071211; background: #36d6bb; }
 .brand strong { display: block; letter-spacing: .16em; font-size: 16px; line-height: 1; }
 .brand span { display: block; margin-top: 4px; color: #6b817c; letter-spacing: .12em; font-size: 8px; font-weight: 700; }
@@ -682,7 +683,23 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 6px;
+  gap: 8px;
+}
+
+.auth-modal-logo {
+  height: 48px;
+  max-width: 220px;
+  object-fit: contain;
+  display: block;
+}
+
+.auth-brand-subtitle {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #5eead4;
+  text-transform: uppercase;
 }
 
 .auth-brand-mark {
@@ -2293,8 +2310,17 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 
 .nav-brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+  text-decoration: none;
+}
+
+.landing-nav-logo {
+  height: 32px;
+  max-width: 170px;
+  object-fit: contain;
+  object-position: left center;
+  display: block;
 }
 
 .brand-logo-text {
@@ -3026,7 +3052,15 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 .footer-brand-col {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+
+.landing-footer-logo {
+  height: 28px;
+  max-width: 150px;
+  object-fit: contain;
+  object-position: left center;
+  display: block;
 }
 
 .footer-logo {
@@ -3486,5 +3520,36 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   border-color: #2a4740 !important;
   color: #8fa5a0 !important;
   background: #0f2420 !important;
+}
+
+.auth-loading-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #08100f;
+  color: #79908a;
+  font-size: 13px;
+  font-family: 'DM Mono', monospace;
+}
+
+.auth-loading-logo {
+  height: 48px;
+  max-width: 220px;
+  object-fit: contain;
+  animation: pulse-logo 2s ease-in-out infinite;
+}
+
+@keyframes pulse-logo {
+  0%, 100% {
+    opacity: 0.8;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
 }
 

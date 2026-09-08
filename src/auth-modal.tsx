@@ -85,11 +85,12 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
           </button>
         )}
         <div className="auth-brand">
-          <div className="auth-brand-mark">
-            <Activity size={24} />
-          </div>
-          <h2>APEX</h2>
-          <span>QUANT TRADING PLATFORM</span>
+          <img
+            src="/apex-logo.png"
+            alt="APEX Trading Lab"
+            className="auth-modal-logo"
+          />
+          <span className="auth-brand-subtitle">Algorithmic Execution Terminal</span>
         </div>
 
         <div className="auth-tabs">
