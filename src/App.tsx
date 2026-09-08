@@ -773,7 +773,10 @@ function App() {
           <button className="menu-button" onClick={() => setMobileNav(!mobileNav)}>
             <Menu size={20} />
           </button>
-          <div className="crumb">Workspace <ChevronRight size={14} /> <b>{nav.find((item) => item.key === page)?.label}</b></div>
+          <div className="crumb">
+            <span className="crumb-prefix hide-mobile">Workspace <ChevronRight size={14} /></span>
+            <b>{nav.find((item) => item.key === page)?.label}</b>
+          </div>
           <div className="top-actions">
             {derivConnected && (
               <DerivStatusBadge
@@ -790,7 +793,7 @@ function App() {
                 title={liveArmed ? 'Click to Disarm live execution' : 'Click to Arm live trading'}
               >
                 {liveArmed ? <ShieldCheck size={13} /> : <AlertTriangle size={13} />}
-                {liveArmed ? 'ARMED (Click to Disarm)' : 'Arm Live Trading'}
+                {liveArmed ? 'ARMED' : 'Arm Trading'}
               </button>
             )}
             {isDerivDemo && linkedRealAccount && (
@@ -828,23 +831,25 @@ function App() {
                 <LogOut size={13} /> Disconnect
               </button>
             )}
-            <button className="refresh" onClick={() => void load()}><RefreshCw size={15} /> Sync</button>
-            <div className="topbar-user-pill" title={`Signed in as ${user.email}`}>
+            <button className="refresh hide-mobile" onClick={() => void load()}><RefreshCw size={15} /> Sync</button>
+            <div className="topbar-user-pill hide-mobile-compact" title={`Signed in as ${user.email}`}>
               <div className="user-avatar-dot">
                 <UserIcon size={13} />
               </div>
-              <span className="user-email-text">{user.email?.split('@')[0]}</span>
+              <span className="user-email-text hide-mobile">{user.email?.split('@')[0]}</span>
               <button
                 type="button"
-                className="topbar-signout-btn"
+                className="topbar-signout-btn hide-mobile"
                 onClick={() => void handleSignOut()}
                 title="Sign out of APEX"
               >
                 <LogOut size={13} />
               </button>
             </div>
-            <div className="balance">
-              <span>{derivConnected ? (isDerivReal ? (liveArmed ? 'Deriv live (ARMED)' : 'Deriv real (Safe Mode)') : 'Deriv demo balance') : 'Demo balance'}</span>
+            <div className="balance topbar-balance">
+              <span className="balance-label hide-mobile">
+                {derivConnected ? (isDerivReal ? (liveArmed ? 'Deriv live' : 'Deriv real') : 'Deriv demo') : 'Demo balance'}
+              </span>
               <strong>{money(derivConnected ? (deriv.account?.balance ?? 0) : (workspace?.balance ?? 0))}</strong>
             </div>
           </div>
@@ -1569,18 +1574,18 @@ function TradeTable({ trades, pageSize = 8 }: { trades: Trade[]; pageSize?: numb
   const current = trades.slice(page * pageSize, page * pageSize + pageSize);
   if (!trades.length) return <EmptyState title="No trades yet" text="Your executed trades will appear here with their final result." />;
 
-  // Smart windowed pagination: at most 5 items displayed to prevent mobile overflow
+  // Smart compact pagination: at most 4 items displayed to prevent mobile overflow
   const getPageNumbers = () => {
-    if (totalPages <= 5) {
+    if (totalPages <= 3) {
       return Array.from({ length: totalPages }, (_, i) => i);
     }
     const pages: (number | string)[] = [];
-    if (page <= 2) {
-      pages.push(0, 1, 2, '...', totalPages - 1);
-    } else if (page >= totalPages - 3) {
-      pages.push(0, '...', totalPages - 3, totalPages - 2, totalPages - 1);
+    if (page === 0) {
+      pages.push(0, 1, '...', totalPages - 1);
+    } else if (page === totalPages - 1) {
+      pages.push(0, '...', totalPages - 2, totalPages - 1);
     } else {
-      pages.push(0, '...', page, '...', totalPages - 1);
+      pages.push(0, page, '...', totalPages - 1);
     }
     return pages;
   };
@@ -1626,31 +1631,33 @@ function TradeTable({ trades, pageSize = 8 }: { trades: Trade[]; pageSize?: numb
       {totalPages > 1 && (
         <div className="pagination">
           <span className="page-info">
-            Page {page + 1} of {totalPages} · {trades.length} trades
+            Page {page + 1} of {totalPages} <span className="hide-mobile">· {trades.length} trades</span>
           </span>
           <div className="page-buttons">
             <button
-              className="page-btn"
+              className="page-btn page-nav-btn"
               disabled={page === 0}
               onClick={() => setPage(page - 1)}
             >
               Prev
             </button>
-            {getPageNumbers().map((p, idx) =>
-              typeof p === 'string' ? (
-                <span key={`ellipsis-${idx}`} className="page-ellipsis">…</span>
-              ) : (
-                <button
-                  key={p}
-                  className={page === p ? 'page-btn active' : 'page-btn'}
-                  onClick={() => setPage(p)}
-                >
-                  {p + 1}
-                </button>
-              )
-            )}
+            <div className="page-numbers-group">
+              {getPageNumbers().map((p, idx) =>
+                typeof p === 'string' ? (
+                  <span key={`ellipsis-${idx}`} className="page-ellipsis">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    className={page === p ? 'page-btn active' : 'page-btn'}
+                    onClick={() => setPage(p)}
+                  >
+                    {p + 1}
+                  </button>
+                )
+              )}
+            </div>
             <button
-              className="page-btn"
+              className="page-btn page-nav-btn"
               disabled={page === totalPages - 1}
               onClick={() => setPage(page + 1)}
             >

@@ -268,30 +268,53 @@ export function ManualTrader({
     const range = maxQ - minQ || 1;
 
     // SVG coordinate space: 0 0 100 65
+    // Map current tick to x = 80 so there are 20 units of future breathing room,
+    // exactly like Deriv DTrader and TradingView charts!
     const points = visibleTicks.map((t, idx) => {
-      const x = (idx / (visibleTicks.length - 1)) * 98;
-      const y = 62 - ((t.quote - minQ) / range) * 58;
-      return { x, y, quote: t.quote, index: t.index };
+      const x = (idx / (visibleTicks.length - 1)) * 80;
+      const y = 60 - ((t.quote - minQ) / range) * 54;
+      return { x, y, quote: t.quote, index: t.index, time: t.time };
     });
 
-    const pathStr = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+    // Generate smooth financial bezier curve
+    const buildSmoothPath = (pts: { x: number; y: number }[]) => {
+      if (pts.length < 2) return '';
+      let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[Math.max(0, i - 1)];
+        const p1 = pts[i];
+        const p2 = pts[i + 1];
+        const p3 = pts[Math.min(pts.length - 1, i + 2)];
+
+        const cp1x = p1.x + (p2.x - p0.x) * 0.16;
+        const cp1y = p1.y + (p2.y - p0.y) * 0.16;
+        const cp2x = p2.x - (p3.x - p1.x) * 0.16;
+        const cp2y = p2.y - (p3.y - p1.y) * 0.16;
+
+        d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
+      }
+      return d;
+    };
+
+    const pathStr = buildSmoothPath(points);
     const lastP = points[points.length - 1];
     const firstP = points[0];
     const fillStr = `${pathStr} L ${lastP.x.toFixed(2)} 65 L ${firstP.x.toFixed(2)} 65 Z`;
 
+    const currentX = lastP ? lastP.x : 80;
     const currentY = lastP ? lastP.y : 32;
 
     // Generate 5 evenly spaced right-axis price labels
     const yLabels = [0, 0.25, 0.5, 0.75, 1].map((pct) => {
       const price = minQ + range * pct;
-      const yPos = 62 - pct * 58;
+      const yPos = 60 - pct * 54;
       return { price: price.toFixed(2), yPos };
     });
 
-    return { pathStr, fillStr, minQ, maxQ, range, points, yLabels, currentY };
+    return { pathStr, fillStr, minQ, maxQ, range, points, yLabels, currentX, currentY };
   }, [visibleTicks]);
 
-  // Contract overlay coordinates
+  // Contract overlay coordinates with smooth path
   const contractOverlay = useMemo(() => {
     if (!activeContract || !chartMath.points) return null;
     const contractPointIndices = new Set(activeContract.ticks.map((t) => t.tickIndex));
@@ -299,12 +322,19 @@ export function ManualTrader({
 
     if (matchedPoints.length === 0) return null;
 
-    const overlayPath = matchedPoints.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+    let overlayPath = '';
+    if (matchedPoints.length === 1) {
+      overlayPath = `M ${matchedPoints[0].x.toFixed(2)} ${matchedPoints[0].y.toFixed(2)}`;
+    } else {
+      overlayPath = matchedPoints.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+    }
+    const entryPt = matchedPoints[0];
     const latestContractPt = matchedPoints[matchedPoints.length - 1];
 
     return {
       points: matchedPoints,
       path: overlayPath,
+      entryPt,
       latestPt: latestContractPt,
     };
   }, [activeContract, chartMath]);
@@ -517,10 +547,13 @@ export function ManualTrader({
             <svg viewBox="0 0 100 65" preserveAspectRatio="none" className="dtrader-svg">
               <defs>
                 <linearGradient id="dtraderAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#2dd4bf" stopOpacity="0.28" />
-                  <stop offset="85%" stopColor="#2dd4bf" stopOpacity="0.04" />
+                  <stop offset="0%" stopColor="#2dd4bf" stopOpacity="0.22" />
+                  <stop offset="65%" stopColor="#2dd4bf" stopOpacity="0.04" />
                   <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0" />
                 </linearGradient>
+                <filter id="lineGlow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feDropShadow dx="0" dy="0" stdDeviation="0.4" floodColor="#2dd4bf" floodOpacity="0.4" />
+                </filter>
               </defs>
 
               {/* Dotted Grid Lines */}
@@ -529,30 +562,32 @@ export function ManualTrader({
                   key={i}
                   x1="0"
                   y1={yl.yPos}
-                  x2="98"
+                  x2="100"
                   y2={yl.yPos}
-                  stroke="#1c2b27"
-                  strokeWidth="0.8"
+                  stroke="#162824"
+                  strokeWidth="0.75"
                   vectorEffect="non-scaling-stroke"
                   strokeDasharray="2 3"
                 />
               ))}
-              <line x1="25" y1="0" x2="25" y2="65" stroke="#162320" strokeWidth="0.8" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
-              <line x1="50" y1="0" x2="50" y2="65" stroke="#162320" strokeWidth="0.8" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
-              <line x1="75" y1="0" x2="75" y2="65" stroke="#162320" strokeWidth="0.8" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
+              <line x1="20" y1="0" x2="20" y2="65" stroke="#13231f" strokeWidth="0.75" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
+              <line x1="40" y1="0" x2="40" y2="65" stroke="#13231f" strokeWidth="0.75" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
+              <line x1="60" y1="0" x2="60" y2="65" stroke="#13231f" strokeWidth="0.75" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
+              <line x1="80" y1="0" x2="80" y2="65" stroke="#13231f" strokeWidth="0.75" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
 
               {/* Area Fill */}
               {chartType === 'area' && chartMath.fillStr && (
                 <path d={chartMath.fillStr} fill="url(#dtraderAreaGrad)" />
               )}
 
-              {/* Main Price Line - Razor-thin crisp financial line */}
+              {/* Main Price Line - Ultra smooth financial spline */}
               {chartMath.pathStr && (
                 <path
                   d={chartMath.pathStr}
                   fill="none"
                   stroke="#f8fafc"
-                  strokeWidth="1.2"
+                  strokeWidth="1.15"
+                  filter="url(#lineGlow)"
                   vectorEffect="non-scaling-stroke"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -581,79 +616,92 @@ export function ManualTrader({
                       key={i}
                       cx={pt.x}
                       cy={pt.y}
-                      r="0.8"
+                      r="0.85"
                       fill={activeContract?.status === 'won' ? '#34d399' : '#2dd4bf'}
                       stroke="#07100f"
-                      strokeWidth="0.8"
+                      strokeWidth="0.75"
                       vectorEffect="non-scaling-stroke"
                     />
                   ))}
+                  {/* Contract Progress Text Badge (e.g. 5/5) like Deriv */}
+                  {contractOverlay.entryPt && (
+                    <text
+                      x={contractOverlay.entryPt.x}
+                      y={Math.max(6, contractOverlay.entryPt.y - 3)}
+                      fill="#f1f5f9"
+                      fontSize="3"
+                      fontWeight="800"
+                      textAnchor="middle"
+                      fontFamily="'DM Mono', monospace"
+                    >
+                      {activeContract?.currentTickCount}/{activeContract?.totalTicks}
+                    </text>
+                  )}
                 </g>
               )}
 
-              {/* Current Price Horizontal Extension Line */}
+              {/* Spot Vertical Crosshair dashed line */}
+              <line
+                x1={chartMath.currentX}
+                y1="0"
+                x2={chartMath.currentX}
+                y2="65"
+                stroke="#2dd4bf"
+                strokeWidth="0.75"
+                vectorEffect="non-scaling-stroke"
+                strokeDasharray="2 3"
+                opacity="0.4"
+              />
+
+              {/* Spot Horizontal Crosshair Line extending to axis */}
               <line
                 x1="0"
                 y1={chartMath.currentY}
-                x2="98"
+                x2="100"
                 y2={chartMath.currentY}
                 stroke="#2dd4bf"
-                strokeWidth="1"
+                strokeWidth="0.75"
                 vectorEffect="non-scaling-stroke"
-                strokeDasharray="3 3"
+                strokeDasharray="2 3"
+                opacity="0.55"
               />
 
-              {/* Latest Spot Marker Dot */}
+              {/* Latest Spot Marker - Glowing pulsing multi-layer dot */}
               <circle
-                cx="98"
+                cx={chartMath.currentX}
                 cy={chartMath.currentY}
-                r="0.9"
+                r="2.2"
                 fill="#2dd4bf"
-                stroke="#ffffff"
-                strokeWidth="1"
+                opacity="0.2"
+              />
+              <circle
+                cx={chartMath.currentX}
+                cy={chartMath.currentY}
+                r="1.4"
+                fill="#2dd4bf"
+                opacity="0.45"
+              />
+              <circle
+                cx={chartMath.currentX}
+                cy={chartMath.currentY}
+                r="0.85"
+                fill="#ffffff"
+                stroke="#0d9488"
+                strokeWidth="0.6"
                 vectorEffect="non-scaling-stroke"
               />
             </svg>
 
-            {/* Floating Live Price Callout (just like the photo!) */}
-            <div
-              className="dtrader-floating-callout"
-              style={{
-                top: `${Math.max(12, Math.min(chartMath.currentY * 4.2 - 60, 220))}px`,
-                right: '110px',
-              }}
-            >
+            {/* Floating Live Price Callout (aligned neatly without covering chart waves) */}
+            <div className="dtrader-floating-callout">
               <div className={`callout-pct ${currentTick.changePct >= 0 ? 'positive' : 'negative'}`}>
                 {currentTick.changePct >= 0 ? `+${currentTick.changePct}%` : `${currentTick.changePct}%`}
               </div>
               <div className="callout-price">{currentTick.quote.toFixed(2)}</div>
               <div className="callout-time">
-                08 Sep 2026 {currentTick.time}
+                {currentTick.time}
               </div>
-              <div className="callout-crosshair" />
             </div>
-
-            {/* In-Chart Contract Badge (e.g. 5/5 or 2/5) */}
-            {activeContract && (
-              <div
-                className={`dtrader-tick-counter-badge ${activeContract.status}`}
-                style={{
-                  top: `${Math.max(20, chartMath.currentY * 4.2 - 25)}px`,
-                  right: '180px',
-                }}
-              >
-                <b>
-                  {activeContract.currentTickCount}/{activeContract.totalTicks}
-                </b>
-                <span>
-                  {activeContract.status === 'running'
-                    ? 'ticks'
-                    : activeContract.status === 'won'
-                    ? 'WON'
-                    : 'LOST'}
-                </span>
-              </div>
-            )}
 
             {/* Right Y-Axis Price Labels */}
             <div className="dtrader-y-axis">
@@ -680,19 +728,19 @@ export function ManualTrader({
 
           {/* Bottom Zoom / Navigation Controls */}
           <div className="dtrader-bottom-controls">
-            <div className="dtrader-zoom-pill">
+            <div className="dtrader-bottom-pill">
               <button
                 type="button"
                 className="zoom-btn"
-                onClick={() => setZoomLevel((z) => Math.min(60, z + 8))}
-                title="Zoom Out"
+                onClick={() => updateZoomLevel((z) => Math.min(90, z + 8))}
+                title="Zoom Out (More ticks)"
               >
                 <Minus size={14} />
               </button>
               <button
                 type="button"
                 className="zoom-btn"
-                onClick={() => setZoomLevel(35)}
+                onClick={() => updateZoomLevel(35)}
                 title="Recenter Chart"
               >
                 <Crosshair size={14} />
@@ -700,8 +748,8 @@ export function ManualTrader({
               <button
                 type="button"
                 className="zoom-btn"
-                onClick={() => setZoomLevel((z) => Math.max(18, z - 8))}
-                title="Zoom In"
+                onClick={() => updateZoomLevel((z) => Math.max(15, z - 8))}
+                title="Zoom In (Spread ticks)"
               >
                 <Plus size={14} />
               </button>
