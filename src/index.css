@@ -1776,3 +1776,174 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   justify-content: flex-end;
 }
 
+/* Enhanced Equity Curve & Performance Suite */
+.enhanced-equity-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.equity-stats-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding: 12px 16px;
+  background: rgba(13, 23, 22, 0.7);
+  border: 1px solid #162925;
+  border-radius: 8px;
+}
+
+.equity-stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eq-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.eq-stat-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'DM Mono', monospace;
+}
+
+.eq-stat-val.positive {
+  color: #34d399;
+}
+
+.eq-stat-val.negative {
+  color: #f87171;
+}
+
+.eq-stat-val.highlight {
+  color: #fbbf24;
+}
+
+.eq-stat-val.muted {
+  color: #94a3b8;
+}
+
+.eq-stat-val small {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  margin-left: 2px;
+}
+
+.equity-range-selector {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  background: #091312;
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid #162925;
+}
+
+.range-pill {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.range-pill:hover {
+  color: #f1f5f9;
+}
+
+.range-pill.active {
+  background: #19332e;
+  color: #2dd4bf;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.equity-chart-wrapper {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  background: radial-gradient(circle at 50% 20%, rgba(13, 27, 25, 0.4) 0%, #081211 100%);
+  border: 1px solid #162925;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+}
+
+.equity-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.compact-chart {
+  height: 90px;
+  background: rgba(9, 19, 18, 0.6);
+  border-radius: 6px;
+  border: 1px solid #142320;
+  overflow: hidden;
+  padding: 4px 0 0 0;
+}
+
+.compact-chart .equity-svg {
+  height: calc(100% - 20px);
+}
+
+.equity-tooltip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  background: #0f1f1d;
+  border: 1px solid #2dd4bf;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  border-radius: 6px;
+  padding: 8px 12px;
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+  animation: fadeIn 0.15s ease;
+}
+
+.equity-tooltip .tooltip-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  border-bottom: 1px solid #1e3833;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+}
+
+.equity-tooltip .tooltip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.equity-tooltip .tooltip-body b {
+  color: #f1f5f9;
+  font-family: 'DM Mono', monospace;
+}
+
+.eq-label-mid {
+  color: #94a3b8;
+  font-weight: 600;
+}
+

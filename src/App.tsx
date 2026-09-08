@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient, type User } from '@supabase/supabase-js';
 import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, Globe, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
@@ -178,6 +178,15 @@ function App() {
     setBots(botsData);
     setTrades(tradesData);
     setLoading(false);
+
+    // Auto-reconnect to Deriv if user previously connected (persists across page refresh)
+    const storedDerivToken =
+      localStorage.getItem(`apex_deriv_token_${currentUser.id}`) ||
+      localStorage.getItem('apex_deriv_token');
+
+    if (storedDerivToken && deriv.authState !== 'connected' && deriv.authState !== 'connecting') {
+      void handleDerivConnect(storedDerivToken, DEFAULT_APP_ID, true);
+    }
   };
 
   useEffect(() => {
@@ -268,8 +277,8 @@ function App() {
     setNotice('Live trading disarmed. Switched to safe mode.');
   };
 
-  const handleDerivConnect = async (token: string, _appId?: string) => {
-    setNotice('Connecting to Deriv…');
+  const handleDerivConnect = async (token: string, _appId?: string, isAutoReconnect = false) => {
+    if (!isAutoReconnect) setNotice('Connecting to Deriv…');
     setLiveArmed(false); // ALWAYS start in safe demo mode!
     // Always use owner's registered App ID to route commissions
     const result = await deriv.connect(token, DEFAULT_APP_ID);
@@ -277,16 +286,19 @@ function App() {
       if (userRef.current) {
         localStorage.setItem(`apex_deriv_token_${userRef.current.id}`, token);
       }
+      localStorage.setItem('apex_deriv_token', token);
       sessionStartingBalRef.current = result.account.balance;
 
-      // CRITICAL SAFETY: Stop all active running bots & abort pending trade queues
-      try {
-        await supabase.from('trading_bots').update({ active: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-      } catch (e) {
-        console.warn('Could not batch pause bots in DB:', e);
+      if (!isAutoReconnect) {
+        // CRITICAL SAFETY: Stop all active running bots & abort pending trade queues
+        try {
+          await supabase.from('trading_bots').update({ active: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+        } catch (e) {
+          console.warn('Could not batch pause bots in DB:', e);
+        }
+        setBots((current) => current.map((b) => ({ ...b, active: false })));
+        botPendingTradesRef.current.clear();
       }
-      setBots((current) => current.map((b) => ({ ...b, active: false })));
-      botPendingTradesRef.current.clear();
 
       await updateWorkspace({
         deriv_connected: true,
@@ -294,9 +306,19 @@ function App() {
         deriv_is_virtual: result.account.is_virtual,
         deriv_balance: result.account.balance,
       });
-      setNotice(`Connected to Deriv (${result.account.loginid}) [${result.account.is_virtual ? 'Demo' : 'Real'}]. All active bots have been stopped for safety — you can restart them manually.`);
+
+      if (!isAutoReconnect) {
+        setNotice(`Connected to Deriv (${result.account.loginid}) [${result.account.is_virtual ? 'Demo' : 'Real'}]. All active bots have been stopped for safety — you can restart them manually.`);
+      }
     } else {
-      setNotice(`Could not connect: ${result.error ?? 'Unknown error'}. Check your API token.`);
+      if (!isAutoReconnect) {
+        setNotice(`Could not connect: ${result.error ?? 'Unknown error'}. Check your API token.`);
+      } else {
+        if (userRef.current) {
+          localStorage.removeItem(`apex_deriv_token_${userRef.current.id}`);
+        }
+        localStorage.removeItem('apex_deriv_token');
+      }
     }
   };
 
@@ -324,6 +346,7 @@ function App() {
     if (userRef.current) {
       localStorage.removeItem(`apex_deriv_token_${userRef.current.id}`);
     }
+    localStorage.removeItem('apex_deriv_token');
     void updateWorkspace({ deriv_connected: false, deriv_loginid: null, deriv_is_virtual: null, deriv_balance: null });
     setNotice('Disconnected from Deriv. Switched to demo mode.');
   };
@@ -334,6 +357,10 @@ function App() {
     }
     setLiveArmed(false);
     sessionStartingBalRef.current = null;
+    if (userRef.current) {
+      localStorage.removeItem(`apex_deriv_token_${userRef.current.id}`);
+    }
+    localStorage.removeItem('apex_deriv_token');
     await supabase.auth.signOut();
     setUser(null);
     setWorkspace(null);
@@ -994,16 +1021,406 @@ function BotStats({ bot, userTrades }: { bot: BotRow; userTrades: Trade[] }) {
   );
 }
 
-function EquityChart({ trades, color = '#2dd4bf' }: { trades: Trade[]; color?: string }) {
-  const sorted = [...trades].reverse();
-  let cumulative = 0;
-  const points = sorted.map((_, i) => { cumulative += Number(sorted[i].profit); return cumulative; });
-  if (!points.length) return <EmptyState title="No trades yet" text="The equity curve will appear once trades are recorded." />;
-  const min = Math.min(0, ...points); const max = Math.max(0, ...points);
-  const range = max - min || 1;
-  const coords = points.map((p, i) => { const x = (i / Math.max(1, points.length - 1)) * 100; const y = 55 - ((p - min) / range) * 45; return `${x},${y}`; }).join(' ');
-  const gid = `eq-${color.replace('#', '')}`;
-  return <div className="price-chart"><svg viewBox="0 0 100 60" preserveAspectRatio="none"><defs><linearGradient id={gid} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity=".3" /><stop offset="100%" stopColor={color} stopOpacity="0" /></linearGradient></defs><polygon points={`0,60 ${coords} 100,60`} fill={`url(#${gid})`} /><polyline points={coords} fill="none" stroke={color} strokeWidth="1.4" /></svg><div className="chart-labels"><span>Start</span><span>{points.length} trades</span><span>Now</span></div></div>;
+function EquityChart({
+  trades,
+  color = '#2dd4bf',
+  compact = false,
+}: {
+  trades: Trade[];
+  color?: string;
+  compact?: boolean;
+}) {
+  const [rangeFilter, setRangeFilter] = useState<'all' | '50' | '20' | '10'>('all');
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
+  // If compact, always use all trades. If not compact, slice according to rangeFilter
+  const activeTrades = useMemo(() => {
+    if (compact || rangeFilter === 'all') return trades;
+    const count = parseInt(rangeFilter, 10);
+    return trades.slice(0, count);
+  }, [trades, compact, rangeFilter]);
+
+  // chronological order (oldest first, newest last)
+  const chronological = useMemo(() => [...activeTrades].reverse(), [activeTrades]);
+
+  // Performance analytics
+  const stats = useMemo(() => {
+    if (!chronological.length) return null;
+
+    let cumulative = 0;
+    let peak = 0;
+    let maxDrawdown = 0;
+    let wins = 0;
+    let losses = 0;
+    let grossProfit = 0;
+    let grossLoss = 0;
+    let streak = 0;
+    let bestStreak = 0;
+
+    const dataPoints = chronological.map((trade, i) => {
+      const p = Number(trade.profit);
+      cumulative += p;
+      if (cumulative > peak) peak = cumulative;
+      const dd = peak - cumulative;
+      if (dd > maxDrawdown) maxDrawdown = dd;
+
+      if (p > 0) {
+        wins++;
+        grossProfit += p;
+        streak = streak > 0 ? streak + 1 : 1;
+        if (streak > bestStreak) bestStreak = streak;
+      } else if (p < 0) {
+        losses++;
+        grossLoss += Math.abs(p);
+        streak = 0;
+      }
+
+      return {
+        index: i + 1,
+        trade,
+        profit: p,
+        cumulative: Number(cumulative.toFixed(2)),
+        peak: Number(peak.toFixed(2)),
+        drawdown: Number(dd.toFixed(2)),
+      };
+    });
+
+    const netProfit = Number(cumulative.toFixed(2));
+    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : grossProfit > 0 ? 'MAX' : '1.0';
+    const winRate = Math.round((wins / chronological.length) * 100);
+
+    return {
+      dataPoints,
+      netProfit,
+      peak: Number(peak.toFixed(2)),
+      maxDrawdown: Number(maxDrawdown.toFixed(2)),
+      profitFactor,
+      winRate,
+      bestStreak,
+      wins,
+      losses,
+      total: chronological.length,
+    };
+  }, [chronological]);
+
+  if (!trades.length || !stats || !stats.dataPoints.length) {
+    return <EmptyState title="No trades yet" text="The equity curve will appear once trades are recorded." />;
+  }
+
+  // Find min and max for chart scaling
+  const points = stats.dataPoints;
+  const values = points.map((p) => p.cumulative);
+  let minVal = Math.min(0, ...values);
+  let maxVal = Math.max(0, ...values);
+  const pad = (maxVal - minVal) * 0.18 || 5;
+  minVal = Number((minVal - pad).toFixed(2));
+  maxVal = Number((maxVal + pad).toFixed(2));
+  const range = maxVal - minVal || 1;
+
+  // SVG coordinate space: 0 0 100 56
+  const coords = points.map((pt, i) => {
+    const x = (i / Math.max(1, points.length - 1)) * 96 + 2;
+    const y = 50 - ((pt.cumulative - minVal) / range) * 44;
+    return { ...pt, x, y };
+  });
+
+  const pathStr = coords.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+  const firstX = coords[0].x.toFixed(2);
+  const lastX = coords[coords.length - 1].x.toFixed(2);
+
+  // Break-even (0 line) position
+  const zeroY = 50 - ((0 - minVal) / range) * 44;
+  const hasZeroLine = minVal < 0 && maxVal > 0;
+
+  // Peak and Min points
+  const peakPt = coords.reduce((max, pt) => (pt.cumulative > max.cumulative ? pt : max), coords[0]);
+  const minPt = coords.reduce((min, pt) => (pt.cumulative < min.cumulative ? pt : min), coords[0]);
+  const lastPt = coords[coords.length - 1];
+
+  const hoveredPt = hoverIndex !== null && coords[hoverIndex] ? coords[hoverIndex] : null;
+
+  const gid = `eq-${(color || '2dd4bf').replace('#', '')}-${compact ? 'c' : 'f'}`;
+  const strokeColor = stats.netProfit >= 0 ? color : '#f43f5e';
+
+  // Format price helper
+  const fmt = (v: number) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
+
+  if (compact) {
+    return (
+      <div className="price-chart compact-chart">
+        <svg viewBox="0 0 100 56" preserveAspectRatio="none" className="equity-svg">
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={strokeColor} stopOpacity="0.25" />
+              <stop offset="100%" stopColor={strokeColor} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <polygon points={`2,55 ${coords.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')} ${lastX},55`} fill={`url(#${gid})`} />
+          <path
+            d={pathStr}
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth="1.2"
+            vectorEffect="non-scaling-stroke"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <circle cx={lastPt.x} cy={lastPt.y} r="0.9" fill={strokeColor} stroke="#ffffff" strokeWidth="0.8" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <div className="chart-labels">
+          <span>Start</span>
+          <span>{stats.total} trades ({stats.winRate}% win)</span>
+          <span className={stats.netProfit >= 0 ? 'positive' : 'negative'}>{fmt(stats.netProfit)}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="enhanced-equity-container">
+      {/* Performance Analytics Stats Strip */}
+      <div className="equity-stats-bar">
+        <div className="equity-stat-item">
+          <span className="eq-stat-label">Net P/L</span>
+          <strong className={`eq-stat-val ${stats.netProfit >= 0 ? 'positive' : 'negative'}`}>
+            {stats.netProfit >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+            {fmt(stats.netProfit)}
+          </strong>
+        </div>
+
+        <div className="equity-stat-item">
+          <span className="eq-stat-label">Peak (ATH)</span>
+          <strong className="eq-stat-val positive">
+            +{money(stats.peak)}
+          </strong>
+        </div>
+
+        <div className="equity-stat-item">
+          <span className="eq-stat-label">Max Drawdown</span>
+          <strong className={`eq-stat-val ${stats.maxDrawdown > 0 ? 'negative' : 'muted'}`}>
+            {stats.maxDrawdown > 0 ? `-${money(stats.maxDrawdown)}` : '$0.00'}
+          </strong>
+        </div>
+
+        <div className="equity-stat-item">
+          <span className="eq-stat-label">Profit Factor</span>
+          <strong className="eq-stat-val">
+            {stats.profitFactor}x
+          </strong>
+        </div>
+
+        <div className="equity-stat-item">
+          <span className="eq-stat-label">Win Rate</span>
+          <strong className={`eq-stat-val ${stats.winRate >= 50 ? 'positive' : 'negative'}`}>
+            {stats.winRate}% <small>({stats.wins}W / {stats.losses}L)</small>
+          </strong>
+        </div>
+
+        <div className="equity-stat-item">
+          <span className="eq-stat-label">Best Streak</span>
+          <strong className="eq-stat-val highlight">
+            <Zap size={13} /> {stats.bestStreak} {stats.bestStreak === 1 ? 'win' : 'wins'}
+          </strong>
+        </div>
+
+        {trades.length > 10 && (
+          <div className="equity-range-selector">
+            {(['all', '50', '20', '10'] as const).map((r) => (
+              <button
+                key={r}
+                type="button"
+                className={`range-pill ${rangeFilter === r ? 'active' : ''}`}
+                onClick={() => setRangeFilter(r)}
+              >
+                {r === 'all' ? 'All' : `${r}T`}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* SVG Interactive Canvas */}
+      <div className="equity-chart-wrapper">
+        <svg
+          viewBox="0 0 100 56"
+          preserveAspectRatio="none"
+          className="equity-svg"
+          onMouseLeave={() => setHoverIndex(null)}
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const relX = (e.clientX - rect.left) / rect.width;
+            const targetIdx = Math.round(relX * (coords.length - 1));
+            const clamped = Math.max(0, Math.min(coords.length - 1, targetIdx));
+            setHoverIndex(clamped);
+          }}
+        >
+          <defs>
+            <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={strokeColor} stopOpacity="0.28" />
+              <stop offset="70%" stopColor={strokeColor} stopOpacity="0.05" />
+              <stop offset="100%" stopColor={strokeColor} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+
+          {/* Dotted horizontal guidelines */}
+          <line x1="2" y1="8" x2="98" y2="8" stroke="#162320" strokeWidth="0.8" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
+          <line x1="2" y1="48" x2="98" y2="48" stroke="#162320" strokeWidth="0.8" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
+
+          {/* Break-even ($0.00) reference baseline */}
+          {hasZeroLine && (
+            <g className="zero-baseline-group">
+              <line
+                x1="2"
+                y1={zeroY}
+                x2="98"
+                y2={zeroY}
+                stroke="#334155"
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
+                strokeDasharray="3 3"
+              />
+              <text x="3" y={zeroY - 1.8} fill="#64748b" fontSize="2.4" fontWeight="600" letterSpacing="0.05em">
+                BREAK-EVEN ($0.00)
+              </text>
+            </g>
+          )}
+
+          {/* Area Fill */}
+          <polygon points={`2,55 ${coords.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')} ${lastX},55`} fill={`url(#${gid})`} />
+
+          {/* Main Equity Trend Line - razor-sharp thin line */}
+          <path
+            d={pathStr}
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth="1.3"
+            vectorEffect="non-scaling-stroke"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+
+          {/* All-Time High Marker (Peak) */}
+          {stats.peak > 0 && (
+            <g className="peak-marker-group">
+              <circle
+                cx={peakPt.x}
+                cy={peakPt.y}
+                r="0.8"
+                fill="#34d399"
+                stroke="#064e3b"
+                strokeWidth="0.8"
+                vectorEffect="non-scaling-stroke"
+              />
+              <text
+                x={Math.min(86, Math.max(12, peakPt.x))}
+                y={Math.max(5, peakPt.y - 2.5)}
+                fill="#34d399"
+                fontSize="2.4"
+                fontWeight="700"
+                textAnchor="middle"
+              >
+                ▲ ATH {fmt(peakPt.cumulative)}
+              </text>
+            </g>
+          )}
+
+          {/* Low Marker (if in negative territory) */}
+          {minPt.cumulative < -1 && (
+            <g className="min-marker-group">
+              <circle
+                cx={minPt.x}
+                cy={minPt.y}
+                r="0.8"
+                fill="#f87171"
+                stroke="#450a0a"
+                strokeWidth="0.8"
+                vectorEffect="non-scaling-stroke"
+              />
+              <text
+                x={Math.min(86, Math.max(12, minPt.x))}
+                y={Math.min(52, minPt.y + 3.8)}
+                fill="#f87171"
+                fontSize="2.4"
+                fontWeight="700"
+                textAnchor="middle"
+              >
+                ▼ LOW {fmt(minPt.cumulative)}
+              </text>
+            </g>
+          )}
+
+          {/* Latest Spot Marker */}
+          <circle
+            cx={lastPt.x}
+            cy={lastPt.y}
+            r="1"
+            fill={strokeColor}
+            stroke="#ffffff"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+          />
+
+          {/* Interactive Hover Crosshair */}
+          {hoveredPt && (
+            <g className="chart-hover-overlay">
+              <line
+                x1={hoveredPt.x}
+                y1="0"
+                x2={hoveredPt.x}
+                y2="55"
+                stroke="#94a3b8"
+                strokeWidth="0.8"
+                vectorEffect="non-scaling-stroke"
+                strokeDasharray="2 2"
+              />
+              <circle
+                cx={hoveredPt.x}
+                cy={hoveredPt.y}
+                r="1.4"
+                fill="#ffffff"
+                stroke={strokeColor}
+                strokeWidth="1.2"
+                vectorEffect="non-scaling-stroke"
+              />
+            </g>
+          )}
+        </svg>
+
+        {/* Floating Tooltip Card */}
+        {hoveredPt && (
+          <div
+            className="equity-tooltip"
+            style={{
+              left: `${Math.min(82, Math.max(18, (hoveredPt.x / 100) * 100))}%`,
+              top: `${Math.max(10, Math.min(75, (hoveredPt.y / 56) * 100 - 15))}%`,
+            }}
+          >
+            <div className="tooltip-header">
+              <span>Trade #{hoveredPt.index}</span>
+              <strong className={hoveredPt.profit >= 0 ? 'positive' : 'negative'}>
+                {hoveredPt.profit >= 0 ? 'WON' : 'LOST'} ({fmt(hoveredPt.profit)})
+              </strong>
+            </div>
+            <div className="tooltip-body">
+              <span>{hoveredPt.trade.instrument}</span>
+              <b>Equity: {fmt(hoveredPt.cumulative)}</b>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Axis Footer Labels */}
+      <div className="chart-labels">
+        <span>Trade #1 ({timeAgo(chronological[0]?.created_at || new Date().toISOString())})</span>
+        <span className="eq-label-mid">
+          {stats.total} trades plotted · {stats.winRate}% win rate
+        </span>
+        <span className={stats.netProfit >= 0 ? 'positive' : 'negative'}>
+          Current: {fmt(stats.netProfit)}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 function Bots({ bots, toggleBot, runTrade, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>; trades: Trade[] }) {
@@ -1027,7 +1444,7 @@ function Bots({ bots, toggleBot, runTrade, trades }: { bots: BotRow[]; toggleBot
               <p>{bot.description}</p>
               <BotStats bot={bot} userTrades={botTrades} />
               {botTrades.length > 0 && (
-                <div className="bot-chart-wrap"><EquityChart trades={botTrades} /></div>
+                <div className="bot-chart-wrap"><EquityChart trades={botTrades} compact /></div>
               )}
               <div className="card-actions">
                 <button

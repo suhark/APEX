@@ -422,27 +422,29 @@ export function ManualTrader({
                   y1={yl.yPos}
                   x2="98"
                   y2={yl.yPos}
-                  stroke="#1e2d2a"
-                  strokeWidth="0.4"
-                  strokeDasharray="1.5 2"
+                  stroke="#1c2b27"
+                  strokeWidth="0.8"
+                  vectorEffect="non-scaling-stroke"
+                  strokeDasharray="2 3"
                 />
               ))}
-              <line x1="25" y1="0" x2="25" y2="65" stroke="#162320" strokeWidth="0.4" strokeDasharray="2 3" />
-              <line x1="50" y1="0" x2="50" y2="65" stroke="#162320" strokeWidth="0.4" strokeDasharray="2 3" />
-              <line x1="75" y1="0" x2="75" y2="65" stroke="#162320" strokeWidth="0.4" strokeDasharray="2 3" />
+              <line x1="25" y1="0" x2="25" y2="65" stroke="#162320" strokeWidth="0.8" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
+              <line x1="50" y1="0" x2="50" y2="65" stroke="#162320" strokeWidth="0.8" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
+              <line x1="75" y1="0" x2="75" y2="65" stroke="#162320" strokeWidth="0.8" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
 
               {/* Area Fill */}
               {chartType === 'area' && chartMath.fillStr && (
                 <path d={chartMath.fillStr} fill="url(#dtraderAreaGrad)" />
               )}
 
-              {/* Main Price Line */}
+              {/* Main Price Line - Razor-thin crisp financial line */}
               {chartMath.pathStr && (
                 <path
                   d={chartMath.pathStr}
                   fill="none"
-                  stroke="#f1f5f9"
-                  strokeWidth="1.1"
+                  stroke="#f8fafc"
+                  strokeWidth="1.2"
+                  vectorEffect="non-scaling-stroke"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
@@ -462,6 +464,7 @@ export function ManualTrader({
                         : '#38bdf8'
                     }
                     strokeWidth="2.2"
+                    vectorEffect="non-scaling-stroke"
                     strokeLinecap="round"
                   />
                   {contractOverlay.points.map((pt, i) => (
@@ -469,10 +472,11 @@ export function ManualTrader({
                       key={i}
                       cx={pt.x}
                       cy={pt.y}
-                      r="1.3"
+                      r="0.8"
                       fill={activeContract?.status === 'won' ? '#34d399' : '#2dd4bf'}
                       stroke="#07100f"
-                      strokeWidth="0.5"
+                      strokeWidth="0.8"
+                      vectorEffect="non-scaling-stroke"
                     />
                   ))}
                 </g>
@@ -484,19 +488,21 @@ export function ManualTrader({
                 y1={chartMath.currentY}
                 x2="98"
                 y2={chartMath.currentY}
-                stroke="#f87171"
-                strokeWidth="0.5"
-                strokeDasharray="2 2"
+                stroke="#2dd4bf"
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
+                strokeDasharray="3 3"
               />
 
               {/* Latest Spot Marker Dot */}
               <circle
                 cx="98"
                 cy={chartMath.currentY}
-                r="1.8"
-                fill="#f87171"
+                r="0.9"
+                fill="#2dd4bf"
                 stroke="#ffffff"
-                strokeWidth="0.6"
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
               />
             </svg>
 
