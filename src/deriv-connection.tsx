@@ -22,7 +22,6 @@ export function DerivConnectionPanel({
   isArmed?: boolean;
 }) {
   const [token, setToken] = useState('');
-  const [appId, setAppId] = useState(DEFAULT_APP_ID);
   const [showToken, setShowToken] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
 
@@ -138,7 +137,7 @@ export function DerivConnectionPanel({
       {authState === 'error' && (
         <div className="deriv-error">
           <AlertCircle size={16} />
-          <span>Could not connect. Check your API token and App ID, then try again.</span>
+          <span>Could not connect. Check your API token and try again.</span>
         </div>
       )}
       <label className="deriv-token-label">
@@ -156,22 +155,10 @@ export function DerivConnectionPanel({
           </button>
         </div>
       </label>
-      <label className="deriv-token-label">
-        Deriv App ID
-        <div className="deriv-token-input">
-          <input
-            type="text"
-            value={appId}
-            placeholder="Your registered Deriv App ID"
-            onChange={(e) => setAppId(e.target.value)}
-            disabled={connecting}
-          />
-        </div>
-      </label>
       <button
         className="primary"
-        disabled={!token.trim() || !appId.trim() || connecting}
-        onClick={() => onConnect(token.trim(), appId.trim())}
+        disabled={!token.trim() || connecting}
+        onClick={() => onConnect(token.trim(), DEFAULT_APP_ID)}
       >
         {connecting ? <><Loader2 size={16} className="spin" /> Connecting…</> : <><Link2 size={16} /> Connect to Deriv</>}
       </button>
@@ -182,11 +169,7 @@ export function DerivConnectionPanel({
           <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer">
             Deriv API Token settings
           </a>
-          . Enable the <b>Read</b>, <b>Trade</b>, and <b>Trading information</b> scopes. Register your app at{' '}
-          <a href="https://developers.deriv.com" target="_blank" rel="noopener noreferrer">
-            developers.deriv.com
-          </a>
-          .
+          . Enable the <b>Read</b>, <b>Trade</b>, and <b>Trading information</b> scopes.
         </span>
       </div>
     </div>

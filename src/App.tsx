@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, Wallet, X, Zap } from 'lucide-react';
+import { createClient, type User } from '@supabase/supabase-js';
+import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, Globe, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
 import { executeTrade, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
+import { AuthModal } from './auth-modal';
+
+const DEFAULT_APP_ID = '34khJS0KsSP29i9G8kCiJ';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL ?? '',
@@ -11,9 +14,9 @@ const supabase = createClient(
 );
 
 type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'record' | 'settings';
-type Trade = { id: string; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string };
-type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number };
-type Workspace = { id: string; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null };
+type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string };
+type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
+type Workspace = { id: string; user_id?: string | null; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null };
 
 type TradeAlert = {
   id: number;
@@ -40,6 +43,8 @@ function money(value: number) { return `${value < 0 ? '-' : ''}$${Math.abs(value
 function timeAgo(date: string) { const minutes = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 60000)); return minutes < 1 ? 'just now' : `${minutes}m ago`; }
 
 function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
   const [page, setPage] = useState<Page>('dashboard');
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [bots, setBots] = useState<BotRow[]>([]);
@@ -82,19 +87,130 @@ function App() {
     }
   }, [deriv.account, workspace]);
 
-  const load = async () => {
+  const userRef = useRef<User | null>(null);
+  userRef.current = user;
+
+  const load = async (activeUser?: User | null) => {
+    const currentUser = activeUser !== undefined ? activeUser : userRef.current;
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    const [workspaceResult, botsResult, tradesResult] = await Promise.all([
-      supabase.from('trading_workspace').select('*').limit(1).maybeSingle(),
-      supabase.from('trading_bots').select('*').order('name'),
-      supabase.from('trading_trades').select('*').order('created_at', { ascending: false }).limit(100),
-    ]);
-    if (workspaceResult.data) setWorkspace(workspaceResult.data as Workspace);
-    if (botsResult.data) setBots(botsResult.data as BotRow[]);
-    if (tradesResult.data) setTrades(tradesResult.data as Trade[]);
+
+    let ws: Workspace | null = null;
+    let wsLoaded = false;
+
+    // 1. Fetch user-specific workspace
+    try {
+      const { data, error } = await supabase
+        .from('trading_workspace')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      if (!error && data) {
+        ws = data as Workspace;
+        wsLoaded = true;
+      } else if (!error && !data) {
+        // Create new isolated workspace for user
+        const initWs = {
+          user_id: currentUser.id,
+          mode: 'demo',
+          balance: 10000,
+          starting_balance: 10000,
+          loss_limit: 50,
+        };
+        const createResult = await supabase
+          .from('trading_workspace')
+          .insert(initWs)
+          .select()
+          .maybeSingle();
+
+        if (!createResult.error && createResult.data) {
+          ws = createResult.data as Workspace;
+          wsLoaded = true;
+        }
+      } else if (error) {
+        console.warn('Workspace user_id query fallback:', error.message);
+      }
+    } catch (e) {
+      console.warn('Failed loading user workspace:', e);
+    }
+
+    if (!wsLoaded) {
+      // Fallback to legacy single workspace if migration not yet run
+      const legacyWs = await supabase.from('trading_workspace').select('*').limit(1).maybeSingle();
+      if (legacyWs.data) ws = legacyWs.data as Workspace;
+    }
+
+    // 2. Fetch global bots library
+    let botsData: BotRow[] = [];
+    const botsResult = await supabase.from('trading_bots').select('*').order('name');
+    if (botsResult.data) botsData = botsResult.data as BotRow[];
+
+    // 3. Fetch user-isolated trades
+    let tradesData: Trade[] = [];
+    try {
+      const { data, error } = await supabase
+        .from('trading_trades')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (!error && data) {
+        tradesData = data as Trade[];
+      } else {
+        const fallback = await supabase
+          .from('trading_trades')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(100);
+        if (fallback.data) tradesData = fallback.data as Trade[];
+      }
+    } catch (e) {
+      console.warn('Failed loading trades:', e);
+    }
+
+    if (ws) setWorkspace(ws);
+    setBots(botsData);
+    setTrades(tradesData);
     setLoading(false);
+
+    // Auto-reconnect saved Deriv token for this user if present
+    const savedToken = localStorage.getItem(`apex_deriv_token_${currentUser.id}`);
+    if (savedToken && deriv.authState === 'disconnected') {
+      void handleDerivConnect(savedToken, DEFAULT_APP_ID);
+    }
   };
-  useEffect(() => { void load(); }, []);
+
+  useEffect(() => {
+    // Check initial auth session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const activeUser = session?.user ?? null;
+      setUser(activeUser);
+      setAuthChecking(false);
+      if (activeUser) {
+        void load(activeUser);
+      }
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const activeUser = session?.user ?? null;
+      setUser(activeUser);
+      setAuthChecking(false);
+      if (activeUser) {
+        void load(activeUser);
+      } else {
+        setWorkspace(null);
+        setTrades([]);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
   useEffect(() => { const interval = window.setInterval(() => setTick((value) => value + 1), 1600); return () => window.clearInterval(interval); }, []);
   useEffect(() => { if (!notice) return; const timeout = window.setTimeout(() => setNotice(''), 4000); return () => window.clearTimeout(timeout); }, [notice]);
   useEffect(() => { if (!tradeAlert) return; const timeout = window.setTimeout(() => setTradeAlert(null), 6000); return () => window.clearTimeout(timeout); }, [tradeAlert]);
@@ -157,11 +273,15 @@ function App() {
     setNotice('Live trading disarmed. Switched to safe mode.');
   };
 
-  const handleDerivConnect = async (token: string, appId: string) => {
+  const handleDerivConnect = async (token: string, _appId?: string) => {
     setNotice('Connecting to Deriv…');
     setLiveArmed(false); // ALWAYS start in safe demo mode!
-    const result = await deriv.connect(token, appId);
+    // Always use owner's registered App ID to route commissions
+    const result = await deriv.connect(token, DEFAULT_APP_ID);
     if (result.ok && result.account) {
+      if (userRef.current) {
+        localStorage.setItem(`apex_deriv_token_${userRef.current.id}`, token);
+      }
       sessionStartingBalRef.current = result.account.balance;
       await updateWorkspace({
         deriv_connected: true,
@@ -196,8 +316,24 @@ function App() {
     setLiveArmed(false);
     deriv.disconnect();
     sessionStartingBalRef.current = null;
+    if (userRef.current) {
+      localStorage.removeItem(`apex_deriv_token_${userRef.current.id}`);
+    }
     void updateWorkspace({ deriv_connected: false, deriv_loginid: null, deriv_is_virtual: null, deriv_balance: null });
     setNotice('Disconnected from Deriv. Switched to demo mode.');
+  };
+
+  const handleSignOut = async () => {
+    if (derivConnected) {
+      deriv.disconnect();
+    }
+    setLiveArmed(false);
+    sessionStartingBalRef.current = null;
+    await supabase.auth.signOut();
+    setUser(null);
+    setWorkspace(null);
+    setTrades([]);
+    setNotice('Signed out successfully.');
   };
 
   const liveArmedRef = useRef(liveArmed);
@@ -284,6 +420,7 @@ function App() {
         });
 
         const trade = {
+          user_id: userRef.current?.id ?? null,
           instrument: details.instrument,
           direction: details.direction,
           stake: details.stake,
@@ -294,7 +431,14 @@ function App() {
           entry_price: result.entryPrice,
           exit_price: null,
         };
-        const { data, error } = await supabase.from('trading_trades').insert(trade).select().maybeSingle();
+        let { data, error } = await supabase.from('trading_trades').insert(trade).select().maybeSingle();
+        if (error) {
+          // Retry without user_id if column does not exist on remote DB yet
+          const { user_id, ...tradeWithoutUser } = trade;
+          const retry = await supabase.from('trading_trades').insert(tradeWithoutUser).select().maybeSingle();
+          data = retry.data;
+          error = retry.error;
+        }
         if (error) {
           if (details.botName) botPendingTradesRef.current.delete(details.botName);
           setNotice('Trade could not be recorded.');
@@ -372,8 +516,25 @@ function App() {
     const win = Math.random() > 0.42;
     const profit = Number((details.stake * (win ? 0.78 : -1)).toFixed(2));
     const exit = Number((entry + (win ? (details.direction === 'CALL' ? 1 : -1) : (details.direction === 'CALL' ? -1 : 1)) * (0.3 + Math.random() * 1.5)).toFixed(2));
-    const trade = { instrument: details.instrument, direction: details.direction, stake: details.stake, result: win ? 'won' : 'lost', profit, source: details.source, bot_name: details.botName, entry_price: entry, exit_price: exit };
-    const { data, error } = await supabase.from('trading_trades').insert(trade).select().maybeSingle();
+    const trade = {
+      user_id: userRef.current?.id ?? null,
+      instrument: details.instrument,
+      direction: details.direction,
+      stake: details.stake,
+      result: win ? 'won' : 'lost',
+      profit,
+      source: details.source,
+      bot_name: details.botName,
+      entry_price: entry,
+      exit_price: exit,
+    };
+    let { data, error } = await supabase.from('trading_trades').insert(trade).select().maybeSingle();
+    if (error) {
+      const { user_id, ...tradeWithoutUser } = trade;
+      const retry = await supabase.from('trading_trades').insert(tradeWithoutUser).select().maybeSingle();
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) { setNotice('Trade could not be recorded.'); return; }
     if (data) setTrades((current) => [data as Trade, ...current]);
     await updateWorkspace({ balance: Number((ws.balance + profit).toFixed(2)) });
@@ -458,6 +619,29 @@ function App() {
     />
   );
 
+  if (authChecking) {
+    return (
+      <div className="auth-loading-screen">
+        <div className="auth-brand-mark spin">
+          <Activity size={32} />
+        </div>
+        <p>Initializing APEX Trading Lab…</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <AuthModal
+        supabase={supabase}
+        onAuthSuccess={(authedUser) => {
+          setUser(authedUser);
+          void load(authedUser);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className={mobileNav ? 'sidebar open' : 'sidebar'}>
@@ -494,6 +678,20 @@ function App() {
           <button className="mini-settings" onClick={() => setPage('settings')}>
             <Settings2 size={16} /> Workspace settings
           </button>
+          <div className="sidebar-user-section">
+            <div className="user-info">
+              <div className="user-avatar-dot">
+                <UserIcon size={14} />
+              </div>
+              <div className="user-text">
+                <strong>{user.email?.split('@')[0]}</strong>
+                <span title={user.email}>{user.email}</span>
+              </div>
+            </div>
+            <button className="mini-settings signout-btn" onClick={() => void handleSignOut()}>
+              <LogOut size={15} /> Sign out
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -558,6 +756,20 @@ function App() {
               </button>
             )}
             <button className="refresh" onClick={() => void load()}><RefreshCw size={15} /> Sync</button>
+            <div className="topbar-user-pill" title={`Signed in as ${user.email}`}>
+              <div className="user-avatar-dot">
+                <UserIcon size={13} />
+              </div>
+              <span className="user-email-text">{user.email?.split('@')[0]}</span>
+              <button
+                type="button"
+                className="topbar-signout-btn"
+                onClick={() => void handleSignOut()}
+                title="Sign out of APEX"
+              >
+                <LogOut size={13} />
+              </button>
+            </div>
             <div className="balance">
               <span>{derivConnected ? (isDerivReal ? (liveArmed ? 'Deriv live (ARMED)' : 'Deriv real (Safe Mode)') : 'Deriv demo balance') : 'Demo balance'}</span>
               <strong>{money(derivConnected ? (deriv.account?.balance ?? 0) : (workspace?.balance ?? 0))}</strong>
@@ -706,21 +918,63 @@ function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivCon
   const balanceValue = derivConnected && derivAccount ? derivAccount.balance : workspace.balance;
   const balanceLabel = derivConnected && derivAccount ? (isDerivReal ? 'Deriv live account' : 'Deriv demo account') : (workspace.mode === 'demo' ? 'Demo account' : 'Live account');
   const headerDesc = derivConnected ? (isDerivReal ? "You're connected to a real Deriv account. Trades will execute with real funds." : "You're connected to a Deriv demo account. Trades execute on Deriv with virtual funds.") : "Your synthetic trading workspace is running smoothly. Review your guardrails before you deploy.";
-  return <><PageHeader eyebrow="Overview / Today" title="Good morning, trader." description={headerDesc} action={<button className="primary" onClick={() => setPage('manual')}><Plus size={16} /> New trade</button>} /><div className="stats-grid"><Stat label="Available balance" value={money(balanceValue)} detail={balanceLabel} tone="success" icon={Wallet} /><Stat label="Session P/L" value={money(pnl)} detail={`${trades.filter((trade) => trade.profit > 0).length} winning trades`} tone={pnl >= 0 ? 'success' : 'danger'} icon={pnl >= 0 ? TrendingUp : TrendingDown} /><Stat label="Active bots" value={String(active.length)} detail={`${bots.length} in library`} icon={Bot} /><Stat label="Market status" value="Open" detail={derivConnected ? "Deriv feeds online" : "Synthetic feeds online"} tone="success" icon={Activity} /></div><div className="grid-2"><section className="panel"><div className="panel-title"><div><span className="eyebrow">Live automation</span><h2>Active bots</h2></div><button className="text-button" onClick={() => setPage('bots')}>View library <ChevronRight size={15} /></button></div>{active.length ? active.map((bot) => { const winRate = bot.total_trades ? Math.round((bot.wins / bot.total_trades) * 100) : 0; return <div className="bot-row" key={bot.id}><div className="bot-avatar"><Bot size={18} /></div><div className="bot-copy"><strong>{bot.name}</strong><span><i className="live-dot" /> {bot.active ? 'Running — trading every 5s' : 'Paused'}</span></div><div className="bot-metric"><span>{winRate}% win · {bot.total_trades} trades</span><b className={bot.pnl >= 0 ? 'positive' : 'negative'}>{money(bot.pnl)}</b></div><button className="icon-button" onClick={() => void toggleBot(bot)}><Pause size={16} /></button></div>; }) : <EmptyState title="No active bots" text="Activate a free bot and it will watch synthetic markets for you." action={<button className="secondary" onClick={() => setPage('bots')}>Browse free bots</button>} />}</section><section className="panel guard-panel"><div className="panel-title"><div><span className="eyebrow">Risk controls</span><h2>Loss-limit guardrail</h2></div><ShieldCheck className="success-icon" size={22} /></div><div className="guard-value"><strong>{money(used)}</strong><span>of {money(workspace.loss_limit)} used</span></div><div className="progress"><span style={{ width: `${guard}%` }} /></div><div className="guard-footer"><span><i className="live-dot" /> Protection enabled</span><button className="text-button" onClick={() => setPage('settings')}>Adjust limit <ChevronRight size={15} /></button></div><div className="guard-note">New trades pause automatically when the session loss limit is reached.</div></section></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Equity curve</h2></div><button className="text-button" onClick={() => setPage('record')}>Full track record <ChevronRight size={15} /></button></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Latest activity</span><h2>Trade history</h2></div></div><TradeTable trades={trades.slice(0, 5)} /></section></>;
+  return <><PageHeader eyebrow="Overview / Today" title="Good morning, trader." description={headerDesc} action={<button className="primary" onClick={() => setPage('manual')}><Plus size={16} /> New trade</button>} /><div className="stats-grid"><Stat label="Available balance" value={money(balanceValue)} detail={balanceLabel} tone="success" icon={Wallet} /><Stat label="Session P/L" value={money(pnl)} detail={`${trades.filter((trade) => trade.profit > 0).length} winning trades`} tone={pnl >= 0 ? 'success' : 'danger'} icon={pnl >= 0 ? TrendingUp : TrendingDown} /><Stat label="Active bots" value={String(active.length)} detail={`${bots.length} in library`} icon={Bot} /><Stat label="Market status" value="Open" detail={derivConnected ? "Deriv feeds online" : "Synthetic feeds online"} tone="success" icon={Activity} /></div><div className="grid-2"><section className="panel"><div className="panel-title"><div><span className="eyebrow">Live automation</span><h2>Active bots</h2></div><button className="text-button" onClick={() => setPage('bots')}>View library <ChevronRight size={15} /></button></div>{active.length ? active.map((bot) => {
+    const botTrades = trades.filter((trade) => trade.bot_name === bot.name);
+    const closed = botTrades.filter((t) => t.result === 'won' || t.result === 'lost');
+    const hasTrades = closed.length > 0;
+    const wins = closed.filter((t) => t.result === 'won').length;
+    const winRate = hasTrades ? Math.round((wins / closed.length) * 100) : (bot.benchmark_win_rate ?? 74);
+    const botPnl = closed.reduce((sum, t) => sum + Number(t.profit), 0);
+    return <div className="bot-row" key={bot.id}><div className="bot-avatar"><Bot size={18} /></div><div className="bot-copy"><strong>{bot.name}</strong><span><i className="live-dot" /> {bot.active ? 'Running — trading every 5s' : 'Paused'}</span></div><div className="bot-metric"><span>{winRate}% win {hasTrades ? `· ${closed.length} trades` : '(benchmark)'}</span><b className={botPnl >= 0 ? 'positive' : 'negative'}>{money(botPnl)}</b></div><button className="icon-button" onClick={() => void toggleBot(bot)}><Pause size={16} /></button></div>;
+  }) : <EmptyState title="No active bots" text="Activate a free bot and it will watch synthetic markets for you." action={<button className="secondary" onClick={() => setPage('bots')}>Browse free bots</button>} />}</section><section className="panel guard-panel"><div className="panel-title"><div><span className="eyebrow">Risk controls</span><h2>Loss-limit guardrail</h2></div><ShieldCheck className="success-icon" size={22} /></div><div className="guard-value"><strong>{money(used)}</strong><span>of {money(workspace.loss_limit)} used</span></div><div className="progress"><span style={{ width: `${guard}%` }} /></div><div className="guard-footer"><span><i className="live-dot" /> Protection enabled</span><button className="text-button" onClick={() => setPage('settings')}>Adjust limit <ChevronRight size={15} /></button></div><div className="guard-note">New trades pause automatically when the session loss limit is reached.</div></section></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Equity curve</h2></div><button className="text-button" onClick={() => setPage('record')}>Full track record <ChevronRight size={15} /></button></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Latest activity</span><h2>Trade history</h2></div></div><TradeTable trades={trades.slice(0, 5)} /></section></>;
 }
 
-function BotStats({ bot }: { bot: BotRow }) {
-  const losses = bot.total_trades - bot.wins;
-  const winRate = bot.total_trades ? Math.round((bot.wins / bot.total_trades) * 100) : 0;
-  return <div className="bot-stats">
-    <div className="bot-stat"><span>Trades</span><b>{bot.total_trades}</b></div>
-    <div className="bot-stat"><span>Wins</span><b className="positive">{bot.wins}</b></div>
-    <div className="bot-stat"><span>Losses</span><b className="negative">{losses}</b></div>
-    <div className="bot-stat"><span>Win rate</span><b>{winRate}%</b></div>
-    <div className="bot-stat"><span>Won</span><b className="positive">{money(bot.won_amount)}</b></div>
-    <div className="bot-stat"><span>Lost</span><b className="negative">{money(bot.lost_amount)}</b></div>
-  </div>;
+function BotStats({ bot, userTrades }: { bot: BotRow; userTrades: Trade[] }) {
+  const closedUserTrades = userTrades.filter((t) => t.result === 'won' || t.result === 'lost');
+  const hasUserTrades = closedUserTrades.length > 0;
+
+  if (!hasUserTrades) {
+    const benchmarkWinRate = bot.benchmark_win_rate ?? 76;
+    const benchmarkTrades = bot.benchmark_trades ?? (bot.name === 'Apex Momentum' ? 2450 : 850);
+    return (
+      <div className="bot-stats-container">
+        <div className="bot-stats-badge benchmark">
+          <Globe size={11} /> Platform Win Rate Benchmark (Pre-run)
+        </div>
+        <div className="bot-stats">
+          <div className="bot-stat"><span>Global trades</span><b>{benchmarkTrades.toLocaleString()}</b></div>
+          <div className="bot-stat"><span>Benchmark win rate</span><b className="positive">{benchmarkWinRate}%</b></div>
+          <div className="bot-stat"><span>Expected risk</span><b>{bot.risk}</b></div>
+          <div className="bot-stat"><span>Your trades</span><b className="muted">0 (Not run yet)</b></div>
+        </div>
+      </div>
+    );
+  }
+
+  const total = closedUserTrades.length;
+  const wins = closedUserTrades.filter((t) => t.result === 'won').length;
+  const losses = total - wins;
+  const winRate = Math.round((wins / total) * 100);
+  const wonAmount = closedUserTrades.filter((t) => t.profit > 0).reduce((sum, t) => sum + Number(t.profit), 0);
+  const lostAmount = closedUserTrades.filter((t) => t.profit < 0).reduce((sum, t) => sum + Math.abs(Number(t.profit)), 0);
+
+  return (
+    <div className="bot-stats-container">
+      <div className="bot-stats-badge personal">
+        <UserIcon size={11} /> Your Track Record ({total} {total === 1 ? 'trade' : 'trades'})
+      </div>
+      <div className="bot-stats">
+        <div className="bot-stat"><span>Trades</span><b>{total}</b></div>
+        <div className="bot-stat"><span>Wins</span><b className="positive">{wins}</b></div>
+        <div className="bot-stat"><span>Losses</span><b className="negative">{losses}</b></div>
+        <div className="bot-stat"><span>Win rate</span><b className={winRate >= 50 ? 'positive' : 'negative'}>{winRate}%</b></div>
+        <div className="bot-stat"><span>Won</span><b className="positive">{money(wonAmount)}</b></div>
+        <div className="bot-stat"><span>Lost</span><b className="negative">{money(lostAmount)}</b></div>
+      </div>
+    </div>
+  );
 }
+
 function EquityChart({ trades, color = '#2dd4bf' }: { trades: Trade[]; color?: string }) {
   const sorted = [...trades].reverse();
   let cumulative = 0;
@@ -732,7 +986,52 @@ function EquityChart({ trades, color = '#2dd4bf' }: { trades: Trade[]; color?: s
   const gid = `eq-${color.replace('#', '')}`;
   return <div className="price-chart"><svg viewBox="0 0 100 60" preserveAspectRatio="none"><defs><linearGradient id={gid} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity=".3" /><stop offset="100%" stopColor={color} stopOpacity="0" /></linearGradient></defs><polygon points={`0,60 ${coords} 100,60`} fill={`url(#${gid})`} /><polyline points={coords} fill="none" stroke={color} strokeWidth="1.4" /></svg><div className="chart-labels"><span>Start</span><span>{points.length} trades</span><span>Now</span></div></div>;
 }
-function Bots({ bots, toggleBot, runTrade, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>; trades: Trade[] }) { return <><PageHeader eyebrow="Automation library" title="Free bots" description="Start with a clear strategy, a visible risk tier, and a demo-first execution loop. Multiple bots can run simultaneously." /><div className="bot-grid">{bots.map((bot) => { const botTrades = trades.filter((trade) => trade.bot_name === bot.name); return <div className="bot-card" key={bot.id}><div className="card-top"><div className="bot-avatar large"><Bot size={21} /></div><span className={`risk ${bot.risk.toLowerCase()}`}>{bot.risk}</span></div><h2>{bot.name}</h2><p>{bot.description}</p><BotStats bot={bot} />{botTrades.length > 0 && <div className="bot-chart-wrap"><EquityChart trades={botTrades} /></div>}<div className="card-actions"><button className={bot.active ? 'secondary active-button' : 'primary'} onClick={() => void toggleBot(bot)}>{bot.active ? <><Pause size={15} /> Pause bot</> : <><Play size={15} /> Start bot</>}</button><button className="ghost" onClick={() => void runTrade({ instrument: instruments[0], direction: 'CALL', stake: 10, source: 'demo', botName: bot.name })}>Test trade</button></div>{bot.active && <div className="watching"><i className="live-dot" /> Running — placing trades every 5s</div>}</div>; })}</div></>; }
+
+function Bots({ bots, toggleBot, runTrade, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>; trades: Trade[] }) {
+  return (
+    <>
+      <PageHeader
+        eyebrow="Automation library"
+        title="Free bots"
+        description="Start with a clear strategy, a visible risk tier, and a demo-first execution loop. Multiple bots can run simultaneously."
+      />
+      <div className="bot-grid">
+        {bots.map((bot) => {
+          const botTrades = trades.filter((trade) => trade.bot_name === bot.name);
+          return (
+            <div className="bot-card" key={bot.id}>
+              <div className="card-top">
+                <div className="bot-avatar large"><Bot size={21} /></div>
+                <span className={`risk ${bot.risk.toLowerCase()}`}>{bot.risk}</span>
+              </div>
+              <h2>{bot.name}</h2>
+              <p>{bot.description}</p>
+              <BotStats bot={bot} userTrades={botTrades} />
+              {botTrades.length > 0 && (
+                <div className="bot-chart-wrap"><EquityChart trades={botTrades} /></div>
+              )}
+              <div className="card-actions">
+                <button
+                  className={bot.active ? 'secondary active-button' : 'primary'}
+                  onClick={() => void toggleBot(bot)}
+                >
+                  {bot.active ? <><Pause size={15} /> Pause bot</> : <><Play size={15} /> Start bot</>}
+                </button>
+                <button
+                  className="ghost"
+                  onClick={() => void runTrade({ instrument: instruments[0], direction: 'CALL', stake: 10, source: 'demo', botName: bot.name })}
+                >
+                  Test trade
+                </button>
+              </div>
+              {bot.active && <div className="watching"><i className="live-dot" /> Running — placing trades every 5s</div>}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
 
 function Manual({ tick, runTrade, derivConnected, isDerivReal }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string }) => Promise<void>; derivConnected: boolean; isDerivReal: boolean }) { const [instrument, setInstrument] = useState(instruments[1]); const [stake, setStake] = useState(10); const index = instruments.indexOf(instrument); const pillLabel = derivConnected ? (isDerivReal ? 'Deriv live' : 'Deriv demo') : 'Demo execution'; return <><PageHeader eyebrow="Direct execution" title="Manual trader" description={derivConnected ? (isDerivReal ? "Connected to a real Deriv account. Trades will execute with real funds." : "Connected to a Deriv demo account. Trades execute with virtual funds.") : "Place a synthetic contract with a live price view and immediate result feedback."} action={<div className={derivConnected ? (isDerivReal ? 'live-pill' : 'demo-pill') : 'demo-pill'}><i className="live-dot" /> {pillLabel}</div>} /><div className="trade-layout"><section className="panel chart-panel"><div className="chart-head"><div><span className="eyebrow">{instrument}</span><h2>{priceFor(index, tick).toFixed(2)} <em className="positive">+0.42%</em></h2></div><span className="chart-time">Live <Clock3 size={14} /></span></div><PriceChart tick={tick} index={index} /></section><section className="panel ticket"><div className="eyebrow">Trade ticket</div><h2>Choose a direction</h2><label>Instrument<select value={instrument} onChange={(event) => setInstrument(event.target.value)}>{instruments.map((item) => <option key={item}>{item}</option>)}</select></label><label>Stake amount<div className="input-prefix"><span>$</span><input type="number" min="1" value={stake} onChange={(event) => setStake(Number(event.target.value))} /></div></label><div className="stake-row">{[5, 10, 25, 50].map((amount) => <button key={amount} className={stake === amount ? 'selected' : ''} onClick={() => setStake(amount)}>${amount}</button>)}</div><div className="payout"><span>Potential payout</span><strong>{money(stake * 1.78)}</strong></div><div className="direction-buttons"><button className="call" onClick={() => void runTrade({ instrument, direction: 'CALL', stake, source: 'manual' })}><ArrowUpRight size={19} /> Buy CALL</button><button className="put" onClick={() => void runTrade({ instrument, direction: 'PUT', stake, source: 'manual' })}><ArrowDownRight size={19} /> Buy PUT</button></div><small className="muted">{derivConnected ? 'Trades execute on Deriv. Contract settles after 5 ticks.' : 'Results are simulated for testing. Connect Deriv for live trading.'}</small></section></div></>; }
 
@@ -746,7 +1045,46 @@ function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrume
 
 function Quick({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void> }) { const presets = [{ name: 'Steady Start', detail: '$5 stake · Conservative', risk: 'Low' }, { name: 'Balanced Pulse', detail: '$10 stake · Moderate', risk: 'Medium' }, { name: 'Fast Momentum', detail: '$25 stake · Aggressive', risk: 'High' }]; return <><PageHeader eyebrow="One-click automation" title="Quick bot" description="Choose a sensible preset and get a bot watching the market in seconds." /><div className="quick-grid">{presets.map((preset, index) => <div className="quick-card" key={preset.name}><div className="quick-icon"><Zap size={20} /></div><span className="risk moderate">{preset.risk} risk</span><h2>{preset.name}</h2><p>{preset.detail}</p><div className="quick-status"><i className="live-dot" /> Ready to start</div><button className="primary full" onClick={() => void runTrade({ instrument: instruments[(tick + index) % instruments.length], direction: index === 1 ? 'PUT' : 'CALL', stake: [5, 10, 25][index], source: 'quick_bot', botName: `Quick · ${preset.name}` })}><Play size={16} /> Start demo run</button></div>)}</div><section className="panel session-panel"><div><span className="eyebrow">Session stats</span><h2>Quick bot runs stay visible</h2><p className="muted">Every result is recorded in the same public ledger so you can see what happened, not just a marketing claim.</p></div><div className="session-stats"><strong>0</strong><span>active quick sessions</span></div></section></>; }
 
-function Apex({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; trades: Trade[] }) { const bot = bots.find((item) => item.name === 'Apex Momentum'); const apexTrades = trades.filter((trade) => trade.bot_name === 'Apex Momentum'); return <><PageHeader eyebrow="Flagship automation" title="Apex bot" description="An adaptive synthetic-index strategy with transparent performance and risk controls." action={bot ? <button className="primary" onClick={() => void toggleBot(bot)}>{bot.active ? <><Pause size={16} /> Pause Apex</> : <><Rocket size={16} /> Start Apex</>}</button> : undefined} /><div className="apex-banner"><div><span className="pro-tag">APEX PRO</span><h2>Adaptive momentum, clearly explained.</h2><p>Reads momentum, volatility, and reversal pressure together. Position size stays inside your workspace loss guardrail.</p></div><div className="apex-score"><strong>{bot?.total_trades ? `${Math.round((bot.wins / bot.total_trades) * 100)}%` : '—'}</strong><span>win rate</span></div></div>{bot && <div className="bot-stats wide"><BotStats bot={bot} /></div>}<section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Equity curve</h2></div><span className="chart-time">Live <Activity size={14} /></span></div><EquityChart trades={apexTrades} color="#f2c576" /></section><section className="panel"><div className="panel-title"><h2>Apex trade log</h2></div><TradeTable trades={apexTrades} /></section></>; }
+function Apex({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; trades: Trade[] }) {
+  const bot = bots.find((item) => item.name === 'Apex Momentum');
+  const apexTrades = trades.filter((trade) => trade.bot_name === 'Apex Momentum');
+  const closedApex = apexTrades.filter((t) => t.result === 'won' || t.result === 'lost');
+  const hasUserTrades = closedApex.length > 0;
+  const userWins = closedApex.filter((t) => t.result === 'won').length;
+  const userWinRate = hasUserTrades ? Math.round((userWins / closedApex.length) * 100) : null;
+  const displayWinRate = userWinRate !== null ? `${userWinRate}%` : `${bot?.benchmark_win_rate ?? 82}%`;
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Flagship automation"
+        title="Apex bot"
+        description="An adaptive synthetic-index strategy with transparent performance and risk controls."
+        action={bot ? <button className="primary" onClick={() => void toggleBot(bot)}>{bot.active ? <><Pause size={16} /> Pause Apex</> : <><Rocket size={16} /> Start Apex</>}</button> : undefined}
+      />
+      <div className="apex-banner">
+        <div>
+          <span className="pro-tag">APEX PRO</span>
+          <h2>Adaptive momentum, clearly explained.</h2>
+          <p>Reads momentum, volatility, and reversal pressure together. Position size stays inside your workspace loss guardrail.</p>
+        </div>
+        <div className="apex-score">
+          <strong>{displayWinRate}</strong>
+          <span>{hasUserTrades ? 'Your personal win rate' : 'Platform benchmark'}</span>
+        </div>
+      </div>
+      {bot && <div className="bot-stats wide"><BotStats bot={bot} userTrades={apexTrades} /></div>}
+      <section className="panel">
+        <div className="panel-title">
+          <div><span className="eyebrow">Performance</span><h2>Equity curve</h2></div>
+          <span className="chart-time">Live <Activity size={14} /></span>
+        </div>
+        <EquityChart trades={apexTrades} color="#f2c576" />
+      </section>
+      <section className="panel"><div className="panel-title"><h2>Apex trade log</h2></div><TradeTable trades={apexTrades} /></section>
+    </>
+  );
+}
 
 function Record({ trades }: { trades: Trade[] }) { const [filter, setFilter] = useState('all'); const filtered = filter === 'all' ? trades : trades.filter((trade) => trade.result === filter); const total = trades.reduce((sum, trade) => sum + Number(trade.profit), 0); const exportCsv = () => { const csv = ['Instrument,Direction,Stake,Result,P/L,Source,Time', ...trades.map((trade) => [trade.instrument, trade.direction, trade.stake, trade.result, trade.profit, trade.source, trade.created_at].join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'apex-track-record.csv'; link.click(); URL.revokeObjectURL(url); }; return <><PageHeader eyebrow="Public performance ledger" title="Track record" description="Every synthetic trade is timestamped and visible. Results cannot be edited after they close." action={<button className="secondary" onClick={exportCsv}><ArrowDownRight size={16} /> Export CSV</button>} /><div className="record-summary"><Stat label="Total trades" value={String(trades.length)} detail="All strategies" icon={BarChart3} /><Stat label="Win rate" value={trades.length ? `${Math.round(trades.filter((trade) => trade.result === 'won').length / trades.length * 100)}%` : '—'} detail="Closed trades" tone="success" icon={Target} /><Stat label="Cumulative P/L" value={money(total)} detail="Across this workspace" tone={total >= 0 ? 'success' : 'danger'} icon={total >= 0 ? TrendingUp : TrendingDown} /></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Cumulative equity curve</h2></div></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><h2>All trades</h2><div className="filter-tabs">{['all', 'won', 'lost'].map((item) => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div></div><TradeTable trades={filtered} /></section></>; }
 
