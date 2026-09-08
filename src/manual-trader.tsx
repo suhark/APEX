@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -13,6 +13,8 @@ import {
   Plus,
   RefreshCw,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 
 export interface ManualTraderProps {
@@ -81,7 +83,77 @@ export function ManualTrader({
   const [showInstrumentDropdown, setShowInstrumentDropdown] = useState<boolean>(false);
   const [chartType, setChartType] = useState<'area' | 'line'>('area');
   const [zoomLevel, setZoomLevel] = useState<number>(35); // number of visible ticks
+  const [showZoomPill, setShowZoomPill] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Gesture and zoom refs for pinch-to-zoom & double tap
+  const touchStartDistRef = useRef<number | null>(null);
+  const startZoomRef = useRef<number>(35);
+  const lastTapTimeRef = useRef<number>(0);
+  const zoomFeedbackTimeoutRef = useRef<number | null>(null);
+
+  const triggerZoomPill = () => {
+    setShowZoomPill(true);
+    if (zoomFeedbackTimeoutRef.current) {
+      window.clearTimeout(zoomFeedbackTimeoutRef.current);
+    }
+    zoomFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setShowZoomPill(false);
+    }, 1600);
+  };
+
+  const updateZoomLevel = (val: number | ((prev: number) => number)) => {
+    setZoomLevel((prev) => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      return Math.min(90, Math.max(15, next));
+    });
+    triggerZoomPill();
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      touchStartDistRef.current = dist;
+      startZoomRef.current = zoomLevel;
+      triggerZoomPill();
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTapTimeRef.current < 320) {
+        // Double tap on chart resets to standard 35 ticks
+        updateZoomLevel(35);
+      }
+      lastTapTimeRef.current = now;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2 && touchStartDistRef.current !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const ratio = dist / touchStartDistRef.current;
+      // Spreading fingers (ratio > 1) zooms in (fewer ticks)
+      // Pinching together (ratio < 1) zooms out (more ticks)
+      const target = Math.round(startZoomRef.current / ratio);
+      setZoomLevel(Math.min(90, Math.max(15, target)));
+      triggerZoomPill();
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStartDistRef.current = null;
+  };
+
+  const handleWheelZoom = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (Math.abs(e.deltaY) > 4) {
+      e.preventDefault();
+      updateZoomLevel((prev) => prev + (e.deltaY > 0 ? 4 : -4));
+    }
+  };
 
   // Active in-chart contract visualization
   const [activeContract, setActiveContract] = useState<ActiveContract | null>(null);
@@ -96,13 +168,13 @@ export function ManualTrader({
     let currentQuote = config.basePrice;
     const now = Date.now();
 
-    for (let i = 50; i >= 0; i--) {
+    for (let i = 85; i >= 0; i--) {
       const delta = (Math.sin(i / 3) * 0.4 + (Math.random() - 0.48) * 0.8) * config.volatility;
       currentQuote = Number((currentQuote + delta).toFixed(2));
       const timeStr = new Date(now - i * 1500).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
       const changePct = Number((((currentQuote - config.basePrice) / config.basePrice) * 100).toFixed(2));
       initialTicks.push({
-        index: 50 - i,
+        index: 85 - i,
         quote: currentQuote,
         time: timeStr,
         changePct,
@@ -130,7 +202,7 @@ export function ManualTrader({
         changePct,
       };
 
-      const updated = [...prev.slice(-65), nextTick];
+      const updated = [...prev.slice(-120), nextTick];
 
       // Advance active contract ticks if a contract is running
       if (activeContract && activeContract.status === 'running') {
@@ -395,6 +467,22 @@ export function ManualTrader({
             >
               <LineChartIcon size={16} />
             </button>
+            <button
+              type="button"
+              className="dtrader-tool-btn"
+              onClick={() => updateZoomLevel((prev) => Math.max(15, prev - 6))}
+              title="Zoom In (Spread ticks)"
+            >
+              <ZoomIn size={15} />
+            </button>
+            <button
+              type="button"
+              className="dtrader-tool-btn"
+              onClick={() => updateZoomLevel((prev) => Math.min(90, prev + 6))}
+              title="Zoom Out (More ticks)"
+            >
+              <ZoomOut size={15} />
+            </button>
             <button type="button" className="dtrader-tool-btn" title="Drawing Tools">
               <Pencil size={15} />
             </button>
@@ -403,8 +491,29 @@ export function ManualTrader({
             </button>
           </div>
 
+          {/* Floating Zoom Level Pill */}
+          {showZoomPill && (
+            <div className="dtrader-zoom-pill">
+              <span>Zoom: {zoomLevel} ticks</span>
+              <button
+                type="button"
+                onClick={() => updateZoomLevel(35)}
+                title="Reset zoom"
+              >
+                Reset
+              </button>
+            </div>
+          )}
+
           {/* SVG Price Chart */}
-          <div className="dtrader-svg-wrapper">
+          <div
+            className="dtrader-svg-wrapper"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
+            onWheel={handleWheelZoom}
+          >
             <svg viewBox="0 0 100 65" preserveAspectRatio="none" className="dtrader-svg">
               <defs>
                 <linearGradient id="dtraderAreaGrad" x1="0" y1="0" x2="0" y2="1">

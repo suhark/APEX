@@ -110,9 +110,127 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 .deriv-pill.connecting { color: #f2c576; background: #2a2218; border: 1px solid #5c4829; }
 .live-pill { display: flex; gap: 7px; align-items: center; padding: 9px 11px; border: 1px solid #614a26; border-radius: 6px; color: #f2c576; background: #1a1610; font-size: 10px; }
 .result.pending { color: #a8b8b3; background: #1a2a26; }.mode-toggle { display: grid; gap: 8px; }.mode-toggle button { display: flex; justify-content: space-between; align-items: center; padding: 14px; border: 1px solid #29413b; border-radius: 7px; color: #78918a; background: #0e1917; text-align: left; }.mode-toggle button.selected { border-color: #3caa96; background: #14332d; }.mode-toggle strong, .mode-toggle span { display: block; }.mode-toggle strong { color: #c8ddd8; font-size: 11px; }.mode-toggle span { margin-top: 4px; font-size: 9px; }.mode-toggle svg { color: #4bd7bd; }.soon { padding: 4px 6px; border-radius: 4px; color: #d3a763 !important; background: #392d1d; }.input-prefix.big { max-width: 230px; margin: 19px 0 15px; }.input-prefix.big input { height: 42px; }.spin { animation: spin 1s linear infinite; }@keyframes spin { to { transform: rotate(360deg); } }.loading { display: flex; justify-content: center; align-items: center; gap: 9px; min-height: 45vh; color: #7a938c; font-size: 12px; }
-@media (max-width: 1050px) { .sidebar { width: 215px; }.page-content { padding-left: 22px; padding-right: 22px; }.topbar, .ticker { padding-left: 22px; padding-right: 22px; }.bot-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 760px) { .sidebar { position: fixed; z-index: 20; left: -250px; transition: left .2s ease; box-shadow: 15px 0 35px #0007; }.sidebar.open { left: 0; }.menu-button { display: block; }.topbar { padding: 0 16px; }.crumb { font-size: 11px; }.refresh { display: none; }.balance { padding-left: 0; border: 0; }.ticker { padding: 0 16px; }.page-content { padding: 25px 16px 55px; }.page-header { align-items: flex-start; flex-direction: column; }.page-header .primary, .page-header .secondary { width: 100%; }.stats-grid, .record-summary { grid-template-columns: repeat(2, 1fr); }.grid-2, .builder-grid, .signal-layout, .bulk-grid, .trade-layout { grid-template-columns: 1fr; }.bot-grid, .quick-grid, .settings-grid { grid-template-columns: 1fr; }.record-summary { grid-template-columns: 1fr; }.apex-banner { align-items: flex-start; flex-direction: column; gap: 22px; }.apex-score { padding: 17px 0 0; border-top: 1px solid #5c4829; border-left: 0; width: 100%; text-align: left; }.session-panel { align-items: flex-start; flex-direction: column; gap: 18px; }.session-stats { padding: 0; border: 0; text-align: left; }.toast { right: 16px; left: 16px; top: 75px; }.chart-panel { min-height: 350px; }.price-chart { height: 220px; }.bot-stats.wide { grid-template-columns: repeat(3, 1fr); }.pagination { flex-direction: column; gap: 10px; } }
-@media (max-width: 440px) { .stats-grid { grid-template-columns: 1fr; }.top-actions { gap: 6px; }.balance strong { font-size: 12px; }.balance span { display: none; }.page-content { padding-left: 12px; padding-right: 12px; }.panel, .bot-card, .quick-card { padding: 16px; } }
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 95;
+  animation: fadeIn 0.2s ease;
+}
+
+.page-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 28px;
+  color: #64748b;
+  font-size: 12px;
+  user-select: none;
+}
+
+@media (max-width: 1050px) {
+  .sidebar { width: 215px; }
+  .page-content { padding-left: 22px; padding-right: 22px; }
+  .topbar, .ticker { padding-left: 22px; padding-right: 22px; }
+  .bot-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 760px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: -280px;
+    width: 280px;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    z-index: 100;
+    transition: left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 15px 0 35px rgba(0, 0, 0, 0.8);
+  }
+  .sidebar.open {
+    left: 0;
+  }
+  .menu-button { display: block; }
+  .topbar {
+    padding: 0 12px;
+    gap: 8px;
+    justify-content: space-between;
+  }
+  .crumb { display: none; }
+  .refresh { display: none; }
+  .top-actions {
+    gap: 6px;
+    margin-left: auto;
+  }
+  .hide-mobile {
+    display: none !important;
+  }
+  .topbar-user-pill {
+    padding: 3px 6px;
+    gap: 4px;
+  }
+  .user-email-text {
+    display: none;
+  }
+  .topbar-signout-btn {
+    display: none;
+  }
+  .balance {
+    padding: 4px 8px;
+    border: 1px solid #1c2e2a;
+    border-radius: 6px;
+    background: #0f1c1a;
+    gap: 4px;
+    align-items: center;
+  }
+  .balance span {
+    display: none;
+  }
+  .balance strong {
+    font-size: 13px;
+  }
+  .ticker { padding: 0 14px; }
+  .page-content { padding: 20px 14px 50px; }
+  .page-header { align-items: flex-start; flex-direction: column; }
+  .page-header .primary, .page-header .secondary { width: 100%; }
+  .stats-grid, .record-summary { grid-template-columns: repeat(2, 1fr); }
+  .grid-2, .builder-grid, .signal-layout, .bulk-grid, .trade-layout { grid-template-columns: 1fr; }
+  .bot-grid, .quick-grid, .settings-grid { grid-template-columns: 1fr; }
+  .record-summary { grid-template-columns: 1fr; }
+  .apex-banner { align-items: flex-start; flex-direction: column; gap: 20px; }
+  .apex-score { padding: 16px 0 0; border-top: 1px solid #5c4829; border-left: 0; width: 100%; text-align: left; }
+  .session-panel { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .session-stats { padding: 0; border: 0; text-align: left; }
+  .toast { right: 14px; left: 14px; top: 75px; }
+  .chart-panel { min-height: 320px; }
+  .price-chart { height: 200px; }
+  .bot-stats.wide { grid-template-columns: repeat(3, 1fr); }
+  .pagination {
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .page-buttons {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 440px) {
+  .stats-grid { grid-template-columns: 1fr; }
+  .top-actions { gap: 4px; }
+  .balance strong { font-size: 12px; }
+  .balance span { display: none; }
+  .page-content { padding-left: 10px; padding-right: 10px; }
+  .panel, .bot-card, .quick-card { padding: 14px; }
+}
 
 /* Deriv Demo vs Real & Safety Badges */
 .deriv-status-badge.demo { border: 1px solid #1e5a52; color: #2dd4bf; background: #0c2723; }
@@ -1087,6 +1205,40 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   }
 }
 
+@media (max-width: 640px) {
+  .dtrader-topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+  .dtrader-topbar-left {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .dtrader-topbar-left .dtrader-asset-picker {
+    flex: 1;
+  }
+  .dtrader-topbar-left .dtrader-asset-btn {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .dtrader-topbar-right {
+    width: 100%;
+    justify-content: space-between;
+    border-top: 1px solid #162925;
+    padding-top: 8px;
+  }
+  .dtrader-account-card {
+    align-items: flex-start;
+  }
+  .dtrader-dropdown-menu {
+    width: 100%;
+    left: 0;
+    right: 0;
+  }
+}
+
 /* Left / Center Financial Chart Panel */
 .dtrader-chart-panel {
   position: relative;
@@ -1192,6 +1344,46 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   width: 100%;
   height: 100%;
   display: flex;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Floating Zoom Indicator Badge */
+.dtrader-zoom-pill {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(13, 27, 24, 0.94);
+  border: 1px solid #2dd4bf;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  color: #5eead4;
+  font-family: 'DM Mono', monospace;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  z-index: 25;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.dtrader-zoom-pill button {
+  background: #173b34;
+  border: 1px solid #2d6b5e;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.dtrader-zoom-pill button:hover {
+  background: #1e4d44;
+  color: #5eead4;
 }
 
 .dtrader-svg {
@@ -1349,34 +1541,35 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   z-index: 10;
 }
 
-.dtrader-zoom-pill {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(13, 24, 22, 0.9);
-  border: 1px solid #1e3631;
-  border-radius: 20px;
-  padding: 4px 8px;
-  backdrop-filter: blur(6px);
-}
-
-.zoom-btn {
-  width: 26px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: 50%;
-  color: #cbd5e1;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.zoom-btn:hover {
-  background: #173630;
-  color: #2dd4bf;
+@media (max-width: 768px) {
+  .dtrader-chart-panel {
+    min-height: 320px;
+    height: 360px;
+  }
+  .dtrader-y-axis {
+    width: 52px;
+  }
+  .dtrader-svg {
+    width: calc(100% - 52px);
+  }
+  .dtrader-floating-callout {
+    right: 58px;
+    padding: 5px 8px;
+    min-width: 100px;
+  }
+  .dtrader-floating-callout .callout-price {
+    font-size: 13px;
+  }
+  .dtrader-left-toolbar {
+    left: 8px;
+    bottom: 10px;
+    padding: 4px 3px;
+    gap: 4px;
+  }
+  .dtrader-tool-btn {
+    width: 28px;
+    height: 28px;
+  }
 }
 
 /* Right Execution Ticket Panel */

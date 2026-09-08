@@ -57,6 +57,17 @@ function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const deriv = useDerivConnection();
 
+  // Prevent background scrolling when mobile sidebar is open
+  useEffect(() => {
+    if (mobileNav) {
+      const orig = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = orig;
+      };
+    }
+  }, [mobileNav]);
+
   const derivConnected = deriv.authState === 'connected' && deriv.account !== null;
   const isDerivReal = derivConnected && !deriv.account?.is_virtual;
   const isDerivDemo = derivConnected && Boolean(deriv.account?.is_virtual);
@@ -749,6 +760,13 @@ function App() {
           </div>
         </div>
       </aside>
+      {mobileNav && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setMobileNav(false)}
+          aria-hidden="true"
+        />
+      )}
 
       <main className="main">
         <header className="topbar">
@@ -778,7 +796,7 @@ function App() {
             {isDerivDemo && linkedRealAccount && (
               <button
                 type="button"
-                className="arm-action-btn switch-real"
+                className="arm-action-btn switch-real hide-mobile"
                 onClick={() => void handleDerivSwitchAccount(linkedRealAccount.loginid)}
                 title={`Switch active trading account to Real (${linkedRealAccount.loginid})`}
               >
@@ -786,7 +804,7 @@ function App() {
               </button>
             )}
             {deriv.accounts.length > 1 && (
-              <div className="topbar-account-switch">
+              <div className="topbar-account-switch hide-mobile">
                 <Wallet size={12} />
                 <select
                   value={deriv.account?.loginid || ''}
@@ -803,7 +821,7 @@ function App() {
             {derivConnected && (
               <button
                 type="button"
-                className="topbar-disconnect-btn"
+                className="topbar-disconnect-btn hide-mobile"
                 onClick={handleDerivDisconnect}
                 title="Disconnect Deriv account"
               >
@@ -1550,7 +1568,99 @@ function TradeTable({ trades, pageSize = 8 }: { trades: Trade[]; pageSize?: numb
   const totalPages = Math.ceil(trades.length / pageSize);
   const current = trades.slice(page * pageSize, page * pageSize + pageSize);
   if (!trades.length) return <EmptyState title="No trades yet" text="Your executed trades will appear here with their final result." />;
-  return <><div className="table-wrap"><table><thead><tr><th>Instrument</th><th>Direction</th><th>Stake</th><th>Result</th><th>P/L</th><th>Source</th><th>When</th></tr></thead><tbody>{current.map((trade) => <tr key={trade.id}><td><b>{trade.instrument.replace('Volatility ', '')}</b></td><td><span className={trade.direction === 'CALL' ? 'direction call-text' : 'direction put-text'}>{trade.direction}</span></td><td>{money(Number(trade.stake))}</td><td><span className={trade.result === 'won' ? 'result won' : trade.result === 'lost' ? 'result lost' : 'result pending'}>{trade.result}</span></td><td className={trade.profit >= 0 ? 'positive' : 'negative'}>{money(Number(trade.profit))}</td><td>{trade.bot_name ?? trade.source.replace('_', ' ')}</td><td className="muted">{timeAgo(trade.created_at)}</td></tr>)}</tbody></table></div>{totalPages > 1 && <div className="pagination"><span className="page-info">Page {page + 1} of {totalPages} · {trades.length} trades</span><div className="page-buttons"><button className="page-btn" disabled={page === 0} onClick={() => setPage(page - 1)}>Prev</button>{Array.from({ length: totalPages }, (_, i) => <button key={i} className={page === i ? 'page-btn active' : 'page-btn'} onClick={() => setPage(i)}>{i + 1}</button>)}<button className="page-btn" disabled={page === totalPages - 1} onClick={() => setPage(page + 1)}>Next</button></div></div>}</>;
+
+  // Smart windowed pagination: at most 5 items displayed to prevent mobile overflow
+  const getPageNumbers = () => {
+    if (totalPages <= 5) {
+      return Array.from({ length: totalPages }, (_, i) => i);
+    }
+    const pages: (number | string)[] = [];
+    if (page <= 2) {
+      pages.push(0, 1, 2, '...', totalPages - 1);
+    } else if (page >= totalPages - 3) {
+      pages.push(0, '...', totalPages - 3, totalPages - 2, totalPages - 1);
+    } else {
+      pages.push(0, '...', page, '...', totalPages - 1);
+    }
+    return pages;
+  };
+
+  return (
+    <>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Instrument</th>
+              <th>Direction</th>
+              <th>Stake</th>
+              <th>Result</th>
+              <th>P/L</th>
+              <th>Source</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {current.map((trade) => (
+              <tr key={trade.id}>
+                <td><b>{trade.instrument.replace('Volatility ', '')}</b></td>
+                <td>
+                  <span className={trade.direction === 'CALL' ? 'direction call-text' : 'direction put-text'}>
+                    {trade.direction}
+                  </span>
+                </td>
+                <td>{money(Number(trade.stake))}</td>
+                <td>
+                  <span className={trade.result === 'won' ? 'result won' : trade.result === 'lost' ? 'result lost' : 'result pending'}>
+                    {trade.result}
+                  </span>
+                </td>
+                <td className={trade.profit >= 0 ? 'positive' : 'negative'}>{money(Number(trade.profit))}</td>
+                <td>{trade.bot_name ?? trade.source.replace('_', ' ')}</td>
+                <td className="muted">{timeAgo(trade.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {totalPages > 1 && (
+        <div className="pagination">
+          <span className="page-info">
+            Page {page + 1} of {totalPages} · {trades.length} trades
+          </span>
+          <div className="page-buttons">
+            <button
+              className="page-btn"
+              disabled={page === 0}
+              onClick={() => setPage(page - 1)}
+            >
+              Prev
+            </button>
+            {getPageNumbers().map((p, idx) =>
+              typeof p === 'string' ? (
+                <span key={`ellipsis-${idx}`} className="page-ellipsis">…</span>
+              ) : (
+                <button
+                  key={p}
+                  className={page === p ? 'page-btn active' : 'page-btn'}
+                  onClick={() => setPage(p)}
+                >
+                  {p + 1}
+                </button>
+              )
+            )}
+            <button
+              className="page-btn"
+              disabled={page === totalPages - 1}
+              onClick={() => setPage(page + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 function Settings({
