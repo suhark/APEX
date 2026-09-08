@@ -120,7 +120,7 @@ export function AuthModal({ supabase, onAuthSuccess }: AuthModalProps) {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="auth-form">
+        <form onSubmit={handleSubmit} className="auth-form" autoComplete="off">
           <label className="auth-label">
             Email Address
             <div className="auth-input-wrap">
@@ -130,7 +130,7 @@ export function AuthModal({ supabase, onAuthSuccess }: AuthModalProps) {
                 placeholder="name@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
+                autoComplete="off"
                 required
                 disabled={loading}
               />
@@ -146,7 +146,7 @@ export function AuthModal({ supabase, onAuthSuccess }: AuthModalProps) {
                 placeholder={mode === 'signup' ? 'Create a secure password (6+ chars)' : 'Enter your password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                autoComplete="new-password"
                 required
                 disabled={loading}
               />

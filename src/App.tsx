@@ -5,6 +5,7 @@ import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
 import { executeTrade, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
 import { AuthModal } from './auth-modal';
+import { ManualTrader } from './manual-trader';
 
 const DEFAULT_APP_ID = '34khJS0KsSP29i9G8kCiJ';
 
@@ -177,12 +178,6 @@ function App() {
     setBots(botsData);
     setTrades(tradesData);
     setLoading(false);
-
-    // Auto-reconnect saved Deriv token for this user if present
-    const savedToken = localStorage.getItem(`apex_deriv_token_${currentUser.id}`);
-    if (savedToken && deriv.authState === 'disconnected') {
-      void handleDerivConnect(savedToken, DEFAULT_APP_ID);
-    }
   };
 
   useEffect(() => {
@@ -283,13 +278,23 @@ function App() {
         localStorage.setItem(`apex_deriv_token_${userRef.current.id}`, token);
       }
       sessionStartingBalRef.current = result.account.balance;
+
+      // CRITICAL SAFETY: Stop all active running bots & abort pending trade queues
+      try {
+        await supabase.from('trading_bots').update({ active: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      } catch (e) {
+        console.warn('Could not batch pause bots in DB:', e);
+      }
+      setBots((current) => current.map((b) => ({ ...b, active: false })));
+      botPendingTradesRef.current.clear();
+
       await updateWorkspace({
         deriv_connected: true,
         deriv_loginid: result.account.loginid,
         deriv_is_virtual: result.account.is_virtual,
         deriv_balance: result.account.balance,
       });
-      setNotice(`Connected to Deriv (${result.account.loginid}) [${result.account.is_virtual ? 'Demo' : 'Real'}]. Live trading stays disarmed for safety.`);
+      setNotice(`Connected to Deriv (${result.account.loginid}) [${result.account.is_virtual ? 'Demo' : 'Real'}]. All active bots have been stopped for safety — you can restart them manually.`);
     } else {
       setNotice(`Could not connect: ${result.error ?? 'Unknown error'}. Check your API token.`);
     }
@@ -881,7 +886,21 @@ function PageView({
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
   if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} />;
   if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} />;
-  if (page === 'manual') return <Manual tick={tick} runTrade={runTrade} derivConnected={derivConnected} isDerivReal={isDerivReal} />;
+  if (page === 'manual') {
+    return (
+      <ManualTrader
+        tick={tick}
+        runTrade={runTrade}
+        derivConnected={derivConnected}
+        isDerivReal={isDerivReal}
+        derivAccount={deriv.account}
+        workspaceBalance={workspace.balance}
+        onSwitchAccount={onDerivSwitchAccount}
+        linkedRealAccount={deriv.accounts.find((a) => !a.is_virtual)}
+        linkedDemoAccount={deriv.accounts.find((a) => a.is_virtual)}
+      />
+    );
+  }
   if (page === 'builder') return <Builder setNotice={setNotice} />;
   if (page === 'signals') return <Signals tick={tick} runTrade={runTrade} />;
   if (page === 'bulk') return <Bulk tick={tick} runTrade={runTrade} />;
@@ -1033,9 +1052,7 @@ function Bots({ bots, toggleBot, runTrade, trades }: { bots: BotRow[]; toggleBot
   );
 }
 
-function Manual({ tick, runTrade, derivConnected, isDerivReal }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string }) => Promise<void>; derivConnected: boolean; isDerivReal: boolean }) { const [instrument, setInstrument] = useState(instruments[1]); const [stake, setStake] = useState(10); const index = instruments.indexOf(instrument); const pillLabel = derivConnected ? (isDerivReal ? 'Deriv live' : 'Deriv demo') : 'Demo execution'; return <><PageHeader eyebrow="Direct execution" title="Manual trader" description={derivConnected ? (isDerivReal ? "Connected to a real Deriv account. Trades will execute with real funds." : "Connected to a Deriv demo account. Trades execute with virtual funds.") : "Place a synthetic contract with a live price view and immediate result feedback."} action={<div className={derivConnected ? (isDerivReal ? 'live-pill' : 'demo-pill') : 'demo-pill'}><i className="live-dot" /> {pillLabel}</div>} /><div className="trade-layout"><section className="panel chart-panel"><div className="chart-head"><div><span className="eyebrow">{instrument}</span><h2>{priceFor(index, tick).toFixed(2)} <em className="positive">+0.42%</em></h2></div><span className="chart-time">Live <Clock3 size={14} /></span></div><PriceChart tick={tick} index={index} /></section><section className="panel ticket"><div className="eyebrow">Trade ticket</div><h2>Choose a direction</h2><label>Instrument<select value={instrument} onChange={(event) => setInstrument(event.target.value)}>{instruments.map((item) => <option key={item}>{item}</option>)}</select></label><label>Stake amount<div className="input-prefix"><span>$</span><input type="number" min="1" value={stake} onChange={(event) => setStake(Number(event.target.value))} /></div></label><div className="stake-row">{[5, 10, 25, 50].map((amount) => <button key={amount} className={stake === amount ? 'selected' : ''} onClick={() => setStake(amount)}>${amount}</button>)}</div><div className="payout"><span>Potential payout</span><strong>{money(stake * 1.78)}</strong></div><div className="direction-buttons"><button className="call" onClick={() => void runTrade({ instrument, direction: 'CALL', stake, source: 'manual' })}><ArrowUpRight size={19} /> Buy CALL</button><button className="put" onClick={() => void runTrade({ instrument, direction: 'PUT', stake, source: 'manual' })}><ArrowDownRight size={19} /> Buy PUT</button></div><small className="muted">{derivConnected ? 'Trades execute on Deriv. Contract settles after 5 ticks.' : 'Results are simulated for testing. Connect Deriv for live trading.'}</small></section></div></>; }
 
-function PriceChart({ tick, index }: { tick: number; index: number }) { const points = Array.from({ length: 30 }, (_, item) => { const x = (item / 29) * 100; const y = 52 - Math.sin((item + tick) / 3.7 + index) * 18 - Math.cos(item / 5) * 7; return `${x},${y}`; }).join(' '); return <div className="price-chart"><svg viewBox="0 0 100 60" preserveAspectRatio="none"><defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#2dd4bf" stopOpacity=".3" /><stop offset="100%" stopColor="#2dd4bf" stopOpacity="0" /></linearGradient></defs><polygon points={`0,60 ${points} 100,60`} fill="url(#chartFill)" /><polyline points={points} fill="none" stroke="#2dd4bf" strokeWidth="1.4" /></svg><div className="chart-labels"><span>60m ago</span><span>30m</span><span>Now</span></div></div>; }
 
 function Builder({ setNotice }: { setNotice: (notice: string) => void }) { const [blocks, setBlocks] = useState(['Price crosses moving average', 'Confirm momentum direction']); const options = ['Price crosses moving average', 'RSI leaves oversold zone', 'Three candles agree', 'Volatility is below threshold']; return <><PageHeader eyebrow="No-code strategy lab" title="Bot builder" description="Assemble readable conditions, choose money management, and test the idea in your demo workspace." action={<button className="primary" onClick={() => setNotice('Strategy saved to your bot library.') }><Check size={16} /> Save strategy</button>} /><div className="builder-grid"><section className="panel"><div className="panel-title"><div><span className="eyebrow">When all conditions are true</span><h2>Entry conditions</h2></div><span className="count-badge">{blocks.length} blocks</span></div>{blocks.map((block, index) => <div className="condition" key={`${block}-${index}`}><div className="drag">⋮⋮</div><div><small>Condition {index + 1}</small><strong>{block}</strong></div><button className="icon-button" onClick={() => setBlocks((current) => current.filter((_, item) => item !== index))}><Trash2 size={15} /></button></div>)}<div className="add-blocks">{options.filter((option) => !blocks.includes(option)).map((option) => <button key={option} onClick={() => setBlocks((current) => [...current, option])}><Plus size={14} /> {option}</button>)}</div></section><section className="panel"><span className="eyebrow">Money management</span><h2>Execution rules</h2><label>Stake per trade<div className="input-prefix"><span>$</span><input defaultValue="10" /></div></label><label>Max trades per session<input type="number" defaultValue="8" /></label><label>Direction preference<select defaultValue="Both directions"><option>Both directions</option><option>CALL only</option><option>PUT only</option></select></label><div className="backtest"><div><BarChart3 size={18} /><div><strong>Ready to backtest</strong><span>Use your conditions against synthetic price history.</span></div></div><button className="secondary" onClick={() => setNotice('Backtest complete: 68% win rate across 124 synthetic trades.')}>Run backtest</button></div></section></div></>; }
 

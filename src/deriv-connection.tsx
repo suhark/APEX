@@ -149,6 +149,9 @@ export function DerivConnectionPanel({
             placeholder="Paste your Deriv API token (pat_...)"
             onChange={(e) => setToken(e.target.value)}
             disabled={connecting}
+            autoComplete="off"
+            name="deriv_api_token_no_fill"
+            spellCheck={false}
           />
           <button type="button" className="toggle-visibility" onClick={() => setShowToken(!showToken)}>
             {showToken ? 'Hide' : 'Show'}

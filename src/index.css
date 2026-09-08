@@ -846,3 +846,933 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   color: #34d399;
   border: 1px solid rgba(52, 211, 153, 0.3);
 }
+
+/* ==========================================================================
+   DERIV DTRADER MANUAL TRADING TERMINAL & CHART
+   ========================================================================== */
+.dtrader-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+/* Top Bar: Asset Selector & Account Status */
+.dtrader-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #0d1716;
+  border: 1px solid #1a2e2b;
+  border-radius: 10px;
+}
+
+.dtrader-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dtrader-add-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #112421;
+  border: 1px solid #1f3c36;
+  border-radius: 8px;
+  color: #f1f5f9;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dtrader-add-btn:hover {
+  background: #163630;
+  border-color: #2dd4bf;
+  color: #2dd4bf;
+}
+
+.dtrader-asset-picker {
+  position: relative;
+}
+
+.dtrader-asset-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: #0f201d;
+  border: 1px solid #1f3c36;
+  border-radius: 8px;
+  color: #f1f5f9;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.dtrader-asset-btn:hover {
+  border-color: #2dd4bf;
+}
+
+.dtrader-asset-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #1f3b35;
+  border: 1px solid #2d5a50;
+  border-radius: 5px;
+  padding: 2px 6px;
+  line-height: 1.1;
+}
+
+.dtrader-asset-badge span {
+  font-size: 11px;
+  font-weight: 800;
+  color: #5eead4;
+}
+
+.dtrader-asset-badge span.sub {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+.dtrader-asset-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.dtrader-asset-info strong {
+  font-size: 13px;
+  color: #f8fafc;
+}
+
+.dtrader-trade-type {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.dtrader-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 260px;
+  background: #0b1715;
+  border: 1px solid #1f3c36;
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.dtrader-dropdown-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  border-bottom: 1px solid #162925;
+}
+
+.dtrader-dropdown-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dtrader-dropdown-item:hover,
+.dtrader-dropdown-item.active {
+  background: #142e29;
+  color: #2dd4bf;
+}
+
+.dtrader-dropdown-item .inst-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 5px;
+  background: #183832;
+  border-radius: 4px;
+  color: #5eead4;
+}
+
+.dtrader-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dtrader-account-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.dtrader-acc-type {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dtrader-acc-type.demo {
+  color: #f59e0b;
+}
+
+.dtrader-acc-type.real {
+  color: #34d399;
+}
+
+.dtrader-acc-balance {
+  font-size: 15px;
+  font-weight: 800;
+  color: #f1f5f9;
+  font-family: 'DM Mono', monospace;
+}
+
+.dtrader-switch-real-btn {
+  background: #ef4444;
+  border: none;
+  border-radius: 20px;
+  padding: 6px 14px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dtrader-switch-real-btn:hover {
+  background: #dc2626;
+}
+
+.dtrader-switch-demo-btn {
+  background: #f59e0b;
+  border: none;
+  border-radius: 20px;
+  padding: 6px 14px;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dtrader-switch-demo-btn:hover {
+  background: #d97706;
+}
+
+/* Main Terminal Grid: Chart + Ticket */
+.dtrader-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .dtrader-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Left / Center Financial Chart Panel */
+.dtrader-chart-panel {
+  position: relative;
+  background: #091413;
+  border: 1px solid #1a2f2b;
+  border-radius: 12px;
+  min-height: 480px;
+  height: 520px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dtrader-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid #132724;
+  background: rgba(13, 23, 22, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 5;
+}
+
+.dtrader-chart-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.dtrader-chart-title b {
+  color: #cbd5e1;
+}
+
+.dtrader-chart-spot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.dtrader-chart-spot strong {
+  font-size: 16px;
+  font-weight: 800;
+  color: #f8fafc;
+  font-family: 'DM Mono', monospace;
+}
+
+/* Left Floating Toolbar */
+.dtrader-left-toolbar {
+  position: absolute;
+  left: 14px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(13, 24, 22, 0.85);
+  border: 1px solid #1e3631;
+  border-radius: 20px;
+  padding: 6px 4px;
+  z-index: 10;
+  backdrop-filter: blur(6px);
+}
+
+.dtrader-tool-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  transition: all 0.15s ease;
+}
+
+.dtrader-tool-btn:hover {
+  background: #173630;
+  color: #2dd4bf;
+}
+
+.dtrader-tool-btn.active {
+  background: #173630;
+  color: #2dd4bf;
+}
+
+.dtrader-tool-btn.interval {
+  font-family: 'DM Mono', monospace;
+  color: #2dd4bf;
+  cursor: default;
+}
+
+/* SVG Chart Area */
+.dtrader-svg-wrapper {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+}
+
+.dtrader-svg {
+  width: calc(100% - 68px);
+  height: 100%;
+  display: block;
+}
+
+/* Floating Live Price Callout Badge */
+.dtrader-floating-callout {
+  position: absolute;
+  background: rgba(11, 23, 21, 0.95);
+  border: 1px solid #23473f;
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.6);
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+  min-width: 130px;
+}
+
+.callout-pct {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.callout-pct.positive {
+  background: #059669;
+  color: #ffffff;
+}
+
+.callout-pct.negative {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.callout-price {
+  font-size: 16px;
+  font-weight: 800;
+  color: #f1f5f9;
+  font-family: 'DM Mono', monospace;
+}
+
+.callout-time {
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: 'DM Mono', monospace;
+}
+
+.callout-crosshair {
+  position: absolute;
+  top: 100%;
+  right: 18px;
+  width: 1px;
+  height: 24px;
+  border-right: 1px dashed #2dd4bf;
+}
+
+/* In-Chart Contract Badge (5/5 ticks) */
+.dtrader-tick-counter-badge {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  z-index: 16;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.dtrader-tick-counter-badge.running {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.dtrader-tick-counter-badge.won {
+  background: #059669;
+  color: #ffffff;
+}
+
+.dtrader-tick-counter-badge.lost {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.dtrader-tick-counter-badge b {
+  font-size: 13px;
+  font-family: 'DM Mono', monospace;
+}
+
+/* Right Y-Axis */
+.dtrader-y-axis {
+  position: relative;
+  width: 68px;
+  height: 100%;
+  border-left: 1px solid #162a26;
+  background: #0b1716;
+}
+
+.dtrader-axis-label {
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: #64748b;
+  font-family: 'DM Mono', monospace;
+}
+
+/* High-Contrast Live Price Badge on Axis */
+.dtrader-live-price-badge {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-50%);
+  background: #000000;
+  border: 1px solid #f87171;
+  border-radius: 4px;
+  padding: 3px 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+.dtrader-live-price-badge b {
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffffff;
+  font-family: 'DM Mono', monospace;
+}
+
+.dtrader-live-price-badge .badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #f87171;
+}
+
+/* Bottom Controls */
+.dtrader-bottom-controls {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+.dtrader-zoom-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(13, 24, 22, 0.9);
+  border: 1px solid #1e3631;
+  border-radius: 20px;
+  padding: 4px 8px;
+  backdrop-filter: blur(6px);
+}
+
+.zoom-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.zoom-btn:hover {
+  background: #173630;
+  color: #2dd4bf;
+}
+
+/* Right Execution Ticket Panel */
+.dtrader-ticket-panel {
+  background: #0d1716;
+  border: 1px solid #1a2f2b;
+  border-radius: 12px;
+  padding: 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dtrader-ticket-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dtrader-help-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+}
+
+.dtrader-help-link:hover {
+  color: #2dd4bf;
+}
+
+/* Direction Tabs (Rise / Fall) */
+.dtrader-direction-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.direction-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid #1e3530;
+  background: #071110;
+  color: #94a3b8;
+  transition: all 0.15s ease;
+}
+
+.direction-tab.rise:hover,
+.direction-tab.rise.active {
+  background: #064e3b;
+  border-color: #10b981;
+  color: #34d399;
+}
+
+.direction-tab.fall:hover,
+.direction-tab.fall.active {
+  background: #4c1d1d;
+  border-color: #ef4444;
+  color: #f87171;
+}
+
+/* Form Cards: Duration & Stake */
+.dtrader-card-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #081211;
+  border: 1px solid #192e2a;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.field-label {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.field-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-currency {
+  font-size: 16px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.field-input-row input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #f8fafc;
+  font-size: 17px;
+  font-weight: 800;
+  font-family: 'DM Mono', monospace;
+  outline: none;
+}
+
+.field-unit {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.quick-ticks-row,
+.quick-stake-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.mini-pill {
+  padding: 3px 8px;
+  background: #0e1e1b;
+  border: 1px solid #1d3833;
+  border-radius: 4px;
+  color: #cbd5e1;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mini-pill:hover,
+.mini-pill.active {
+  background: #14352f;
+  border-color: #2dd4bf;
+  color: #2dd4bf;
+}
+
+/* Allow Equals Toggle */
+.dtrader-toggle-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #081211;
+  border: 1px solid #192e2a;
+  border-radius: 8px;
+}
+
+.toggle-label-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.toggle-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e2e8f0;
+  border-bottom: 1px dashed #64748b;
+  width: fit-content;
+}
+
+.toggle-label-wrap small {
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+/* Modern Switch Toggle */
+.dtrader-switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.dtrader-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.dtrader-switch .slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #1f3732;
+  border-radius: 24px;
+  transition: 0.2s;
+}
+
+.dtrader-switch .slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background: #f8fafc;
+  border-radius: 50%;
+  transition: 0.2s;
+}
+
+.dtrader-switch input:checked + .slider {
+  background: #10b981;
+}
+
+.dtrader-switch input:checked + .slider:before {
+  transform: translateX(18px);
+}
+
+/* Big Action Button */
+.dtrader-buy-action-btn {
+  width: 100%;
+  height: 60px;
+  border: none;
+  border-radius: 30px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.dtrader-buy-action-btn.rise {
+  background: linear-gradient(135deg, #059669, #10b981);
+  color: #ffffff;
+}
+
+.dtrader-buy-action-btn.rise:hover:not(:disabled) {
+  background: linear-gradient(135deg, #047857, #059669);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+}
+
+.dtrader-buy-action-btn.fall {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: #ffffff;
+}
+
+.dtrader-buy-action-btn.fall:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b91c1c, #dc2626);
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+}
+
+.dtrader-buy-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.buy-headline {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.buy-payout {
+  font-size: 12px;
+  opacity: 0.95;
+}
+
+.buy-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* Active Contract Card */
+.contract-status-card {
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid;
+}
+
+.contract-status-card.running {
+  background: rgba(2, 132, 199, 0.12);
+  border-color: rgba(2, 132, 199, 0.35);
+}
+
+.contract-status-card.won {
+  background: rgba(5, 150, 105, 0.14);
+  border-color: rgba(5, 150, 105, 0.4);
+}
+
+.contract-status-card.lost {
+  background: rgba(220, 38, 38, 0.14);
+  border-color: rgba(220, 38, 38, 0.4);
+}
+
+.contract-status-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.contract-status-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.contract-status-body small {
+  display: block;
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.contract-status-body strong {
+  font-size: 13px;
+  color: #f8fafc;
+  font-family: 'DM Mono', monospace;
+}
+
+.dtrader-ticket-footer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.4;
+  border-top: 1px solid #162925;
+  padding-top: 12px;
+}
+
+/* How to Trade Modal */
+.dtrader-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 12, 11, 0.85);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+}
+
+.dtrader-modal-card {
+  background: #0d1716;
+  border: 1px solid #1a2f2b;
+  border-radius: 12px;
+  max-width: 440px;
+  width: 100%;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dtrader-modal-card .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dtrader-modal-card .modal-header h3 {
+  margin: 0;
+  font-size: 17px;
+  color: #f8fafc;
+}
+
+.dtrader-modal-card .modal-header button {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.dtrader-modal-card .modal-body {
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dtrader-modal-card .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
