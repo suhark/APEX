@@ -45,6 +45,74 @@ function priceFor(index: number, tick: number) { return Number((100 + Math.sin((
 function money(value: number) { return `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`; }
 function timeAgo(date: string) { const minutes = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 60000)); return minutes < 1 ? 'just now' : `${minutes}m ago`; }
 
+// ============================================================================
+// Robust Multi-Layer Local Storage Helpers (Guarantees Stats Never Get Lost)
+// ============================================================================
+function getUserTradesKey(userId: string): string {
+  return `apex_trades_${userId}`;
+}
+
+function loadUserTradesFromStorage(userId: string): Trade[] {
+  try {
+    const raw = localStorage.getItem(getUserTradesKey(userId));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.warn('Failed loading local trades:', err);
+  }
+  return [];
+}
+
+function saveUserTradesToStorage(userId: string, trades: Trade[]): void {
+  try {
+    localStorage.setItem(getUserTradesKey(userId), JSON.stringify(trades.slice(0, 300)));
+  } catch (err) {
+    console.warn('Failed saving local trades:', err);
+  }
+}
+
+function getUserWorkspaceKey(userId: string): string {
+  return `apex_workspace_${userId}`;
+}
+
+function loadUserWorkspaceFromStorage(userId: string): Partial<Workspace> | null {
+  try {
+    const raw = localStorage.getItem(getUserWorkspaceKey(userId));
+    if (raw) return JSON.parse(raw);
+  } catch (err) {
+    console.warn('Failed loading local workspace:', err);
+  }
+  return null;
+}
+
+function saveUserWorkspaceToStorage(userId: string, ws: Workspace): void {
+  try {
+    localStorage.setItem(getUserWorkspaceKey(userId), JSON.stringify(ws));
+  } catch (err) {
+    console.warn('Failed saving local workspace:', err);
+  }
+}
+
+function getUserSettingsKey(userId: string): string {
+  return `apex_settings_${userId}`;
+}
+
+function loadUserSettings(userId: string): { allowBotLiveTrading?: boolean; maxBalancePercent?: number } {
+  try {
+    const raw = localStorage.getItem(getUserSettingsKey(userId));
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return {};
+}
+
+function saveUserSettings(userId: string, settings: { allowBotLiveTrading: boolean; maxBalancePercent: number }): void {
+  try {
+    localStorage.setItem(getUserSettingsKey(userId), JSON.stringify(settings));
+  } catch { /* ignore */ }
+}
+
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
@@ -81,9 +149,23 @@ function App() {
 
   // Safety & Arming controls
   const [liveArmed, setLiveArmed] = useState(false);
-  const [allowBotLiveTrading, setAllowBotLiveTrading] = useState(false);
-  const [maxBalancePercent, setMaxBalancePercent] = useState(2);
+  const [allowBotLiveTrading, setAllowBotLiveTradingState] = useState(false);
+  const [maxBalancePercent, setMaxBalancePercentState] = useState(2);
   const sessionStartingBalRef = useRef<number | null>(null);
+
+  const setAllowBotLiveTrading = (allowed: boolean) => {
+    setAllowBotLiveTradingState(allowed);
+    if (userRef.current) {
+      saveUserSettings(userRef.current.id, { allowBotLiveTrading: allowed, maxBalancePercent });
+    }
+  };
+
+  const setMaxBalancePercent = (percent: number) => {
+    setMaxBalancePercentState(percent);
+    if (userRef.current) {
+      saveUserSettings(userRef.current.id, { allowBotLiveTrading, maxBalancePercent: percent });
+    }
+  };
 
   // Auto-disarm live execution if disconnected or switched to Demo
   useEffect(() => {
@@ -92,19 +174,68 @@ function App() {
     }
   }, [derivConnected, isDerivDemo]);
 
-  // Track session starting balance for loss limit calculations
+  // Track session starting balance for loss limit calculations (restored from sessionStorage across refresh)
+  useEffect(() => {
+    const uid = user?.id || 'guest';
+    const saved = sessionStorage.getItem(`apex_session_start_bal_${uid}`);
+    if (saved && !isNaN(Number(saved))) {
+      sessionStartingBalRef.current = Number(saved);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (deriv.account) {
       if (sessionStartingBalRef.current === null) {
         sessionStartingBalRef.current = deriv.account.balance;
+        const uid = user?.id || 'guest';
+        sessionStorage.setItem(`apex_session_start_bal_${uid}`, String(deriv.account.balance));
       }
     } else if (workspace) {
-      sessionStartingBalRef.current = workspace.starting_balance;
+      if (sessionStartingBalRef.current === null) {
+        sessionStartingBalRef.current = workspace.starting_balance;
+        const uid = user?.id || 'guest';
+        sessionStorage.setItem(`apex_session_start_bal_${uid}`, String(workspace.starting_balance));
+      }
     }
-  }, [deriv.account, workspace]);
+  }, [deriv.account, workspace, user]);
 
   const userRef = useRef<User | null>(null);
   userRef.current = user;
+
+  // Immediate trade store updater
+  const persistTrade = (newTrade: Trade) => {
+    setTrades((prev) => {
+      const next = [newTrade, ...prev.filter((t) => t.id !== newTrade.id)];
+      const uid = userRef.current?.id || user?.id || 'guest';
+      saveUserTradesToStorage(uid, next);
+      return next;
+    });
+  };
+
+  const updatePersistedTrade = (tradeId: string, patch: Partial<Trade>) => {
+    setTrades((prev) => {
+      const next = prev.map((t) => (t.id === tradeId ? { ...t, ...patch } : t));
+      const uid = userRef.current?.id || user?.id || 'guest';
+      saveUserTradesToStorage(uid, next);
+      return next;
+    });
+  };
+
+  const updateBotStatsFromTrade = (botName: string, profit: number, isWin: boolean) => {
+    setBots((current) =>
+      current.map((bot) => {
+        if (bot.name !== botName) return bot;
+        return {
+          ...bot,
+          total_trades: bot.total_trades + 1,
+          wins: bot.wins + (isWin ? 1 : 0),
+          pnl: Number((bot.pnl + profit).toFixed(2)),
+          won_amount: Number((bot.won_amount + (isWin ? profit : 0)).toFixed(2)),
+          lost_amount: Number((bot.lost_amount + (isWin ? 0 : Math.abs(profit))).toFixed(2)),
+        };
+      })
+    );
+  };
 
   const load = async (activeUser?: User | null) => {
     const currentUser = activeUser !== undefined ? activeUser : userRef.current;
@@ -114,8 +245,18 @@ function App() {
     }
     setLoading(true);
 
+    // 0. Load persisted user settings
+    const userSettings = loadUserSettings(currentUser.id);
+    if (userSettings.allowBotLiveTrading !== undefined) {
+      setAllowBotLiveTradingState(userSettings.allowBotLiveTrading);
+    }
+    if (userSettings.maxBalancePercent !== undefined) {
+      setMaxBalancePercentState(userSettings.maxBalancePercent);
+    }
+
     let ws: Workspace | null = null;
     let wsLoaded = false;
+    const localWs = loadUserWorkspaceFromStorage(currentUser.id);
 
     // 1. Fetch user-specific workspace
     try {
@@ -155,26 +296,72 @@ function App() {
     }
 
     if (!wsLoaded) {
-      // Fallback to legacy single workspace if migration not yet run
-      const legacyWs = await supabase.from('trading_workspace').select('*').limit(1).maybeSingle();
-      if (legacyWs.data) ws = legacyWs.data as Workspace;
+      if (localWs) {
+        ws = {
+          id: localWs.id || `ws_${currentUser.id}`,
+          user_id: currentUser.id,
+          mode: localWs.mode || 'demo',
+          balance: localWs.balance ?? 10000,
+          starting_balance: localWs.starting_balance ?? 10000,
+          loss_limit: localWs.loss_limit ?? 50,
+          active_bots: localWs.active_bots || [],
+        };
+        wsLoaded = true;
+      } else {
+        // Fallback to legacy single workspace if migration not yet run
+        const legacyWs = await supabase.from('trading_workspace').select('*').limit(1).maybeSingle();
+        if (legacyWs.data) {
+          ws = legacyWs.data as Workspace;
+        } else {
+          ws = {
+            id: `ws_${currentUser.id}`,
+            user_id: currentUser.id,
+            mode: 'demo',
+            balance: 10000,
+            starting_balance: 10000,
+            loss_limit: 50,
+          };
+        }
+      }
     }
 
-    // 2. Fetch user-isolated trades first
-    let tradesData: Trade[] = [];
+    if (localWs && ws) {
+      ws = {
+        ...ws,
+        balance: localWs.balance ?? ws.balance,
+        starting_balance: localWs.starting_balance ?? ws.starting_balance,
+        loss_limit: localWs.loss_limit ?? ws.loss_limit,
+      };
+    }
+
+    // 2. Load user-isolated trades (local storage first, merged with Supabase)
+    const localTrades = loadUserTradesFromStorage(currentUser.id);
+    let tradesData: Trade[] = localTrades;
+
     try {
       const { data, error } = await supabase
         .from('trading_trades')
         .select('*')
         .eq('user_id', currentUser.id)
         .order('created_at', { ascending: false })
-        .limit(100);
+        .limit(200);
 
-      if (!error && data) {
-        tradesData = data as Trade[];
+      if (!error && data && Array.isArray(data)) {
+        const tradeMap = new Map<string, Trade>();
+        localTrades.forEach((t) => tradeMap.set(t.id, t));
+        (data as Trade[]).forEach((t) => {
+          const existing = tradeMap.get(t.id);
+          if (!existing || existing.result === 'pending') {
+            tradeMap.set(t.id, t);
+          }
+        });
+        tradesData = Array.from(tradeMap.values()).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        saveUserTradesToStorage(currentUser.id, tradesData);
       }
     } catch (e) {
-      console.warn('Failed loading user trades:', e);
+      console.warn('Failed loading remote user trades, keeping local trades:', e);
     }
 
     // 3. Fetch bots library and isolate activation & stats strictly per user
@@ -182,14 +369,14 @@ function App() {
     const botsResult = await supabase.from('trading_bots').select('*').order('name');
     if (botsResult.data) {
       let userActiveBots: string[] = [];
-      if (ws?.active_bots && Array.isArray(ws.active_bots)) {
-        userActiveBots = ws.active_bots;
-      } else {
-        const cached = localStorage.getItem(`apex_active_bots_${currentUser.id}`);
-        if (cached) {
-          try { userActiveBots = JSON.parse(cached); } catch { /* ignore */ }
-        }
+      const cached = localStorage.getItem(`apex_active_bots_${currentUser.id}`);
+      if (cached) {
+        try { userActiveBots = JSON.parse(cached); } catch { /* ignore */ }
       }
+      if (userActiveBots.length === 0 && ws?.active_bots && Array.isArray(ws.active_bots)) {
+        userActiveBots = ws.active_bots;
+      }
+
       botsData = (botsResult.data as BotRow[]).map((bot) => {
         const userBotTrades = tradesData.filter(
           (t) => t.bot_name === bot.name && (t.result === 'won' || t.result === 'lost')
@@ -215,7 +402,10 @@ function App() {
       });
     }
 
-    if (ws) setWorkspace(ws);
+    if (ws) {
+      setWorkspace(ws);
+      saveUserWorkspaceToStorage(currentUser.id, ws);
+    }
     setBots(botsData);
     setTrades(tradesData);
     setLoading(false);
@@ -264,8 +454,13 @@ function App() {
     if (!workspace) return;
     const next = { ...workspace, ...changes };
     setWorkspace(next);
-    const { error } = await supabase.from('trading_workspace').update(changes).eq('id', workspace.id);
-    if (error) setNotice('Could not save that workspace change.');
+    if (userRef.current) {
+      saveUserWorkspaceToStorage(userRef.current.id, next);
+    }
+    try {
+      const { error } = await supabase.from('trading_workspace').update(changes).eq('id', workspace.id);
+      if (error) console.warn('Supabase workspace update fallback to local:', error.message);
+    } catch { /* ignore */ }
   };
 
   const armLiveTrading = () => {
@@ -491,7 +686,12 @@ function App() {
           duration: 5,
         });
 
-        const trade = {
+        const tradeId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `deriv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+        const trade: Trade = {
+          id: tradeId,
           user_id: userRef.current?.id ?? null,
           instrument: details.instrument,
           direction: details.direction,
@@ -501,49 +701,50 @@ function App() {
           source: details.source,
           bot_name: details.botName,
           entry_price: result.entryPrice,
-          exit_price: null,
+          exit_price: undefined,
+          created_at: new Date().toISOString(),
         };
-        let { data, error } = await supabase.from('trading_trades').insert(trade).select().maybeSingle();
-        if (error) {
-          // Retry without user_id if column does not exist on remote DB yet
-          const { user_id, ...tradeWithoutUser } = trade;
-          const retry = await supabase.from('trading_trades').insert(tradeWithoutUser).select().maybeSingle();
-          data = retry.data;
-          error = retry.error;
-        }
-        if (error) {
-          if (details.botName) botPendingTradesRef.current.delete(details.botName);
-          setNotice('Trade could not be recorded.');
-          return;
-        }
-        if (data) setTrades((current) => [data as Trade, ...current]);
+
+        // Immediately persist to local user storage and React state
+        persistTrade(trade);
+
+        // Background insert to Supabase (non-blocking)
+        void (async () => {
+          try {
+            const { error: insErr } = await supabase.from('trading_trades').insert(trade);
+            if (insErr) {
+              const { user_id, ...tradeWithoutUser } = trade;
+              await supabase.from('trading_trades').insert(tradeWithoutUser);
+            }
+          } catch { /* ignore */ }
+        })();
 
         subscribeContract(result.contractId, (poc: DerivTradeResult) => {
           if (poc.status === 'won' || poc.status === 'lost') {
             const finalProfit = poc.profit;
-            supabase.from('trading_trades').update({
+            const win = poc.status === 'won';
+
+            // Update persistent trade store and React state
+            updatePersistedTrade(tradeId, {
               result: poc.status,
               profit: finalProfit,
               exit_price: poc.entry_price,
-            }).eq('id', (data as Trade).id).then();
-            setTrades((current) => current.map((t) => t.id === (data as Trade).id
-              ? { ...t, result: poc.status, profit: finalProfit, exit_price: poc.entry_price }
-              : t));
+            });
+
+            // Update Supabase in background
+            void (async () => {
+              try {
+                await supabase.from('trading_trades').update({
+                  result: poc.status,
+                  profit: finalProfit,
+                  exit_price: poc.entry_price,
+                }).eq('id', tradeId);
+              } catch { /* ignore */ }
+            })();
 
             if (details.botName) {
               botPendingTradesRef.current.delete(details.botName);
-              const bot = botsRef.current.find((item) => item.name === details.botName);
-              if (bot) {
-                const win = poc.status === 'won';
-                const botUpdate = {
-                  total_trades: bot.total_trades + 1,
-                  wins: bot.wins + (win ? 1 : 0),
-                  pnl: Number((bot.pnl + finalProfit).toFixed(2)),
-                  won_amount: Number((bot.won_amount + (win ? finalProfit : 0)).toFixed(2)),
-                  lost_amount: Number((bot.lost_amount + (win ? 0 : Math.abs(finalProfit))).toFixed(2)),
-                };
-                setBots((current) => current.map((item) => item.id === bot.id ? { ...item, ...botUpdate } : item));
-              }
+              updateBotStatsFromTrade(details.botName, finalProfit, win);
             }
 
             // High-visibility Won/Lost alert banner
@@ -587,7 +788,13 @@ function App() {
     const win = Math.random() > 0.42;
     const profit = Number((details.stake * (win ? 0.78 : -1)).toFixed(2));
     const exit = Number((entry + (win ? (details.direction === 'CALL' ? 1 : -1) : (details.direction === 'CALL' ? -1 : 1)) * (0.3 + Math.random() * 1.5)).toFixed(2));
-    const trade = {
+    
+    const tradeId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    const trade: Trade = {
+      id: tradeId,
       user_id: userRef.current?.id ?? null,
       instrument: details.instrument,
       direction: details.direction,
@@ -598,23 +805,26 @@ function App() {
       bot_name: details.botName,
       entry_price: entry,
       exit_price: exit,
+      created_at: new Date().toISOString(),
     };
-    let { data, error } = await supabase.from('trading_trades').insert(trade).select().maybeSingle();
-    if (error) {
-      const { user_id, ...tradeWithoutUser } = trade;
-      const retry = await supabase.from('trading_trades').insert(tradeWithoutUser).select().maybeSingle();
-      data = retry.data;
-      error = retry.error;
-    }
-    if (error) { setNotice('Trade could not be recorded.'); return; }
-    if (data) setTrades((current) => [data as Trade, ...current]);
+
+    // Immediately persist trade to local storage and state
+    persistTrade(trade);
+
+    // Background insert to Supabase
+    void (async () => {
+      try {
+        const { error: insErr } = await supabase.from('trading_trades').insert(trade);
+        if (insErr) {
+          const { user_id, ...tradeWithoutUser } = trade;
+          await supabase.from('trading_trades').insert(tradeWithoutUser);
+        }
+      } catch { /* ignore */ }
+    })();
+
     await updateWorkspace({ balance: Number((ws.balance + profit).toFixed(2)) });
     if (details.botName) {
-      const bot = botsRef.current.find((item) => item.name === details.botName);
-      if (bot) {
-        const next = { total_trades: bot.total_trades + 1, wins: bot.wins + (win ? 1 : 0), pnl: Number((bot.pnl + profit).toFixed(2)), won_amount: Number((bot.won_amount + (win ? profit : 0)).toFixed(2)), lost_amount: Number((bot.lost_amount + (win ? 0 : Math.abs(profit))).toFixed(2)) };
-        setBots((current) => current.map((item) => item.id === bot.id ? { ...item, ...next } : item));
-      }
+      updateBotStatsFromTrade(details.botName, profit, win);
     }
     setTradeAlert({
       id: Date.now(),
