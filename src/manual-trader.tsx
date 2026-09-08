@@ -3,6 +3,8 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Crosshair,
   HelpCircle,
   Info,
@@ -86,6 +88,15 @@ export function ManualTrader({
   const [showZoomPill, setShowZoomPill] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
+  // Historical panning & gesture state
+  const [scrollOffset, setScrollOffset] = useState<number>(0);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const isDraggingRef = useRef<boolean>(false);
+  const dragStartXRef = useRef<number>(0);
+  const dragStartOffsetRef = useRef<number>(0);
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+
   // Gesture and zoom refs for pinch-to-zoom & double tap
   const touchStartDistRef = useRef<number | null>(null);
   const startZoomRef = useRef<number>(35);
@@ -120,9 +131,13 @@ export function ManualTrader({
       startZoomRef.current = zoomLevel;
       triggerZoomPill();
     } else if (e.touches.length === 1) {
+      touchStartXRef.current = e.touches[0].clientX;
+      touchStartYRef.current = e.touches[0].clientY;
+      dragStartOffsetRef.current = scrollOffset;
       const now = Date.now();
       if (now - lastTapTimeRef.current < 320) {
-        // Double tap on chart resets to standard 35 ticks
+        // Double tap on chart resets to live and standard 35 ticks
+        setScrollOffset(0);
         updateZoomLevel(35);
       }
       lastTapTimeRef.current = now;
@@ -136,16 +151,47 @@ export function ManualTrader({
         e.touches[0].clientY - e.touches[1].clientY
       );
       const ratio = dist / touchStartDistRef.current;
-      // Spreading fingers (ratio > 1) zooms in (fewer ticks)
-      // Pinching together (ratio < 1) zooms out (more ticks)
       const target = Math.round(startZoomRef.current / ratio);
       setZoomLevel(Math.min(90, Math.max(15, target)));
       triggerZoomPill();
+    } else if (e.touches.length === 1 && touchStartXRef.current !== null) {
+      const deltaX = e.touches[0].clientX - touchStartXRef.current;
+      const deltaY = e.touches[0].clientY - (touchStartYRef.current || 0);
+      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 6) {
+        const tickDelta = Math.round(deltaX / 7);
+        const maxOffset = Math.max(0, tickHistory.length - zoomLevel);
+        const newOffset = Math.max(0, Math.min(maxOffset, dragStartOffsetRef.current + tickDelta));
+        setScrollOffset(newOffset);
+      }
     }
   };
 
   const handleTouchEnd = () => {
     touchStartDistRef.current = null;
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return; // Only left-click initiates pan
+    isDraggingRef.current = true;
+    setIsDragging(true);
+    dragStartXRef.current = e.clientX;
+    dragStartOffsetRef.current = scrollOffset;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current) return;
+    const deltaX = e.clientX - dragStartXRef.current;
+    const tickDelta = Math.round(deltaX / 7);
+    const maxOffset = Math.max(0, tickHistory.length - zoomLevel);
+    const newOffset = Math.max(0, Math.min(maxOffset, dragStartOffsetRef.current + tickDelta));
+    setScrollOffset(newOffset);
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+    setIsDragging(false);
   };
 
   const handleWheelZoom = (e: React.WheelEvent<HTMLDivElement>) => {
@@ -162,25 +208,26 @@ export function ManualTrader({
   const [tickHistory, setTickHistory] = useState<TickPoint[]>([]);
   const config = INSTRUMENT_CONFIGS[selectedInstrument] || INSTRUMENT_CONFIGS['Volatility 100 Index'];
 
-  // Initialize tick series on instrument switch
+  // Initialize tick series on instrument switch (with 220 historical ticks)
   useEffect(() => {
     const initialTicks: TickPoint[] = [];
     let currentQuote = config.basePrice;
     const now = Date.now();
 
-    for (let i = 85; i >= 0; i--) {
+    for (let i = 220; i >= 0; i--) {
       const delta = (Math.sin(i / 3) * 0.4 + (Math.random() - 0.48) * 0.8) * config.volatility;
       currentQuote = Number((currentQuote + delta).toFixed(2));
       const timeStr = new Date(now - i * 1500).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
       const changePct = Number((((currentQuote - config.basePrice) / config.basePrice) * 100).toFixed(2));
       initialTicks.push({
-        index: 85 - i,
+        index: 220 - i,
         quote: currentQuote,
         time: timeStr,
         changePct,
       });
     }
     setTickHistory(initialTicks);
+    setScrollOffset(0);
     setActiveContract(null);
   }, [selectedInstrument]);
 
@@ -202,7 +249,8 @@ export function ManualTrader({
         changePct,
       };
 
-      const updated = [...prev.slice(-120), nextTick];
+      // Retain a generous buffer of 400 ticks for deep historical scrolling
+      const updated = [...prev.slice(-400), nextTick];
 
       // Advance active contract ticks if a contract is running
       if (activeContract && activeContract.status === 'running') {
@@ -238,6 +286,9 @@ export function ManualTrader({
 
       return updated;
     });
+
+    // If currently inspecting the past, increment scrollOffset by 1 so the historical window stays anchored
+    setScrollOffset((prevOffset) => (prevOffset > 0 ? prevOffset + 1 : 0));
   }, [tick]);
 
   // Current live quote
@@ -248,10 +299,13 @@ export function ManualTrader({
     index: 0,
   };
 
-  // Slice visible ticks based on zoom level
+  // Slice visible ticks based on zoom level and scrollOffset
   const visibleTicks = useMemo(() => {
-    return tickHistory.slice(-zoomLevel);
-  }, [tickHistory, zoomLevel]);
+    if (tickHistory.length === 0) return [];
+    const endIndex = Math.max(zoomLevel, tickHistory.length - scrollOffset);
+    const startIndex = Math.max(0, endIndex - zoomLevel);
+    return tickHistory.slice(startIndex, endIndex);
+  }, [tickHistory, zoomLevel, scrollOffset]);
 
   // Chart coordinate calculation
   const chartMath = useMemo(() => {
@@ -535,13 +589,34 @@ export function ManualTrader({
             </div>
           )}
 
+          {/* Historical Inspection Floating Banner */}
+          {scrollOffset > 0 && (
+            <div className="dtrader-past-banner">
+              <span className="past-info">
+                Viewing past trend (<b>-{scrollOffset}</b> ticks · {visibleTicks[visibleTicks.length - 1]?.time})
+              </span>
+              <button
+                type="button"
+                className="dtrader-return-live-btn"
+                onClick={() => setScrollOffset(0)}
+              >
+                <span className="live-dot-pulse" />
+                Return to Live ⏺
+              </button>
+            </div>
+          )}
+
           {/* SVG Price Chart */}
           <div
-            className="dtrader-svg-wrapper"
+            className={`dtrader-svg-wrapper ${isDragging ? 'dragging' : ''} ${scrollOffset > 0 ? 'inspecting-past' : ''}`}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
             onTouchCancel={handleTouchEnd}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
             onWheel={handleWheelZoom}
           >
             <svg viewBox="0 0 100 65" preserveAspectRatio="none" className="dtrader-svg">
@@ -695,11 +770,13 @@ export function ManualTrader({
             {/* Floating Live Price Callout (aligned neatly without covering chart waves) */}
             <div className="dtrader-floating-callout">
               <div className={`callout-pct ${currentTick.changePct >= 0 ? 'positive' : 'negative'}`}>
-                {currentTick.changePct >= 0 ? `+${currentTick.changePct}%` : `${currentTick.changePct}%`}
+                {scrollOffset > 0 ? `Past: -${scrollOffset}t` : currentTick.changePct >= 0 ? `+${currentTick.changePct}%` : `${currentTick.changePct}%`}
               </div>
-              <div className="callout-price">{currentTick.quote.toFixed(2)}</div>
+              <div className="callout-price">
+                {scrollOffset > 0 && visibleTicks.length > 0 ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2) : currentTick.quote.toFixed(2)}
+              </div>
               <div className="callout-time">
-                {currentTick.time}
+                {scrollOffset > 0 && visibleTicks.length > 0 ? visibleTicks[visibleTicks.length - 1].time : currentTick.time}
               </div>
             </div>
 
@@ -717,11 +794,11 @@ export function ManualTrader({
 
               {/* High-Contrast Live Price Badge */}
               <div
-                className="dtrader-live-price-badge"
+                className={`dtrader-live-price-badge ${scrollOffset > 0 ? 'historical' : ''}`}
                 style={{ top: `${(chartMath.currentY / 65) * 100}%` }}
               >
-                <span className="badge-dot" />
-                <b>{currentTick.quote.toFixed(2)}</b>
+                <span className={`badge-dot ${scrollOffset > 0 ? 'past' : ''}`} />
+                <b>{scrollOffset > 0 && visibleTicks.length > 0 ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2) : currentTick.quote.toFixed(2)}</b>
               </div>
             </div>
           </div>
@@ -732,6 +809,14 @@ export function ManualTrader({
               <button
                 type="button"
                 className="zoom-btn"
+                onClick={() => setScrollOffset((prev) => Math.min(Math.max(0, tickHistory.length - zoomLevel), prev + 12))}
+                title="Scroll back in history (older ticks)"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <button
+                type="button"
+                className="zoom-btn"
                 onClick={() => updateZoomLevel((z) => Math.min(90, z + 8))}
                 title="Zoom Out (More ticks)"
               >
@@ -739,9 +824,9 @@ export function ManualTrader({
               </button>
               <button
                 type="button"
-                className="zoom-btn"
-                onClick={() => updateZoomLevel(35)}
-                title="Recenter Chart"
+                className={`zoom-btn ${scrollOffset === 0 ? 'active' : ''}`}
+                onClick={() => { setScrollOffset(0); updateZoomLevel(35); }}
+                title={scrollOffset === 0 ? 'Recenter Live Chart' : 'Return to Live'}
               >
                 <Crosshair size={14} />
               </button>
@@ -752,6 +837,15 @@ export function ManualTrader({
                 title="Zoom In (Spread ticks)"
               >
                 <Plus size={14} />
+              </button>
+              <button
+                type="button"
+                className="zoom-btn"
+                onClick={() => setScrollOffset((prev) => Math.max(0, prev - 12))}
+                title="Scroll forward (newer ticks)"
+                disabled={scrollOffset === 0}
+              >
+                <ChevronRight size={14} />
               </button>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertCircle, Check, Link2, Loader2, LogOut, ShieldCheck, Unlink, Wallet } from 'lucide-react';
+import { AlertCircle, Check, ExternalLink, Link2, Loader2, LogOut, ShieldCheck, Unlink, Wallet } from 'lucide-react';
 import { type DerivAuthState, type DerivAccount } from './deriv-client';
 
 const DEFAULT_APP_ID = '34khJS0KsSP29i9G8kCiJ';
@@ -131,13 +131,43 @@ export function DerivConnectionPanel({
         <Link2 size={20} />
         <div>
           <h2>Connect your Deriv account</h2>
-          <p>Link a Deriv account to execute real trades. You can use a demo or real Deriv account.</p>
+          <p>Direct browser-to-gateway WebSocket connection. Demo or Real accounts supported.</p>
         </div>
       </div>
+
+      <div className="deriv-direct-box">
+        <div className="deriv-direct-lead">
+          <span>Need an API token? Generate one directly on Deriv:</span>
+          <a
+            href="https://home.deriv.com/dashboard/profile/api-tokens"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="deriv-direct-link-btn"
+          >
+            <span>Open Deriv API Tokens</span>
+            <ExternalLink size={14} />
+          </a>
+        </div>
+        <div className="deriv-quick-steps">
+          <div className="deriv-step-item">
+            <span className="step-num">1</span>
+            <span>Click the button above to go straight to API Tokens.</span>
+          </div>
+          <div className="deriv-step-item">
+            <span className="step-num">2</span>
+            <span>Name your token (e.g. <code>APEX</code>) and tick <b>Read</b> & <b>Trade</b> scopes.</span>
+          </div>
+          <div className="deriv-step-item">
+            <span className="step-num">3</span>
+            <span>Copy your generated token and paste it into the field below.</span>
+          </div>
+        </div>
+      </div>
+
       {authState === 'error' && (
         <div className="deriv-error">
           <AlertCircle size={16} />
-          <span>Could not connect. Check your API token and try again.</span>
+          <span>Could not connect. Verify your API token scopes (Read + Trade) and try again.</span>
         </div>
       )}
       <label className="deriv-token-label">
@@ -168,11 +198,11 @@ export function DerivConnectionPanel({
       <div className="deriv-help">
         <Unlink size={14} />
         <span>
-          Get your API token from{' '}
-          <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer">
-            Deriv API Token settings
+          Tokens can be managed or revoked anytime on{' '}
+          <a href="https://home.deriv.com/dashboard/profile/api-tokens" target="_blank" rel="noopener noreferrer">
+            Deriv Profile &gt; API Tokens
           </a>
-          . Enable the <b>Read</b>, <b>Trade</b>, and <b>Trading information</b> scopes.
+          .
         </span>
       </div>
     </div>

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { type SupabaseClient, type User } from '@supabase/supabase-js';
-import { Activity, AlertCircle, CheckCircle2, Eye, EyeOff, Lock, Mail, Loader2, ArrowRight } from 'lucide-react';
+import { Activity, AlertCircle, CheckCircle2, Eye, EyeOff, Lock, Mail, Loader2, ArrowRight, X } from 'lucide-react';
 
 interface AuthModalProps {
   supabase: SupabaseClient;
   onAuthSuccess: (user: User) => void;
+  onClose?: () => void;
 }
 
-export function AuthModal({ supabase, onAuthSuccess }: AuthModalProps) {
+export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -71,8 +72,18 @@ export function AuthModal({ supabase, onAuthSuccess }: AuthModalProps) {
   };
 
   return (
-    <div className="auth-overlay">
-      <div className="auth-card">
+    <div className="auth-overlay" onClick={onClose}>
+      <div className="auth-card" onClick={(e) => e.stopPropagation()}>
+        {onClose && (
+          <button
+            type="button"
+            className="auth-close-btn"
+            onClick={onClose}
+            aria-label="Back to overview"
+          >
+            <X size={18} />
+          </button>
+        )}
         <div className="auth-brand">
           <div className="auth-brand-mark">
             <Activity size={24} />
