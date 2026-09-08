@@ -17,7 +17,7 @@ const supabase = createClient(
 type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'record' | 'settings';
 type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
-type Workspace = { id: string; user_id?: string | null; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null };
+type Workspace = { id: string; user_id?: string | null; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null; active_bots?: string[] | null };
 
 type TradeAlert = {
   id: number;
@@ -145,10 +145,24 @@ function App() {
       if (legacyWs.data) ws = legacyWs.data as Workspace;
     }
 
-    // 2. Fetch global bots library
+    // 2. Fetch global bots library and isolate activation per user
     let botsData: BotRow[] = [];
     const botsResult = await supabase.from('trading_bots').select('*').order('name');
-    if (botsResult.data) botsData = botsResult.data as BotRow[];
+    if (botsResult.data) {
+      let userActiveBots: string[] = [];
+      if (ws?.active_bots && Array.isArray(ws.active_bots)) {
+        userActiveBots = ws.active_bots;
+      } else {
+        const cached = localStorage.getItem(`apex_active_bots_${currentUser.id}`);
+        if (cached) {
+          try { userActiveBots = JSON.parse(cached); } catch { /* ignore */ }
+        }
+      }
+      botsData = (botsResult.data as BotRow[]).map((bot) => ({
+        ...bot,
+        active: userActiveBots.includes(bot.name),
+      }));
+    }
 
     // 3. Fetch user-isolated trades
     let tradesData: Trade[] = [];
@@ -290,11 +304,9 @@ function App() {
       sessionStartingBalRef.current = result.account.balance;
 
       if (!isAutoReconnect) {
-        // CRITICAL SAFETY: Stop all active running bots & abort pending trade queues
-        try {
-          await supabase.from('trading_bots').update({ active: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-        } catch (e) {
-          console.warn('Could not batch pause bots in DB:', e);
+        // CRITICAL SAFETY: Stop running bots for this user
+        if (userRef.current) {
+          localStorage.setItem(`apex_active_bots_${userRef.current.id}`, '[]');
         }
         setBots((current) => current.map((b) => ({ ...b, active: false })));
         botPendingTradesRef.current.clear();
@@ -305,6 +317,7 @@ function App() {
         deriv_loginid: result.account.loginid,
         deriv_is_virtual: result.account.is_virtual,
         deriv_balance: result.account.balance,
+        ...(!isAutoReconnect ? { active_bots: [] } : {}),
       });
 
       if (!isAutoReconnect) {
@@ -502,7 +515,6 @@ function App() {
                   won_amount: Number((bot.won_amount + (win ? finalProfit : 0)).toFixed(2)),
                   lost_amount: Number((bot.lost_amount + (win ? 0 : Math.abs(finalProfit))).toFixed(2)),
                 };
-                supabase.from('trading_bots').update(botUpdate).eq('id', bot.id).then();
                 setBots((current) => current.map((item) => item.id === bot.id ? { ...item, ...botUpdate } : item));
               }
             }
@@ -574,7 +586,6 @@ function App() {
       const bot = botsRef.current.find((item) => item.name === details.botName);
       if (bot) {
         const next = { total_trades: bot.total_trades + 1, wins: bot.wins + (win ? 1 : 0), pnl: Number((bot.pnl + profit).toFixed(2)), won_amount: Number((bot.won_amount + (win ? profit : 0)).toFixed(2)), lost_amount: Number((bot.lost_amount + (win ? 0 : Math.abs(profit))).toFixed(2)) };
-        await supabase.from('trading_bots').update(next).eq('id', bot.id);
         setBots((current) => current.map((item) => item.id === bot.id ? { ...item, ...next } : item));
       }
     }
@@ -591,10 +602,22 @@ function App() {
     setNotice(`${win ? '🎉' : '📉'} ${details.direction} trade ${win ? 'WON' : 'LOST'} ${win ? '+' : ''}${money(profit)}`);
   };
   const toggleBot = async (bot: BotRow) => {
-    const active = !bot.active;
-    await supabase.from('trading_bots').update({ active }).eq('id', bot.id);
-    setBots((current) => current.map((item) => item.id === bot.id ? { ...item, active } : item));
-    setNotice(active ? `${bot.name} is live and watching conditions.` : `${bot.name} paused.`);
+    const nextActive = !bot.active;
+    const nextBots = bots.map((item) => (item.id === bot.id ? { ...item, active: nextActive } : item));
+    setBots(nextBots);
+
+    const activeBotNames = nextBots.filter((b) => b.active).map((b) => b.name);
+    if (userRef.current) {
+      localStorage.setItem(`apex_active_bots_${userRef.current.id}`, JSON.stringify(activeBotNames));
+    }
+
+    try {
+      await updateWorkspace({ active_bots: activeBotNames });
+    } catch (e) {
+      console.warn('Could not save user active bots:', e);
+    }
+
+    setNotice(nextActive ? `${bot.name} is live and watching conditions.` : `${bot.name} paused.`);
   };
 
   useEffect(() => {

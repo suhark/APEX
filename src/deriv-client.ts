@@ -47,6 +47,60 @@ let authToken: string | null = null;
 let appId: string | null = null;
 let accountInfo: DerivAccount | null = null;
 let availableAccounts: DerivAccount[] = [];
+let pingInterval: number | null = null;
+let reconnectTimer: number | null = null;
+let isManualDisconnect = false;
+
+function startKeepAlive() {
+  stopKeepAlive();
+  pingInterval = window.setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      send({ ping: 1 }).catch(() => {});
+    }
+  }, 25000);
+}
+
+function stopKeepAlive() {
+  if (pingInterval !== null) {
+    clearInterval(pingInterval);
+    pingInterval = null;
+  }
+}
+
+function handleSocketClose() {
+  ws = null;
+  stopKeepAlive();
+  setAuthState('disconnected');
+  setAccountInfo(null);
+
+  if (!isManualDisconnect && authToken && appId) {
+    if (reconnectTimer === null) {
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        if (!isManualDisconnect && authToken && appId && authState === 'disconnected') {
+          console.log('[Deriv WebSocket] Reconnecting after connection drop…');
+          authorize(authToken, appId).catch((err) => {
+            console.warn('[Deriv WebSocket] Auto-reconnect failed:', err);
+          });
+        }
+      }, 3000);
+    }
+  }
+}
+
+function attachSocket(socket: WebSocket) {
+  if (ws) {
+    ws.onclose = null;
+    ws.onerror = null;
+    ws.close();
+    ws = null;
+  }
+  ws = socket;
+  ws.onmessage = handleMessage;
+  ws.onclose = handleSocketClose;
+  startKeepAlive();
+}
+
 const stateListeners = new Set<(state: DerivAuthState) => void>();
 const accountListeners = new Set<(account: DerivAccount | null) => void>();
 const availableAccountsListeners = new Set<(accounts: DerivAccount[]) => void>();
@@ -184,6 +238,14 @@ function handleMessage(event: MessageEvent) {
   const data = JSON.parse(event.data as string);
   const pendingReq = data.req_id ? pending.get(data.req_id) : null;
 
+  if (data.msg_type === 'ping' || data.ping === 'pong') {
+    if (pendingReq) {
+      pendingReq.resolve(data);
+      pending.delete(data.req_id);
+    }
+    return;
+  }
+
   if (data.error) {
     if (pendingReq) {
       pendingReq.reject(data.error.message);
@@ -261,6 +323,11 @@ async function send<T = unknown>(payload: Record<string, unknown>): Promise<T> {
 }
 
 export async function authorize(token: string, app: string): Promise<DerivAccount> {
+  isManualDisconnect = false;
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   authToken = token;
   appId = app;
   setAuthState('connecting');
@@ -277,19 +344,7 @@ export async function authorize(token: string, app: string): Promise<DerivAccoun
 
       const wsUrl = await getOtpWebSocketUrl(token, app, selectedAccount.loginid);
       const socket = await connectWs(wsUrl);
-      if (ws) {
-        ws.onclose = null;
-        ws.onerror = null;
-        ws.close();
-        ws = null;
-      }
-      ws = socket;
-      ws.onmessage = handleMessage;
-      ws.onclose = () => {
-        ws = null;
-        setAuthState('disconnected');
-        setAccountInfo(null);
-      };
+      attachSocket(socket);
 
       setAuthState('connected');
       setAccountInfo(selectedAccount);
@@ -302,19 +357,7 @@ export async function authorize(token: string, app: string): Promise<DerivAccoun
       // Legacy flow: authorize via WebSocket
       const url = `wss://ws.derivws.com/websockets/v2?app_id=${app}`;
       const socket = await connectWs(url);
-      if (ws) {
-        ws.onclose = null;
-        ws.onerror = null;
-        ws.close();
-        ws = null;
-      }
-      ws = socket;
-      ws.onmessage = handleMessage;
-      ws.onclose = () => {
-        ws = null;
-        setAuthState('disconnected');
-        setAccountInfo(null);
-      };
+      attachSocket(socket);
 
       setAuthState('authorizing');
       const data = await send<{
@@ -378,19 +421,7 @@ export async function switchAccount(loginid: string): Promise<DerivAccount> {
   if (isPatToken(authToken) || !isLegacyAppId(appId)) {
     const wsUrl = await getOtpWebSocketUrl(authToken, appId, target.loginid);
     const socket = await connectWs(wsUrl);
-    if (ws) {
-      ws.onclose = null;
-      ws.onerror = null;
-      ws.close();
-      ws = null;
-    }
-    ws = socket;
-    ws.onmessage = handleMessage;
-    ws.onclose = () => {
-      ws = null;
-      setAuthState('disconnected');
-      setAccountInfo(null);
-    };
+    attachSocket(socket);
 
     setAccountInfo(target);
     contractCallbacks.clear();
@@ -403,6 +434,12 @@ export async function switchAccount(loginid: string): Promise<DerivAccount> {
 }
 
 export function disconnect() {
+  isManualDisconnect = true;
+  stopKeepAlive();
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   authToken = null;
   appId = null;
   setAuthState('disconnected');
