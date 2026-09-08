@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Activity,
   ArrowRight,
   Bot,
   ChevronDown,
   ChevronUp,
-  Cpu,
   ExternalLink,
   Lock,
   Play,
@@ -16,352 +15,475 @@ import {
   Wallet,
   Zap,
 } from 'lucide-react';
-import { PolicyModal, PolicyTab } from './policy-modal';
+import { PolicyModal, type PolicyTab } from './policy-modal';
 
 interface LandingPageProps {
   onOpenAuth: () => void;
   onExploreDemo?: () => void;
 }
 
-interface FaqItem {
-  question: string;
-  answer: string;
+interface MarketRow {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  trend: 'up' | 'down';
+  history: number[];
 }
 
-const FAQ_DATA: FaqItem[] = [
+const INITIAL_MARKETS: MarketRow[] = [
   {
-    question: 'How does APEX execute trades on my Deriv account?',
-    answer:
-      'APEX establishes a direct, TLS-encrypted WebSocket connection from your browser to Deriv’s official gateway (wss://ws.derivws.com). When a strategy condition or manual ticket triggers, contract purchase requests execute directly on Deriv with sub-100ms latency without routing through any third-party intermediary servers.',
+    symbol: '1HZ10V',
+    name: 'Volatility 10 (1s)',
+    price: 101.38,
+    change: -0.04,
+    trend: 'down',
+    history: [101.45, 101.44, 101.42, 101.42, 101.38],
   },
   {
-    question: 'What permissions / scopes are required for my Deriv API token?',
-    answer:
-      'You only need to grant "Read" and "Trade" scopes. Never grant "Admin", "Payments", or "Withdrawal" permissions. APEX is strictly non-custodial: it cannot deposit, withdraw, or transfer funds. Your money remains securely in your personal Deriv account at all times.',
+    symbol: '1HZ25V',
+    name: 'Volatility 25 (1s)',
+    price: 98.21,
+    change: 0.07,
+    trend: 'up',
+    history: [98.12, 98.14, 98.15, 98.18, 98.21],
   },
   {
-    question: 'What are Synthetic Volatility Indices?',
-    answer:
-      'Synthetic Volatility Indices (Volatility 10, 25, 50, 75, 100) are engineered financial markets with constant, verifiable volatility. They run 24 hours a day, 7 days a week, 365 days a year, unaffected by market opening hours, bank holidays, or unpredictable global geopolitical news.',
+    symbol: '1HZ50V',
+    name: 'Volatility 50 (1s)',
+    price: 248.89,
+    change: 0.0,
+    trend: 'down',
+    history: [248.95, 248.92, 248.9, 248.9, 248.89],
   },
   {
-    question: 'Can I practice with virtual demo funds before trading live?',
-    answer:
-      'Yes. APEX is designed demo-first. When you launch the workspace, you can trade with virtual funds on synthetic feeds or connect your Deriv Demo account. Live execution is disarmed by default and requires your explicit authorization before placing real-money contracts.',
+    symbol: '1HZ75V',
+    name: 'Volatility 75 (1s)',
+    price: 482.35,
+    change: 0.01,
+    trend: 'up',
+    history: [482.25, 482.28, 482.3, 482.32, 482.35],
   },
   {
-    question: 'How does the automated Loss-Limit Guardrail protect my capital?',
-    answer:
-      'The platform monitors your session profit/loss on every tick. If your cumulative session drawdown reaches your pre-configured loss limit (e.g., $50), APEX immediately disarms live execution and cancels active bot loops to prevent emotional over-trading.',
-  },
-  {
-    question: 'Can I run multiple automated bots simultaneously?',
-    answer:
-      'Yes. You can activate multiple specialized bots (such as Momentum Pulse, Range Scout, and Reverse Signal) across different synthetic volatility pairs. Each bot’s active state is isolated strictly to your user profile.',
+    symbol: '1HZ100V',
+    name: 'Volatility 100 (1s)',
+    price: 929.42,
+    change: 0.07,
+    trend: 'up',
+    history: [929.15, 929.2, 929.28, 929.35, 929.42],
   },
 ];
 
-const SYNTHETIC_MARKETS = [
-  { name: 'Volatility 10 (1s)', price: '101.42', change: '+0.18%', up: true },
-  { name: 'Volatility 25 (1s)', price: '98.15', change: '+0.32%', up: true },
-  { name: 'Volatility 50 (1s)', price: '248.90', change: '-0.14%', up: false },
-  { name: 'Volatility 75 (1s)', price: '482.30', change: '+0.45%', up: true },
-  { name: 'Volatility 100 (1s)', price: '928.74', change: '-0.21%', up: false },
+const FAQ_DATA = [
+  {
+    q: 'How does APEX connect to Deriv?',
+    a: 'APEX connects directly from your browser to Deriv’s official gateway (wss://ws.derivws.com) using your API token. No trade signals or authorization tokens are routed through third-party servers. Your execution stays strictly between your client and Deriv.',
+  },
+  {
+    q: 'What token scopes do I need to enable?',
+    a: 'Only "Read" and "Trade". Do not enable "Admin", "Payments", or "Withdrawals". APEX is non-custodial: it can only read feeds and place contracts you authorize. It cannot withdraw or transfer your capital.',
+  },
+  {
+    q: 'How does the session loss guardrail work?',
+    a: 'You choose a hard dollar limit for session drawdown (e.g. $50). If cumulative closed trade losses reach that threshold, APEX disarms live execution and stops active bots automatically so you don’t blow an account during a tilted run.',
+  },
+  {
+    q: 'Can I test bots in demo mode first?',
+    a: 'Yes. The workspace is demo-first. You can run manual trades and bots against live synthetic feeds with virtual balances. Live execution is disarmed by default and requires explicit manual arming before any real stake is placed.',
+  },
+  {
+    q: 'Are bot states shared between users?',
+    a: 'No. Every user account has an isolated workspace. Turning a bot on or adjusting stake sizes in your account only affects your personal session.',
+  },
 ];
 
-export function LandingPage({ onOpenAuth, onExploreDemo }: LandingPageProps) {
-  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
-  const [activePolicyTab, setActivePolicyTab] = useState<PolicyTab | null>(null);
+export function LandingPage({ onOpenAuth }: LandingPageProps) {
+  const [markets, setMarkets] = useState<MarketRow[]>(INITIAL_MARKETS);
+  const [utcTime, setUtcTime] = useState<string>('20:35:45 UTC');
+  const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const [policyTab, setPolicyTab] = useState<PolicyTab | null>(null);
 
-  const toggleFaq = (index: number) => {
-    setOpenFaqIndex(openFaqIndex === index ? null : index);
+  // Live UTC Clock
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setUtcTime(now.toUTCString().slice(17, 25) + ' UTC');
+    };
+    updateTime();
+    const timer = setInterval(updateTime, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Subtle simulated tick feed for the hero monitor table
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMarkets((prev) =>
+        prev.map((m, i) => {
+          const delta = (Math.sin(Date.now() / 3000 + i) * 0.15 + (Math.random() - 0.49) * 0.2) * (m.price * 0.0008);
+          const nextPrice = Number((m.price + delta).toFixed(2));
+          const nextChange = Number((((nextPrice - INITIAL_MARKETS[i].price) / INITIAL_MARKETS[i].price) * 100).toFixed(2));
+          const nextTrend = nextChange >= 0 ? 'up' : 'down';
+          const nextHistory = [...m.history.slice(-6), nextPrice];
+          return {
+            ...m,
+            price: nextPrice,
+            change: nextChange,
+            trend: nextTrend,
+            history: nextHistory,
+          };
+        })
+      );
+    }, 2200);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Helper to draw clean SVG sparkline
+  const renderSparkline = (history: number[], trend: 'up' | 'down') => {
+    if (!history || history.length < 2) return null;
+    const min = Math.min(...history);
+    const max = Math.max(...history);
+    const range = max - min || 1;
+    const width = 54;
+    const height = 18;
+
+    const points = history.map((val, idx) => {
+      const x = (idx / (history.length - 1)) * width;
+      const y = height - 2 - ((val - min) / range) * (height - 4);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    const color = trend === 'up' ? '#10b981' : '#ef4444';
+
+    return (
+      <svg width={width} height={height} className="sparkline-svg">
+        <polyline
+          fill="none"
+          stroke={color}
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={points.join(' ')}
+        />
+      </svg>
+    );
   };
 
   return (
-    <div className="landing-shell">
-      {/* Top Navigation */}
-      <header className="landing-nav">
-        <div className="landing-nav-inner">
-          <div className="landing-brand">
-            <div className="brand-mark">
-              <Activity size={18} />
-            </div>
-            <div>
-              <strong>APEX</strong>
-              <span>TRADING LAB</span>
-            </div>
+    <div className="terminal-landing">
+      {/* Top Status Strip */}
+      <div className="top-status-strip">
+        <div className="status-container">
+          <div className="status-left">
+            <span className="status-dot connected" />
+            <span className="status-label">connected</span>
+            <span className="status-url">wss://ws.derivws.com</span>
+          </div>
+          <div className="status-right">
+            <span className="status-ping">ping 14ms</span>
+            <span className="status-time">{utcTime}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <header className="terminal-nav">
+        <div className="nav-container">
+          <div className="nav-brand">
+            <span className="brand-logo-text">APEX</span>
+            <span className="brand-sub-text">TRADING LAB</span>
           </div>
 
-          <nav className="landing-links">
-            <a href="#features">Automation</a>
+          <nav className="nav-menu">
+            <a href="#automation">Automation</a>
             <a href="#markets">Markets</a>
-            <a href="#risk-guard">Risk Controls</a>
+            <a href="#risk-controls">Risk Controls</a>
             <a href="#faq">FAQ</a>
             <button
               type="button"
-              className="landing-policy-link"
-              onClick={() => setActivePolicyTab('privacy')}
+              className="nav-policy-btn"
+              onClick={() => setPolicyTab('privacy')}
             >
               Policies
             </button>
           </nav>
 
-          <div className="landing-actions">
-            <button
-              type="button"
-              className="primary landing-cta-btn"
-              onClick={onOpenAuth}
-            >
-              Launch Terminal <ArrowRight size={14} />
-            </button>
-          </div>
+          <button
+            type="button"
+            className="nav-launch-btn"
+            onClick={onOpenAuth}
+          >
+            Launch Terminal
+          </button>
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="landing-hero">
-        <div className="landing-hero-content">
-          <div className="landing-tagline">
-            <span className="live-dot" /> High-frequency Deriv API WebSocket Terminal
-          </div>
-          <h1>
-            Automate Synthetic Volatility Markets With Institutional Precision
-          </h1>
-          <p className="landing-subhead">
-            Deploy algorithmic trading loops, execute sub-second tick strategies on Deriv,
-            and protect your capital with hard session loss-limit circuit breakers.
-          </p>
+      {/* Hero Section: Split Asymmetrical Layout */}
+      <section className="terminal-hero">
+        <div className="hero-container">
+          {/* Left Column */}
+          <div className="hero-left">
+            <h1 className="hero-title">
+              Automate synthetic volatility trading with the guardrails built in.
+            </h1>
+            <p className="hero-desc">
+              Run algorithmic strategies against Deriv's synthetic indices, execute manually
+              on a live tick chart, and cap what a bad session can cost you before it happens.
+            </p>
 
-          <div className="landing-hero-btns">
-            <button
-              type="button"
-              className="primary landing-btn-large"
-              onClick={onOpenAuth}
-            >
-              <Play size={16} /> Start Trading Now
-            </button>
-            <a
-              href="https://home.deriv.com/dashboard/profile/api-tokens"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="secondary landing-btn-large deriv-link-outline"
-            >
-              <ExternalLink size={15} /> Get Deriv API Token
-            </a>
+            <div className="hero-action-row">
+              <button
+                type="button"
+                className="hero-primary-btn"
+                onClick={onOpenAuth}
+              >
+                Start trading now
+              </button>
+              <a
+                href="https://home.deriv.com/dashboard/profile/api-tokens"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hero-link-btn"
+              >
+                Get Deriv API token &rarr;
+              </a>
+            </div>
+
+            <div className="hero-specs-grid">
+              <div className="spec-item">
+                <span>Sub-100ms execution</span>
+              </div>
+              <div className="spec-divider" />
+              <div className="spec-item">
+                <span>Non-custodial, zero fees</span>
+              </div>
+              <div className="spec-item">
+                <span>Direct client-side WSS</span>
+              </div>
+              <div className="spec-divider" />
+              <div className="spec-item">
+                <span>Hard loss guardrails</span>
+              </div>
+            </div>
           </div>
 
-          <div className="landing-trust-bar">
-            <div className="trust-item">
-              <Zap size={14} />
-              <span>Sub-100ms Execution</span>
-            </div>
-            <div className="trust-item">
-              <ShieldCheck size={14} />
-              <span>Non-Custodial · Zero Fees</span>
-            </div>
-            <div className="trust-item">
-              <Lock size={14} />
-              <span>Direct Client-Side WSS</span>
-            </div>
-            <div className="trust-item">
-              <ShieldAlert size={14} />
-              <span>Hard Loss Guardrails</span>
+          {/* Right Column: Embedded Live Terminal Monitor */}
+          <div className="hero-right" id="markets">
+            <div className="market-monitor-card">
+              <div className="monitor-header">
+                <span className="monitor-title">synthetic volatility indices</span>
+                <span className="monitor-badge">1s tick</span>
+              </div>
+
+              <div className="monitor-table">
+                <div className="monitor-thead">
+                  <span className="col-symbol">symbol</span>
+                  <span className="col-price">price</span>
+                  <span className="col-trend">trend</span>
+                  <span className="col-chg">chg</span>
+                </div>
+
+                <div className="monitor-tbody">
+                  {markets.map((m) => (
+                    <div className="monitor-row" key={m.symbol}>
+                      <div className="col-symbol">
+                        <strong className="symbol-code">{m.symbol}</strong>
+                        <span className="symbol-name">{m.name}</span>
+                      </div>
+                      <div className="col-price font-mono">
+                        {m.price.toFixed(2)}
+                      </div>
+                      <div className="col-trend">
+                        {renderSparkline(m.history, m.trend)}
+                      </div>
+                      <div className={`col-chg font-mono ${m.change >= 0 ? 'text-pos' : 'text-neg'}`}>
+                        {m.change >= 0 ? `▲ ${m.change.toFixed(2)}%` : `▼ ${Math.abs(m.change).toFixed(2)}%`}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Live Synthetic Markets Ticker */}
-      <section className="landing-ticker-section" id="markets">
-        <div className="landing-ticker-strip">
-          {SYNTHETIC_MARKETS.map((m) => (
-            <div className="landing-ticker-cell" key={m.name}>
-              <span className="ticker-inst">{m.name}</span>
-              <strong className="ticker-val">{m.price}</strong>
-              <span className={`ticker-chg ${m.up ? 'positive' : 'negative'}`}>
-                {m.change}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Core Platform Architecture Grid */}
-      <section className="landing-section" id="features">
-        <div className="landing-container">
-          <div className="landing-section-header">
-            <h2>Engineered For Consistent Strategy Execution</h2>
+      {/* Section 2: Core Philosophy */}
+      <section className="terminal-section" id="automation">
+        <div className="section-container">
+          <div className="section-lead">
+            <h2>Built for strategies you can repeat, not one lucky trade.</h2>
             <p>
-              Built specifically for Deriv Synthetic Volatility Indices. Trade manually with
-              fluent financial spline charts or automate with disciplined execution loops.
+              Everything here is scoped to Deriv's synthetic volatility indices — trade the
+              chart manually, hand it to a bot, or build your own entry logic without writing code.
             </p>
           </div>
 
-          <div className="landing-grid-3">
-            <div className="landing-card">
-              <div className="landing-card-icon">
-                <Bot size={22} />
-              </div>
-              <h3>Automated Bot Library</h3>
+          {/* 3 Real Terminal Architecture Blocks */}
+          <div className="philosophy-grid">
+            <div className="philosophy-block">
+              <div className="block-num">01</div>
+              <h3>Automated Strategy Library</h3>
               <p>
-                Deploy pre-built synthetic bots including Momentum Pulse, Range Scout, and
-                Reverse Signal. Each bot enforces strict stake limits and independent lifecycle control.
+                Run Momentum Pulse, Range Scout, and Reverse Signal simultaneously. Each bot runs on
+                a dedicated interval loop and evaluates conditions tick-by-tick against real Deriv feeds.
               </p>
-              <div className="card-feature-list">
-                <span>✓ Multi-bot concurrent execution</span>
-                <span>✓ Isolated user activation states</span>
-                <span>✓ Independent personal track records</span>
-              </div>
-            </div>
-
-            <div className="landing-card highlight-card">
-              <div className="landing-card-icon accent">
-                <Shield size={22} />
-              </div>
-              <h3>Session Loss Guardrails</h3>
-              <p>
-                Never suffer runaway drawdowns. Configure your daily or session loss threshold.
-                The moment that ceiling is touched, live execution disarms automatically.
-              </p>
-              <div className="card-feature-list">
-                <span>✓ Automated live disarm trigger</span>
-                <span>✓ Active contract protection</span>
-                <span>✓ Real-time P/L tracking</span>
-              </div>
-            </div>
-
-            <div className="landing-card">
-              <div className="landing-card-icon">
-                <Activity size={22} />
-              </div>
-              <h3>Manual Financial Terminal</h3>
-              <p>
-                Trade Rise/Fall contracts with razor-thin responsive spline charts, dual crosshairs,
-                multi-layer live spot halos, and historical pan scrollback.
-              </p>
-              <div className="card-feature-list">
-                <span>✓ Smooth cubic-bezier tick wave</span>
-                <span>✓ Pan back through past market history</span>
-                <span>✓ Pinch-to-zoom touch gestures</span>
-              </div>
-            </div>
-
-            <div className="landing-card">
-              <div className="landing-card-icon">
-                <Cpu size={22} />
-              </div>
-              <h3>No-Code Strategy Builder</h3>
-              <p>
-                Assemble customized entry conditions, moving average crossovers, and RSI logic
-                without writing a line of code. Test strategies directly in your virtual sandbox.
-              </p>
-            </div>
-
-            <div className="landing-card">
-              <div className="landing-card-icon">
-                <TrendingUp size={22} />
-              </div>
-              <h3>Public Audit Ledger</h3>
-              <p>
-                Every synthetic contract executed through APEX is timestamped and recorded
-                immutably in your ledger. View cumulative equity curves and win rate stats.
-              </p>
-            </div>
-
-            <div className="landing-card">
-              <div className="landing-card-icon">
-                <Wallet size={22} />
-              </div>
-              <h3>Direct Deriv Integration</h3>
-              <p>
-                Enter your personal Deriv token with Read and Trade scopes. Your funds stay in
-                your Deriv account, and orders execute directly across official WebSockets.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Risk Guard Detail Panel */}
-      <section className="landing-section dark-alt" id="risk-guard">
-        <div className="landing-container">
-          <div className="guard-showcase-panel">
-            <div className="guard-showcase-left">
-              <div className="guard-badge">
-                <ShieldCheck size={14} /> Capital Preservation
-              </div>
-              <h2>Circuit Breaker Built Into Every Trade</h2>
-              <p>
-                In synthetic volatility markets, risk management determines longevity. APEX treats
-                capital preservation as a core software primitive.
-              </p>
-              <ul className="guard-points">
-                <li>
-                  <strong>Demo-First Safe Mode:</strong> All sessions boot with live execution
-                  disarmed until explicitly armed by the trader.
-                </li>
-                <li>
-                  <strong>Auto-Disarm on Account Switch:</strong> Switching between Demo and Real
-                  accounts instantly disarms live execution.
-                </li>
-                <li>
-                  <strong>Continuous Keep-Alive Ping:</strong> 25-second WebSocket ping keeps your
-                  terminal synchronized with Deriv without gateway timeouts.
-                </li>
+              <ul className="block-list">
+                <li>Strict per-trade stake controls ($2, $5, $10)</li>
+                <li>Isolated user states: activating a bot never affects other accounts</li>
+                <li>Zero-state tracking: see your actual win rate, not platform mock stats</li>
               </ul>
             </div>
-            <div className="guard-showcase-right">
-              <div className="guard-mock-card">
-                <div className="mock-card-header">
-                  <span>Guardrail Status</span>
-                  <b className="positive">Active (ARMED)</b>
+
+            <div className="philosophy-block highlight">
+              <div className="block-num accent">02</div>
+              <h3>Session Loss Guardrails</h3>
+              <p>
+                The biggest leak in volatility trading is tilt. APEX implements software circuit breakers
+                that monitor your cumulative session P/L and disarm live execution instantly.
+              </p>
+              <ul className="block-list">
+                <li>Automatic live trading disarm on loss threshold hit</li>
+                <li>Demo-first safety: real trading requires explicit arming</li>
+                <li>Instant disarm on switching between Demo and Real accounts</li>
+              </ul>
+            </div>
+
+            <div className="philosophy-block">
+              <div className="block-num">03</div>
+              <h3>Direct Client-Side Execution</h3>
+              <p>
+                Your API token stays inside your browser's encrypted session storage. Trade commands
+                travel over secure WebSockets straight to Deriv's gateway with sub-100ms response times.
+              </p>
+              <ul className="block-list">
+                <li>Non-custodial: only Read and Trade scopes required</li>
+                <li>Funds never leave your personal Deriv account</li>
+                <li>Immutable ledger of every opened and settled contract</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Section 3: Risk Controls & Circuit Breaker */}
+      <section className="terminal-section dark-alt" id="risk-controls">
+        <div className="section-container">
+          <div className="risk-showcase-box">
+            <div className="risk-showcase-content">
+              <span className="risk-tag">CIRCUIT BREAKER</span>
+              <h2>Stop losses where your rules say, not when emotion dictates.</h2>
+              <p>
+                Configure a loss guardrail for every session (e.g. $50 or $100). The moment cumulative
+                negative delta reaches that limit, APEX cuts execution and pauses all bots immediately.
+              </p>
+              <div className="risk-stats-strip">
+                <div>
+                  <small>Execution Safe Mode</small>
+                  <strong>Disarmed by Default</strong>
                 </div>
-                <div className="mock-stat-row">
-                  <span>Loss Limit Threshold:</span>
-                  <strong>$50.00</strong>
+                <div>
+                  <small>Max Session Drawdown</small>
+                  <strong>Hard Capped</strong>
                 </div>
-                <div className="mock-stat-row">
-                  <span>Current Session Drawdown:</span>
-                  <span className="negative">-$12.40</span>
+                <div>
+                  <small>WebSocket Keepalive</small>
+                  <strong>25s Heartbeat</strong>
                 </div>
-                <div className="mock-progress-bar">
-                  <div className="mock-progress-fill" style={{ width: '24.8%' }} />
+              </div>
+            </div>
+
+            <div className="risk-showcase-card">
+              <div className="circuit-mock">
+                <div className="circuit-header">
+                  <span>Guardrail Monitor</span>
+                  <span className="circuit-status">ARMED</span>
                 </div>
-                <p className="mock-note">
-                  Live execution will disarm automatically if drawdown reaches $50.00.
-                </p>
+                <div className="circuit-metric">
+                  <span className="metric-label">Session Loss Ceiling</span>
+                  <span className="metric-value font-mono">$50.00</span>
+                </div>
+                <div className="circuit-metric">
+                  <span className="metric-label">Current Drawdown</span>
+                  <span className="metric-value font-mono text-neg">-$14.20</span>
+                </div>
+                <div className="circuit-bar">
+                  <div className="circuit-fill" style={{ width: '28.4%' }} />
+                </div>
+                <span className="circuit-note">
+                  Automatic disarm triggers at -$50.00 session drawdown.
+                </span>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* FAQ Accordion Section */}
-      <section className="landing-section" id="faq">
-        <div className="landing-container faq-container">
-          <div className="landing-section-header">
-            <h2>Frequently Asked Questions</h2>
-            <p>
-              Everything you need to know about APEX, Deriv API tokens, and synthetic index trading.
-            </p>
+      {/* Section 4: Deriv Quick Connect */}
+      <section className="terminal-section">
+        <div className="section-container">
+          <div className="deriv-connect-card">
+            <div className="deriv-connect-info">
+              <h2>Connect your Deriv account in 3 steps</h2>
+              <p>
+                You only need a standard Deriv API token with Read and Trade permissions.
+                No third-party registration or payment gateway required.
+              </p>
+              <div className="deriv-steps-list">
+                <div className="step-row">
+                  <span className="step-badge">1</span>
+                  <span>Open the official <b>Deriv API Tokens</b> page</span>
+                </div>
+                <div className="step-row">
+                  <span className="step-badge">2</span>
+                  <span>Name your token (e.g. <code>APEX</code>) and tick <b>Read</b> & <b>Trade</b> scopes</span>
+                </div>
+                <div className="step-row">
+                  <span className="step-badge">3</span>
+                  <span>Paste the token into the APEX terminal to start trading</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="deriv-connect-action">
+              <a
+                href="https://home.deriv.com/dashboard/profile/api-tokens"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="deriv-direct-btn"
+              >
+                <span>Open Deriv API Tokens</span>
+                <ExternalLink size={15} />
+              </a>
+              <small>Redirects directly to Deriv Dashboard &gt; API Tokens</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Section 5: FAQ Accordion */}
+      <section className="terminal-section dark-alt" id="faq">
+        <div className="section-container faq-narrow">
+          <div className="section-lead">
+            <h2>Frequently answered questions</h2>
+            <p>Direct answers about security, scopes, and execution mechanics.</p>
           </div>
 
-          <div className="faq-accordion">
+          <div className="faq-list">
             {FAQ_DATA.map((item, idx) => {
-              const isOpen = openFaqIndex === idx;
+              const isOpen = openFaq === idx;
               return (
                 <div
-                  className={`faq-item ${isOpen ? 'open' : ''}`}
                   key={idx}
-                  onClick={() => toggleFaq(idx)}
+                  className={`faq-row ${isOpen ? 'open' : ''}`}
+                  onClick={() => setOpenFaq(isOpen ? null : idx)}
                 >
-                  <div className="faq-question">
-                    <span>{item.question}</span>
-                    {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                  <div className="faq-q">
+                    <span>{item.q}</span>
+                    <span className="faq-icon">{isOpen ? '−' : '+'}</span>
                   </div>
                   {isOpen && (
-                    <div className="faq-answer">
-                      <p>{item.answer}</p>
+                    <div className="faq-a">
+                      <p>{item.a}</p>
                     </div>
                   )}
                 </div>
@@ -371,126 +493,68 @@ export function LandingPage({ onOpenAuth, onExploreDemo }: LandingPageProps) {
         </div>
       </section>
 
-      {/* Bottom CTA Banner */}
-      <section className="landing-cta-banner">
-        <div className="landing-container">
-          <div className="cta-banner-card">
-            <h2>Ready To Trade Synthetic Markets With Discipline?</h2>
-            <p>
-              Create your account in seconds. Test free bots in Demo mode or connect your Deriv API
-              token for automated live execution.
-            </p>
-            <div className="cta-banner-buttons">
-              <button
-                type="button"
-                className="primary landing-btn-large"
-                onClick={onOpenAuth}
-              >
-                Launch APEX Terminal <ArrowRight size={15} />
-              </button>
-              <a
-                href="https://home.deriv.com/dashboard/profile/api-tokens"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="secondary landing-btn-large"
-              >
-                <ExternalLink size={14} /> Get Deriv API Token
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* Footer */}
-      <footer className="landing-footer">
-        <div className="landing-container landing-footer-inner">
-          <div className="footer-left">
-            <div className="landing-brand">
-              <div className="brand-mark small">
-                <Activity size={15} />
+      <footer className="terminal-footer">
+        <div className="footer-container">
+          <div className="footer-top">
+            <div className="footer-brand">
+              <strong>APEX TRADING LAB</strong>
+              <p>Non-custodial algorithmic trading interface for Deriv Synthetic Volatility Indices.</p>
+            </div>
+
+            <div className="footer-nav">
+              <div className="footer-group">
+                <span className="group-title">Terminal</span>
+                <a href="#automation">Automation Bots</a>
+                <a href="#markets">Synthetic Feeds</a>
+                <a href="#risk-controls">Loss Guardrails</a>
               </div>
-              <div>
-                <strong>APEX</strong>
-                <span>TRADING LAB</span>
+
+              <div className="footer-group">
+                <span className="group-title">Deriv</span>
+                <a
+                  href="https://home.deriv.com/dashboard/profile/api-tokens"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  API Tokens Portal &rarr;
+                </a>
+                <a href="https://deriv.com" target="_blank" rel="noopener noreferrer">
+                  Deriv.com &rarr;
+                </a>
+              </div>
+
+              <div className="footer-group">
+                <span className="group-title">Policies</span>
+                <button type="button" onClick={() => setPolicyTab('privacy')}>
+                  Privacy Policy
+                </button>
+                <button type="button" onClick={() => setPolicyTab('terms')}>
+                  Terms of Service
+                </button>
+                <button type="button" onClick={() => setPolicyTab('risk')}>
+                  Risk Disclosure
+                </button>
               </div>
             </div>
-            <p className="footer-desc">
-              Algorithmic execution interface for synthetic volatility indices. Direct Deriv
-              WebSocket connectivity with client-side loss limit automation.
-            </p>
           </div>
 
-          <div className="footer-links-group">
-            <div className="footer-col">
-              <h4>Platform</h4>
-              <a href="#features">Automation Bots</a>
-              <a href="#markets">Synthetic Markets</a>
-              <a href="#risk-guard">Loss Guardrails</a>
-              <a href="#faq">FAQ</a>
-            </div>
-
-            <div className="footer-col">
-              <h4>Deriv Resources</h4>
-              <a
-                href="https://home.deriv.com/dashboard/profile/api-tokens"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                API Tokens Portal <ExternalLink size={11} />
-              </a>
-              <a
-                href="https://deriv.com"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Deriv Official Site <ExternalLink size={11} />
-              </a>
-            </div>
-
-            <div className="footer-col">
-              <h4>Legal &amp; Risk</h4>
-              <button
-                type="button"
-                className="footer-btn-link"
-                onClick={() => setActivePolicyTab('privacy')}
-              >
-                Privacy Policy
-              </button>
-              <button
-                type="button"
-                className="footer-btn-link"
-                onClick={() => setActivePolicyTab('terms')}
-              >
-                Terms of Service
-              </button>
-              <button
-                type="button"
-                className="footer-btn-link"
-                onClick={() => setActivePolicyTab('risk')}
-              >
-                Risk Disclosure
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="landing-footer-bottom">
-          <div className="landing-container">
-            <p className="footer-disclaimer">
-              <strong>Risk Warning:</strong> Trading synthetic volatility indices and digital options involves substantial risk of loss and is not suitable for all investors. Ensure you fully understand the risks before trading with real capital. APEX is an analytical and execution software tool and does not provide financial investment advice.
+          <div className="footer-disclaimer">
+            <p>
+              <b>Risk Warning:</b> Trading synthetic volatility indices and digital contracts carries a high level of risk and may result in the loss of all invested capital. Never trade with money you cannot afford to lose. APEX is a client-side execution terminal and does not provide financial or investment advice.
             </p>
-            <p className="footer-copy">
+            <span className="footer-copyright">
               © 2026 APEX Trading Lab. All rights reserved.
-            </p>
+            </span>
           </div>
         </div>
       </footer>
 
-      {/* Policy Modal */}
-      {activePolicyTab && (
+      {/* Policy Modal Overlay */}
+      {policyTab && (
         <PolicyModal
-          initialTab={activePolicyTab}
-          onClose={() => setActivePolicyTab(null)}
+          initialTab={policyTab}
+          onClose={() => setPolicyTab(null)}
         />
       )}
     </div>
