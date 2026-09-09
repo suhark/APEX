@@ -322,10 +322,10 @@ export function ManualTrader({
     const range = maxQ - minQ || 1;
 
     // SVG coordinate space: 0 0 100 65
-    // Map current tick to x = 80 so there are 20 units of future breathing room,
-    // exactly like Deriv DTrader and TradingView charts!
+    // Map the last tick to x = 96, leaving just 4 units of right padding —
+    // enough for the glowing dot to breathe without a large empty gap.
     const points = visibleTicks.map((t, idx) => {
-      const x = (idx / (visibleTicks.length - 1)) * 80;
+      const x = (idx / (visibleTicks.length - 1)) * 96;
       const y = 60 - ((t.quote - minQ) / range) * 54;
       return { x, y, quote: t.quote, index: t.index, time: t.time };
     });
@@ -355,7 +355,7 @@ export function ManualTrader({
     const firstP = points[0];
     const fillStr = `${pathStr} L ${lastP.x.toFixed(2)} 65 L ${firstP.x.toFixed(2)} 65 Z`;
 
-    const currentX = lastP ? lastP.x : 80;
+    const currentX = lastP ? lastP.x : 96;
     const currentY = lastP ? lastP.y : 32;
 
     // Generate 5 evenly spaced right-axis price labels

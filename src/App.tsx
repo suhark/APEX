@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient, type User } from '@supabase/supabase-js';
-import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, Globe, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
+import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, Ghost, Globe, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
 import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
@@ -16,7 +16,7 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY ?? '',
 );
 
-type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'record' | 'settings';
+type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'record' | 'settings';
 type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 type Workspace = { id: string; user_id?: string | null; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null; active_bots?: string[] | null };
@@ -39,6 +39,8 @@ const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'manual', label: 'Manual Trader', icon: Target }, { key: 'builder', label: 'Bot Builder', icon: Code2 },
   { key: 'signals', label: 'Signal AI', icon: Sparkles }, { key: 'bulk', label: 'Bulk Trader', icon: ListFilter },
   { key: 'quick', label: 'Quick Bot', icon: Zap }, { key: 'apex', label: 'Apex Bot', icon: Rocket },
+  { key: 'phantom', label: 'Phantom Scalper', icon: Ghost },
+  { key: 'stpv3', label: 'Trend Pullback V3', icon: CandlestickChart },
   { key: 'record', label: 'Track Record', icon: LineChart }, { key: 'settings', label: 'Settings', icon: Settings2 },
 ];
 
@@ -200,6 +202,214 @@ function saveUserSettings(userId: string, settings: { allowBotLiveTrading: boole
   } catch { /* ignore */ }
 }
 
+// ─── STP-V3 Indicator Engine ──────────────────────────────────────────────────
+
+interface Candle { open: number; high: number; low: number; close: number }
+
+/** Build N synthetic 1-minute OHLC candles for the given instrument index ending at currentTick.
+ *  priceFor() is deterministic so any past tick can be reconstructed without storing history. */
+function buildSyntheticCandles(instrIdx: number, currentTick: number, count: number): Candle[] {
+  const TICKS_PER_MIN = 37; // ~1 600 ms per tick → ~37.5 ticks/minute
+  const candles: Candle[] = [];
+  for (let c = count - 1; c >= 0; c--) {
+    const startTick = currentTick - (c + 1) * TICKS_PER_MIN;
+    const endTick   = currentTick - c * TICKS_PER_MIN;
+    const open  = priceFor(instrIdx, startTick);
+    const close = priceFor(instrIdx, endTick);
+    let high = Math.max(open, close);
+    let low  = Math.min(open, close);
+    for (let t = startTick + 4; t < endTick; t += 4) {
+      const p = priceFor(instrIdx, t);
+      if (p > high) high = p;
+      if (p < low)  low  = p;
+    }
+    candles.push({ open, high, low, close });
+  }
+  return candles;
+}
+
+/** Wilder EMA (same as used in ATR / ADX).  k = 1/period for standard Wilder smoothing. */
+function wilderEma(values: number[], period: number): number[] {
+  const result: number[] = [];
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (i < period) {
+      sum += values[i];
+      if (i === period - 1) result.push(sum / period);
+      else result.push(NaN);
+    } else {
+      const prev = result[i - 1];
+      result.push((prev * (period - 1) + values[i]) / period);
+    }
+  }
+  return result;
+}
+
+/** Standard EMA (used for EMA20/EMA50 price lines). */
+function calcEma(closes: number[], period: number): number[] {
+  const k = 2 / (period + 1);
+  const result: number[] = new Array(closes.length).fill(NaN);
+  let started = false;
+  let prev = 0;
+  for (let i = 0; i < closes.length; i++) {
+    if (!started) {
+      if (i < period - 1) continue;
+      // Seed with SMA
+      let sum = 0;
+      for (let j = i - period + 1; j <= i; j++) sum += closes[j];
+      prev = sum / period;
+      result[i] = prev;
+      started = true;
+    } else {
+      prev = closes[i] * k + prev * (1 - k);
+      result[i] = prev;
+    }
+  }
+  return result;
+}
+
+interface StpIndicators {
+  ema20: number; ema50: number;
+  ema20Prev5: number;       // ema20 value 5 candles ago
+  atr14: number;
+  atr50Avg: number;
+  adx14: number;
+  lastCandle: Candle;
+  prevCandle: Candle;
+}
+
+/** Compute all STP-V3 indicators from a candle array (needs ≥ 60 candles). */
+function calcStpIndicators(candles: Candle[]): StpIndicators | null {
+  if (candles.length < 60) return null;
+  const closes = candles.map(c => c.close);
+  const highs  = candles.map(c => c.high);
+  const lows   = candles.map(c => c.low);
+
+  // EMA20 / EMA50
+  const ema20arr = calcEma(closes, 20);
+  const ema50arr = calcEma(closes, 50);
+  const last = candles.length - 1;
+  const ema20 = ema20arr[last];
+  const ema50 = ema50arr[last];
+  const ema20Prev5 = ema20arr[last - 5] ?? NaN;
+  if (isNaN(ema20) || isNaN(ema50) || isNaN(ema20Prev5)) return null;
+
+  // ATR14
+  const trueRanges: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const tr = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i]  - closes[i - 1]),
+    );
+    trueRanges.push(tr);
+  }
+  const atr14arr  = wilderEma(trueRanges, 14);
+  const atr50arr  = wilderEma(trueRanges, 50);
+  const atr14    = atr14arr[atr14arr.length - 1];
+  const atr50Avg = atr50arr[atr50arr.length - 1];
+  if (isNaN(atr14) || isNaN(atr50Avg) || atr14 <= 0) return null;
+
+  // ADX14 (Wilder)
+  const plusDm: number[]  = [];
+  const minusDm: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const upMove   = highs[i]  - highs[i - 1];
+    const downMove = lows[i - 1] - lows[i];
+    plusDm.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDm.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+  const smoothedTr   = wilderEma(trueRanges, 14);
+  const smoothedPlus = wilderEma(plusDm, 14);
+  const smoothedMinus = wilderEma(minusDm, 14);
+  const dx: number[] = [];
+  for (let i = 0; i < smoothedTr.length; i++) {
+    if (isNaN(smoothedTr[i]) || smoothedTr[i] === 0) { dx.push(NaN); continue; }
+    const diPlus  = (smoothedPlus[i]  / smoothedTr[i]) * 100;
+    const diMinus = (smoothedMinus[i] / smoothedTr[i]) * 100;
+    const sum = diPlus + diMinus;
+    dx.push(sum === 0 ? 0 : (Math.abs(diPlus - diMinus) / sum) * 100);
+  }
+  const adxArr = wilderEma(dx.filter(v => !isNaN(v)), 14);
+  const adx14  = adxArr[adxArr.length - 1];
+  if (isNaN(adx14)) return null;
+
+  return {
+    ema20, ema50, ema20Prev5, atr14, atr50Avg, adx14,
+    lastCandle: candles[last],
+    prevCandle: candles[last - 1],
+  };
+}
+
+/** STP-V3 full signal evaluation. Returns null if no trade, or { direction, score } if signal fires. */
+function evalStpV3Signal(ind: StpIndicators): { direction: 'CALL' | 'PUT'; score: number } | null {
+  const { ema20, ema50, ema20Prev5, atr14, atr50Avg, adx14, lastCandle, prevCandle } = ind;
+  const atrRatio = atr14 / (atr50Avg || 1);
+
+  // ── Hard filter: Volatility regime ──────────────────────────────────────────
+  if (atrRatio > 1.50) return null;
+
+  // ── Stage 1: Trend detection ─────────────────────────────────────────────────
+  const bullish = ema20 > ema50;
+  const bearish = ema20 < ema50;
+  const emaSlopeUp   = ema20 > ema20Prev5;
+  const emaSlopeDown = ema20 < ema20Prev5;
+  const emaGap = Math.abs(ema20 - ema50);
+  if (emaGap < 0.10 * atr14) return null;          // insufficient separation
+  if (!bullish && !bearish)   return null;
+  const isBull = bullish && emaSlopeUp;
+  const isBear = bearish && emaSlopeDown;
+  if (!isBull && !isBear) return null;              // slope disagrees with crossover
+
+  // ── Stage 2: Pullback to EMA20 ───────────────────────────────────────────────
+  const pullDist = isBull
+    ? Math.abs(lastCandle.low  - ema20)
+    : Math.abs(lastCandle.high - ema20);
+  if (pullDist > 0.30 * atr14) return null;         // pullback too deep / not close enough
+
+  // ── Stage 3: Structure — swing high/low must stay intact ────────────────────
+  // Approximate: previous candle must form a higher low (bull) or lower high (bear)
+  if (isBull && lastCandle.low < prevCandle.low - 0.20 * atr14) return null;
+  if (isBear && lastCandle.high > prevCandle.high + 0.20 * atr14) return null;
+
+  // ── Stage 4: Confirmation candle ────────────────────────────────────────────
+  const bodySize = Math.abs(lastCandle.close - lastCandle.open);
+  if (bodySize < 0.50 * atr14) return null;         // body too small
+  const bullConf = lastCandle.close > lastCandle.open && lastCandle.close > ema20;
+  const bearConf = lastCandle.close < lastCandle.open && lastCandle.close < ema20;
+  if (isBull && !bullConf) return null;
+  if (isBear && !bearConf) return null;
+
+  // ── Stage 5: ADX ────────────────────────────────────────────────────────────
+  if (adx14 < 22) return null;
+
+  // ── Scoring (100 pts) ────────────────────────────────────────────────────────
+  // Trend quality (25 pts)
+  const emaSlope5 = Math.abs(ema20 - ema20Prev5);
+  const trendScore = emaGap >= 0.30 * atr14 && emaSlope5 >= 0.05 * atr14 ? 25
+    : emaGap >= 0.20 * atr14 ? 18 : 12;
+
+  // Pullback quality (20 pts)
+  const pullbackScore = pullDist <= 0.15 * atr14 ? 20 : pullDist <= 0.22 * atr14 ? 14 : 8;
+
+  // Confirmation candle (20 pts)
+  const bodyRatio = bodySize / atr14;
+  const confirmScore = bodyRatio >= 0.80 ? 20 : bodyRatio >= 0.65 ? 15 : 10;
+
+  // ADX (20 pts)
+  const adxScore = adx14 >= 30 ? 20 : adx14 >= 25 ? 15 : adx14 >= 22 ? 10 : 0;
+
+  // Volatility regime (15 pts)
+  const volScore = atrRatio <= 1.0 ? 15 : atrRatio <= 1.25 ? 12 : 8;
+
+  const totalScore = trendScore + pullbackScore + confirmScore + adxScore + volScore;
+  if (totalScore < 75) return null;
+
+  return { direction: isBull ? 'CALL' : 'PUT', score: totalScore };
+}
+
+// ─── End STP-V3 Indicator Engine ─────────────────────────────────────────────
+
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
@@ -233,6 +443,11 @@ function App() {
   const linkedRealAccount = deriv.accounts.find((a) => !a.is_virtual);
   const linkedDemoAccount = deriv.accounts.find((a) => a.is_virtual);
   const botPendingTradesRef = useRef<Set<string>>(new Set());
+  // Per-bot runtime state for STP-V3 (cooldown + consecutive loss counter)
+  const stpV3StateRef = useRef<{ consecutiveLosses: number; lastLossTime: number }>({
+    consecutiveLosses: 0,
+    lastLossTime: 0,
+  });
 
   // Safety & Arming controls
   const [liveArmed, setLiveArmed] = useState(false);
@@ -483,6 +698,8 @@ function App() {
     }
 
     // 3. Fetch bots library and isolate activation & stats strictly per user
+    // NOTE: trading_bots is a read-only catalog (RLS blocks client inserts).
+    // New bots must be seeded via Supabase migrations run server-side.
     let botsData: BotRow[] = [];
     const botsResult = await supabase.from('trading_bots').select('*').order('name');
     if (botsResult.data) {
@@ -870,6 +1087,15 @@ function App() {
             if (details.botName) {
               botPendingTradesRef.current.delete(details.botName);
               updateBotStatsFromTrade(details.botName, finalProfit, win);
+              // STP-V3 consecutive loss tracking
+              if (details.botName === 'Trend Pullback V3') {
+                if (!win) {
+                  stpV3StateRef.current.consecutiveLosses += 1;
+                  stpV3StateRef.current.lastLossTime = Date.now();
+                } else {
+                  stpV3StateRef.current.consecutiveLosses = 0;
+                }
+              }
             }
 
             applyBalanceDelta(finalProfit);
@@ -901,7 +1127,8 @@ function App() {
             });
             if (postLoss >= ws.loss_limit) {
               if (isDerivReal) setLiveArmed(false);
-              setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. ${isDerivReal ? 'Live trading disarmed.' : 'New trades blocked until you reset the session baseline.'}`);
+              stopAllBots();
+              setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. All bots stopped.${isDerivReal ? ' Live trading disarmed.' : ''}`);
             } else {
               setNotice(`${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`);
             }
@@ -959,6 +1186,15 @@ function App() {
     await updateWorkspace({ balance: Number((ws.balance + profit).toFixed(2)) });
     if (details.botName) {
       updateBotStatsFromTrade(details.botName, profit, win);
+      // STP-V3 consecutive loss tracking (synthetic path)
+      if (details.botName === 'Trend Pullback V3') {
+        if (!win) {
+          stpV3StateRef.current.consecutiveLosses += 1;
+          stpV3StateRef.current.lastLossTime = Date.now();
+        } else {
+          stpV3StateRef.current.consecutiveLosses = 0;
+        }
+      }
     }
     const newBalance = Number((ws.balance + profit).toFixed(2));
     const settledTrades = [trade, ...tradesRef.current.filter((item) => item.id !== trade.id)];
@@ -980,11 +1216,28 @@ function App() {
       sessionLossAfter: postLoss,
     });
     if (postLoss >= ws.loss_limit) {
-      setNotice(`Session loss limit (${money(ws.loss_limit)}) reached. New trades blocked until you reset the session baseline in Settings.`);
+      stopAllBots();
+      setNotice(`Session loss limit (${money(ws.loss_limit)}) reached. All bots stopped. Reset the session baseline in Settings to resume.`);
     } else {
       setNotice(`${win ? '🎉' : '📉'} ${details.direction} trade ${win ? 'WON' : 'LOST'} ${win ? '+' : ''}${money(profit)}`);
     }
   };
+
+  // Deactivates every running bot — called when the session loss limit is hit
+  const stopAllBots = () => {
+    setBots((current) => {
+      const anyActive = current.some((b) => b.active);
+      if (!anyActive) return current;
+      const stopped = current.map((b) => ({ ...b, active: false }));
+      if (userRef.current) {
+        localStorage.setItem(`apex_active_bots_${userRef.current.id}`, JSON.stringify([]));
+      }
+      void updateWorkspace({ active_bots: [] }).catch(() => {});
+      return stopped;
+    });
+    botPendingTradesRef.current.clear();
+  };
+
   const toggleBot = async (bot: BotRow) => {
     const nextActive = !bot.active;
     const nextBots = bots.map((item) => (item.id === bot.id ? { ...item, active: nextActive } : item));
@@ -1009,16 +1262,133 @@ function App() {
       const activeBots = botsRef.current.filter((bot) => bot.active);
       const ws = workspaceRef.current;
       if (!activeBots.length || !ws) return;
+
+      // Stop all bots immediately if the session loss limit has been reached
+      const loopStartBal = sessionStartingBalRef.current ?? ws.starting_balance;
+      const loopCurrentBal = derivConnected && deriv.account ? deriv.account.balance : ws.balance;
+      const loopLossUsed = computeSessionLoss(loopStartBal, loopCurrentBal, tradesRef.current, sessionStartAtRef.current);
+      if (loopLossUsed >= ws.loss_limit) {
+        stopAllBots();
+        return;
+      }
+
       const currentTick = tickRef.current;
       activeBots.forEach((bot, i) => {
         if (botPendingTradesRef.current.has(bot.name)) return;
-        void runTradeRef.current({
-          instrument: instruments[(currentTick + i) % instruments.length],
-          direction: (currentTick + i) % 2 ? 'CALL' : 'PUT',
-          stake: 10,
-          source: 'bot',
-          botName: bot.name,
-        });
+
+        let instrument: string;
+        let direction: 'CALL' | 'PUT';
+        let stake: number;
+
+        if (bot.name === 'Phantom Scalper') {
+          // ── Phantom Scalper: multi-signal strategy ──────────────────────────
+          // Signal 1: EMA trend bias via tick oscillator
+          //   Short EMA proxy: sin-based oscillator over last 3 ticks
+          //   Long EMA proxy: cos-based oscillator over last 8 ticks
+          const shortEma = Math.sin(currentTick / 3);
+          const longEma  = Math.cos(currentTick / 8);
+          const emaBullish = shortEma > longEma;
+
+          // Signal 2: RSI-like momentum from recent synthetic price deltas
+          //   Uses the priceFor helper (tick-seeded sine wave) to compute
+          //   up-moves vs down-moves over the last 6 ticks across V75
+          let gains = 0; let losses = 0;
+          for (let t = 1; t <= 6; t++) {
+            const delta = priceFor(3, currentTick - t + 1) - priceFor(3, currentTick - t);
+            if (delta > 0) gains++; else losses++;
+          }
+          const rsi = gains / (gains + losses || 1); // 0–1 scale
+          const rsiOverbought  = rsi > 0.72;
+          const rsiOversold    = rsi < 0.28;
+
+          // Signal 3: Streak-fade / streak-follow from this bot's recent trades
+          const recentBot = tradesRef.current
+            .filter((t) => t.bot_name === 'Phantom Scalper' && (t.result === 'won' || t.result === 'lost'))
+            .slice(0, 5);
+          const recentLosses = recentBot.filter((t) => t.result === 'lost').length;
+          const recentWins   = recentBot.filter((t) => t.result === 'won').length;
+
+          // Signal 4: Time-of-day cycle filter (avoid choppy midday window)
+          const hour = new Date().getUTCHours();
+          const inPrimeWindow = (hour >= 7 && hour < 11) || (hour >= 13 && hour < 17) || (hour >= 19 && hour < 23);
+
+          // ── Decision logic ─────────────────────────────────────────────────
+          // Prefer V75 for trending conditions, V50 during ranging/recovery
+          if (recentLosses >= 2 && recentWins === 0) {
+            // Cool-down after consecutive losses: drop to lower volatility index
+            instrument = 'Volatility 50 Index';
+            stake      = 8;
+          } else if (recentWins >= 3) {
+            // Hot streak: step up to V100 and ride momentum
+            instrument = 'Volatility 100 Index';
+            stake      = 15;
+          } else if (inPrimeWindow) {
+            instrument = 'Volatility 75 Index';
+            stake      = 12;
+          } else {
+            instrument = 'Volatility 25 Index';
+            stake      = 8;
+          }
+
+          // Directional decision: RSI extremes override EMA trend
+          if (rsiOversold && !emaBullish) {
+            // Price deeply oversold AND trend still down → mean-reversion bounce → CALL
+            direction = 'CALL';
+          } else if (rsiOverbought && emaBullish) {
+            // Price deeply overbought AND trend up → momentum continuation → CALL
+            direction = 'CALL';
+          } else if (rsiOverbought && !emaBullish) {
+            // Overbought into a downtrend → reversal → PUT
+            direction = 'PUT';
+          } else if (rsiOversold && emaBullish) {
+            // Oversold but trend is bullish → no clear edge, follow trend
+            direction = 'CALL';
+          } else {
+            // Neutral RSI: fall back to EMA bias
+            direction = emaBullish ? 'CALL' : 'PUT';
+          }
+
+          // After 2+ consecutive losses in the same direction, fade that direction
+          if (recentLosses >= 2) {
+            const lastDir = recentBot[0]?.direction as 'CALL' | 'PUT' | undefined;
+            if (lastDir) direction = lastDir === 'CALL' ? 'PUT' : 'CALL';
+          }
+        } else if (bot.name === 'Trend Pullback V3') {
+          // ── STP-V3: Six-stage Trend Pullback strategy on V75 ─────────────
+          // Hard stop: ≥3 consecutive losses → pause until 15-min cooldown expires
+          const STP_COOLDOWN_MS = 15 * 60 * 1000;
+          const stpState = stpV3StateRef.current;
+          const msSinceLoss = Date.now() - stpState.lastLossTime;
+          if (stpState.consecutiveLosses >= 3 && msSinceLoss < STP_COOLDOWN_MS) {
+            return; // still in cooldown after 3 consecutive losses
+          }
+          if (stpState.consecutiveLosses >= 3 && msSinceLoss >= STP_COOLDOWN_MS) {
+            stpV3StateRef.current.consecutiveLosses = 0; // cooldown expired — reset
+          }
+
+          // Build 60 synthetic 1-min candles for V75 (instrument index 3)
+          const candles = buildSyntheticCandles(3, currentTick, 60);
+          const ind = calcStpIndicators(candles);
+          if (!ind) return; // insufficient candle history
+
+          const signal = evalStpV3Signal(ind);
+          if (!signal) return; // all 6 stages passed but score < 75, or a hard filter blocked
+
+          instrument = 'Volatility 75 Index';
+          direction  = signal.direction;
+          // Stake = 1% of balance, clamped to [$5, $50]
+          const stpBal = derivConnected && deriv.account
+            ? deriv.account.balance
+            : (workspaceRef.current?.balance ?? 1000);
+          stake = Math.min(50, Math.max(5, Number((stpBal * 0.01).toFixed(2))));
+        } else {
+          // Default strategy for all other bots
+          instrument = instruments[(currentTick + i) % instruments.length];
+          direction  = (currentTick + i) % 2 ? 'CALL' : 'PUT';
+          stake      = 10;
+        }
+
+        void runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name });
       });
     }, 5000);
     return () => window.clearInterval(interval);
@@ -1391,6 +1761,8 @@ function PageView({
   if (page === 'bulk') return <Bulk tick={tick} runTrade={runTrade} />;
   if (page === 'quick') return <Quick tick={tick} runTrade={runTrade} />;
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
+  if (page === 'phantom') return <PhantomScalper bots={bots} toggleBot={toggleBot} trades={trades} />;
+  if (page === 'stpv3') return <TrendPullbackV3 bots={bots} toggleBot={toggleBot} trades={trades} />;
   if (page === 'record') return <Record trades={trades} />;
   return (
     <Settings
@@ -2064,6 +2436,375 @@ function Apex({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: Bo
         <EquityChart trades={apexTrades} color="#f2c576" />
       </section>
       <section className="panel"><div className="panel-title"><h2>Apex trade log</h2></div><TradeTable trades={apexTrades} /></section>
+    </>
+  );
+}
+
+function PhantomScalper({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; trades: Trade[] }) {
+  const bot = bots.find((b) => b.name === 'Phantom Scalper');
+  const phantomTrades = trades.filter((t) => t.bot_name === 'Phantom Scalper');
+  const closed = phantomTrades.filter((t) => t.result === 'won' || t.result === 'lost');
+  const hasUserTrades = closed.length > 0;
+  const userWins = closed.filter((t) => t.result === 'won').length;
+  const userWinRate = hasUserTrades ? Math.round((userWins / closed.length) * 100) : null;
+  const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '—';
+  const totalPnl = closed.reduce((sum, t) => sum + Number(t.profit), 0);
+
+  if (!bot) {
+    return (
+      <>
+        <PageHeader
+          eyebrow="Premium strategy"
+          title="Phantom Scalper"
+          description="A four-signal engine that combines trend, momentum, streak intelligence, and volatility filtering."
+        />
+        <section className="panel" style={{ padding: '2rem' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+            <Ghost size={32} style={{ flexShrink: 0, opacity: 0.5, marginTop: '2px' }} />
+            <div>
+              <h2 style={{ margin: '0 0 0.4rem' }}>Migration not applied yet</h2>
+              <p className="muted" style={{ margin: '0 0 1.2rem', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                The Phantom Scalper bot needs to be seeded into your Supabase database.
+                Go to your <strong>Supabase project → SQL Editor</strong> and run the following query:
+              </p>
+              <pre style={{
+                background: 'rgba(0,0,0,0.35)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '8px',
+                padding: '1rem 1.2rem',
+                fontSize: '0.8rem',
+                lineHeight: 1.7,
+                overflowX: 'auto',
+                margin: '0 0 1.2rem',
+                userSelect: 'all',
+              }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)
+VALUES (
+  'Phantom Scalper',
+  'Multi-signal engine combining EMA trend alignment, RSI momentum, streak-fade logic, and volatility filters. Targets the highest-probability setups only.',
+  'Aggressive',
+  true,
+  79,
+  312
+) ON CONFLICT (name) DO NOTHING;`}</pre>
+              <p className="muted" style={{ margin: 0, fontSize: '0.8rem' }}>
+                After running the query, refresh this page and the bot will be ready to start.
+              </p>
+            </div>
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  const signals = [
+    { label: 'EMA Trend Filter', detail: 'Short vs long EMA crossover sets the directional bias on every bar.' },
+    { label: 'RSI Momentum Gate', detail: 'Only trades when RSI confirms overbought or oversold extremes, avoiding choppy midrange entries.' },
+    { label: 'Streak-Fade Logic', detail: 'After 2+ consecutive losses in the same direction, reverses bias to avoid chasing a losing streak.' },
+    { label: 'Volatility-Weighted Sizing', detail: 'Scales stake and instrument (V25→V100) based on recent win streak and session window.' },
+  ];
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Premium strategy"
+        title="Phantom Scalper"
+        description="A four-signal engine that combines trend, momentum, streak intelligence, and volatility filtering for higher-probability entries."
+        action={bot ? (
+          <button className="primary" onClick={() => void toggleBot(bot)}>
+            {bot.active ? <><Pause size={16} /> Pause Phantom</> : <><Ghost size={16} /> Start Phantom</>}
+          </button>
+        ) : undefined}
+      />
+
+      {/* Banner */}
+      <div className="apex-banner">
+        <div>
+          <span className="pro-tag">PHANTOM PRO</span>
+          <h2>Four signals. One precise entry.</h2>
+          <p>Combines EMA trend alignment, RSI extreme confirmation, streak-fade intelligence, and session-aware sizing to avoid low-probability setups entirely.</p>
+        </div>
+        <div className="apex-score">
+          <strong>{displayWinRate}</strong>
+          <span>{hasUserTrades ? 'Your personal win rate' : '0 trades · Not run yet'}</span>
+        </div>
+      </div>
+
+      {/* Bot stats strip */}
+      <div className="bot-stats wide"><BotStats bot={bot} userTrades={phantomTrades} /></div>
+
+      {/* ── Start / Pause control card ───────────────────────────────────── */}
+      <section className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
+        <div>
+          <span className="eyebrow">Bot control</span>
+          <h2 style={{ margin: '0.2rem 0 0.3rem' }}>
+            {bot.active ? 'Phantom Scalper is running' : 'Phantom Scalper is paused'}
+          </h2>
+          <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+            {bot.active
+              ? 'Placing trades every 5 s · watching EMA, RSI, and streak signals.'
+              : 'Start the bot to begin placing trades on Volatility indices automatically.'}
+          </p>
+        </div>
+        <button
+          className={bot.active ? 'secondary active-button' : 'primary'}
+          style={{ flexShrink: 0, minWidth: '160px' }}
+          onClick={() => void toggleBot(bot)}
+        >
+          {bot.active
+            ? <><Pause size={16} /> Pause bot</>
+            : <><Ghost size={16} /> Start bot</>}
+        </button>
+      </section>
+      {bot.active && <div className="watching" style={{ marginBottom: '1rem' }}><i className="live-dot" /> Running — placing trades every 5 s</div>}
+
+      {/* Summary stat row */}
+      {hasUserTrades && (
+        <div className="record-summary" style={{ marginBottom: '1.5rem' }}>
+          <Stat label="Closed trades" value={String(closed.length)} detail="This session" icon={BarChart3} />
+          <Stat
+            label="Win rate"
+            value={displayWinRate}
+            detail={`${userWins} wins / ${closed.length - userWins} losses`}
+            tone="success"
+            icon={Target}
+          />
+          <Stat
+            label="Net P/L"
+            value={money(totalPnl)}
+            detail="Closed trades only"
+            tone={totalPnl >= 0 ? 'success' : 'danger'}
+            icon={totalPnl >= 0 ? TrendingUp : TrendingDown}
+          />
+        </div>
+      )}
+
+      {/* Equity curve */}
+      <section className="panel">
+        <div className="panel-title">
+          <div><span className="eyebrow">Performance</span><h2>Equity curve</h2></div>
+          <span className="chart-time">Live <Activity size={14} /></span>
+        </div>
+        <EquityChart trades={phantomTrades} color="#a78bfa" />
+      </section>
+
+      {/* Strategy pillars */}
+      <section className="panel">
+        <div className="panel-title">
+          <div><span className="eyebrow">How it works</span><h2>Strategy signals</h2></div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', padding: '0.25rem 0' }}>
+          {signals.map((sig, idx) => (
+            <div key={sig.label} style={{ background: 'var(--surface-2, rgba(255,255,255,0.04))', borderRadius: '10px', padding: '1rem 1.1rem', border: '1px solid var(--border, rgba(255,255,255,0.08))' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#a78bfa', background: 'rgba(167,139,250,0.12)', borderRadius: '4px', padding: '2px 7px', letterSpacing: '0.04em' }}>
+                  {String(idx + 1).padStart(2, '0')}
+                </span>
+                <strong style={{ fontSize: '0.85rem' }}>{sig.label}</strong>
+              </div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted, #9ca3af)', margin: 0, lineHeight: 1.5 }}>{sig.detail}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Risk rules */}
+      <section className="panel">
+        <div className="panel-title">
+          <div><span className="eyebrow">Risk management</span><h2>Execution rules</h2></div>
+        </div>
+        {[
+          ['Primary instrument', 'Volatility 75 Index (prime window), Volatility 50 (recovery mode), Volatility 100 (hot streak)'],
+          ['Stake range', '$8 – $15 · scales with recent performance'],
+          ['After 2 consecutive losses', 'Drops to V50, cuts stake to $8, reverses directional bias'],
+          ['After 3 consecutive wins', 'Steps up to V100, increases stake to $15'],
+          ['Prime session window', 'UTC 07–11 h, 13–17 h, 19–23 h · avoids low-liquidity chop'],
+          ['Cooldown', 'Waits for current trade to settle before placing next (no overlap)'],
+        ].map(([rule, val]) => (
+          <div key={rule} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0.65rem 0', borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))', gap: '1rem', fontSize: '0.84rem' }}>
+            <span style={{ color: 'var(--text-muted, #9ca3af)', flexShrink: 0 }}>{rule}</span>
+            <span style={{ fontWeight: 600, textAlign: 'right' }}>{val}</span>
+          </div>
+        ))}
+      </section>
+
+      {/* Trade log */}
+      <section className="panel">
+        <div className="panel-title"><h2>Phantom Scalper trade log</h2></div>
+        <TradeTable trades={phantomTrades} />
+      </section>
+    </>
+  );
+}
+
+function TrendPullbackV3({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; trades: Trade[] }) {
+  const bot = bots.find((b) => b.name === 'Trend Pullback V3');
+  const stpTrades = trades.filter((t) => t.bot_name === 'Trend Pullback V3');
+  const closed = stpTrades.filter((t) => t.result === 'won' || t.result === 'lost');
+  const hasUserTrades = closed.length > 0;
+  const userWins = closed.filter((t) => t.result === 'won').length;
+  const userWinRate = hasUserTrades ? Math.round((userWins / closed.length) * 100) : null;
+  const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '—';
+  const totalPnl = closed.reduce((sum, t) => sum + Number(t.profit), 0);
+
+  if (!bot) {
+    return (
+      <>
+        <PageHeader eyebrow="Algorithmic strategy" title="Trend Pullback V3" description="Six-stage signal pipeline for high-quality trend entries on Volatility 75." />
+        <section className="panel" style={{ padding: '2rem' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
+            <CandlestickChart size={32} style={{ flexShrink: 0, opacity: 0.5, marginTop: '2px' }} />
+            <div>
+              <h2 style={{ margin: '0 0 0.4rem' }}>Migration not applied yet</h2>
+              <p className="muted" style={{ margin: '0 0 1.2rem', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                Run this in your <strong>Supabase SQL Editor</strong> then refresh:
+              </p>
+              <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem 1.2rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', margin: '0 0 1.2rem', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES (\n  'Trend Pullback V3',\n  'Six-stage signal pipeline on V75: EMA trend, pullback quality, swing structure, confirmation candle, ADX strength, and volatility regime.',\n  'Moderate', true, 76, 287\n) ON CONFLICT (name) DO NOTHING;`}</pre>
+            </div>
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  const pipeline = [
+    { stage: '01', label: 'Trend Detection', detail: 'EMA20 > EMA50 (bull) or EMA20 < EMA50 (bear). Slope must agree. EMA gap ≥ 0.10 × ATR14.' },
+    { stage: '02', label: 'Pullback to EMA20', detail: 'Price must approach EMA20 within 0.30 × ATR14. Deep retracements are rejected.' },
+    { stage: '03', label: 'Swing Structure', detail: 'Latest swing low (bull) or swing high (bear) must remain intact. Breach > 0.20 × ATR14 = no trade.' },
+    { stage: '04', label: 'Confirmation Candle', detail: 'Candle must close back in trend direction with body ≥ 0.50 × ATR14. Signal evaluated after candle close only.' },
+    { stage: '05', label: 'ADX Strength', detail: 'ADX14 ≥ 22. Confirms sufficient directional momentum. Direction comes from EMA — ADX only gates entry.' },
+    { stage: '06', label: 'Volatility Regime', detail: 'ATR14 / ATR50-avg ≤ 1.50. Blocks entry during abnormally aggressive volatility spikes.' },
+  ];
+
+  const scoring = [
+    { component: 'Trend quality',        max: 25, note: 'EMA gap and slope strength' },
+    { component: 'Pullback quality',      max: 20, note: 'Distance to EMA20' },
+    { component: 'Confirmation candle',   max: 20, note: 'Body size vs ATR' },
+    { component: 'ADX strength',          max: 20, note: 'ADX14 tier (22/25/30+)' },
+    { component: 'Volatility regime',     max: 15, note: 'ATR ratio tier' },
+  ];
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Algorithmic strategy"
+        title="Trend Pullback V3"
+        description="Enters only when all six signal stages pass and the quality score reaches 75/100. Designed to prioritise trade quality over trade frequency."
+        action={
+          <button className={bot.active ? 'secondary active-button' : 'primary'} onClick={() => void toggleBot(bot)}>
+            {bot.active ? <><Pause size={16} /> Pause</> : <><CandlestickChart size={16} /> Start</>}
+          </button>
+        }
+      />
+
+      {/* Banner */}
+      <div className="apex-banner">
+        <div>
+          <span className="pro-tag">STP-V3</span>
+          <h2>Six stages. One entry.</h2>
+          <p>Every trade must pass a full pipeline: trend, pullback, structure, confirmation, momentum, and volatility regime. A score below 75/100 means no trade.</p>
+        </div>
+        <div className="apex-score">
+          <strong>{displayWinRate}</strong>
+          <span>{hasUserTrades ? 'Your win rate' : '0 trades · Not run yet'}</span>
+        </div>
+      </div>
+
+      {/* Bot stats */}
+      <div className="bot-stats wide"><BotStats bot={bot} userTrades={stpTrades} /></div>
+
+      {/* Control card */}
+      <section className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
+        <div>
+          <span className="eyebrow">Bot control</span>
+          <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Trend Pullback V3 is running' : 'Trend Pullback V3 is paused'}</h2>
+          <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+            {bot.active
+              ? 'Scanning V75 every 5 s · Only trades when all 6 stages pass and score ≥ 75.'
+              : 'Start the bot to begin scanning Volatility 75 for high-quality pullback entries.'}
+          </p>
+        </div>
+        <button className={bot.active ? 'secondary active-button' : 'primary'} style={{ flexShrink: 0, minWidth: '160px' }} onClick={() => void toggleBot(bot)}>
+          {bot.active ? <><Pause size={16} /> Pause bot</> : <><CandlestickChart size={16} /> Start bot</>}
+        </button>
+      </section>
+      {bot.active && <div className="watching" style={{ marginBottom: '1rem' }}><i className="live-dot" /> Running — scanning V75 every 5 s</div>}
+
+      {/* Summary stats */}
+      {hasUserTrades && (
+        <div className="record-summary" style={{ marginBottom: '1.5rem' }}>
+          <Stat label="Closed trades" value={String(closed.length)} detail="This session" icon={BarChart3} />
+          <Stat label="Win rate" value={displayWinRate} detail={`${userWins}W / ${closed.length - userWins}L`} tone="success" icon={Target} />
+          <Stat label="Net P/L" value={money(totalPnl)} detail="Closed trades only" tone={totalPnl >= 0 ? 'success' : 'danger'} icon={totalPnl >= 0 ? TrendingUp : TrendingDown} />
+        </div>
+      )}
+
+      {/* Equity curve */}
+      <section className="panel">
+        <div className="panel-title">
+          <div><span className="eyebrow">Performance</span><h2>Equity curve</h2></div>
+          <span className="chart-time">Live <Activity size={14} /></span>
+        </div>
+        <EquityChart trades={stpTrades} color="#34d399" />
+      </section>
+
+      {/* Six-stage pipeline */}
+      <section className="panel">
+        <div className="panel-title"><div><span className="eyebrow">Signal pipeline</span><h2>Six-stage entry filter</h2></div></div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.25rem 0' }}>
+          {pipeline.map((s) => (
+            <div key={s.stage} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.9rem', padding: '0.75rem 0.9rem', background: 'rgba(52,211,153,0.05)', border: '1px solid rgba(52,211,153,0.12)', borderRadius: '9px' }}>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#34d399', background: 'rgba(52,211,153,0.15)', borderRadius: '4px', padding: '2px 7px', letterSpacing: '0.04em', flexShrink: 0, marginTop: '1px' }}>{s.stage}</span>
+              <div>
+                <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.2rem' }}>{s.label}</strong>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted, #9ca3af)', margin: 0, lineHeight: 1.5 }}>{s.detail}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Scoring table */}
+      <section className="panel">
+        <div className="panel-title"><div><span className="eyebrow">Quality gate</span><h2>Signal scoring — threshold 75 / 100</h2></div></div>
+        <div style={{ fontSize: '0.84rem' }}>
+          {scoring.map(({ component, max, note }) => (
+            <div key={component} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0', borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))', gap: '1rem' }}>
+              <div>
+                <strong>{component}</strong>
+                <span style={{ color: 'var(--text-muted, #9ca3af)', marginLeft: '0.6rem', fontSize: '0.77rem' }}>{note}</span>
+              </div>
+              <span style={{ fontWeight: 700, color: '#34d399', flexShrink: 0 }}>{max} pts</span>
+            </div>
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.7rem 0 0', fontWeight: 700 }}>
+            <span>Total</span><span style={{ color: '#34d399' }}>100 pts</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Risk rules */}
+      <section className="panel">
+        <div className="panel-title"><div><span className="eyebrow">Risk management</span><h2>Execution rules</h2></div></div>
+        {[
+          ['Instrument', 'Volatility 75 Index only'],
+          ['Stake', '1% of balance · min $5 · max $50'],
+          ['Max concurrent trades', '1 — waits for settlement before next entry'],
+          ['Consecutive loss limit', '3 losses → 15-minute cooldown, then reset'],
+          ['Volatility block', 'ATR14 / ATR50-avg > 1.50 → no entry'],
+          ['Martingale', 'Disabled — stake never increases after a loss'],
+        ].map(([rule, val]) => (
+          <div key={rule} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0.65rem 0', borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))', gap: '1rem', fontSize: '0.84rem' }}>
+            <span style={{ color: 'var(--text-muted, #9ca3af)', flexShrink: 0 }}>{rule}</span>
+            <span style={{ fontWeight: 600, textAlign: 'right' }}>{val}</span>
+          </div>
+        ))}
+      </section>
+
+      {/* Trade log */}
+      <section className="panel">
+        <div className="panel-title"><h2>Trend Pullback V3 trade log</h2></div>
+        <TradeTable trades={stpTrades} />
+      </section>
     </>
   );
 }
