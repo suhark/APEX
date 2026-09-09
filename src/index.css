@@ -11,8 +11,8 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 .app-shell { display: flex; min-height: 100vh; background: #08100f; }
 .sidebar { width: 246px; min-height: 100vh; display: flex; flex-direction: column; padding: 25px 16px 18px; background: #0c1514; border-right: 1px solid #1c2926; flex-shrink: 0; }
-.brand { display: flex; align-items: center; padding: 0 4px 22px; }
-.sidebar-brand-logo { max-width: 170px; height: 36px; object-fit: contain; object-position: left center; display: block; }
+.brand { display: flex; align-items: center; padding: 4px 6px 22px; }
+.sidebar-brand-logo { max-width: 190px; height: 42px; object-fit: contain; object-position: left center; display: block; }
 .brand-mark { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 10px; color: #071211; background: #36d6bb; }
 .brand strong { display: block; letter-spacing: .16em; font-size: 16px; line-height: 1; }
 .brand span { display: block; margin-top: 4px; color: #6b817c; letter-spacing: .12em; font-size: 8px; font-weight: 700; }
@@ -687,8 +687,8 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 }
 
 .auth-modal-logo {
-  height: 48px;
-  max-width: 220px;
+  height: 52px;
+  max-width: 240px;
   object-fit: contain;
   display: block;
 }
