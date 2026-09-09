@@ -86,11 +86,17 @@ function getSessionStartKey(userId: string) { return `apex_session_start_bal_${u
 function getSessionStartAtKey(userId: string) { return `apex_session_start_at_${userId}`; }
 
 function restoreSessionBaseline(userId: string) {
+  // Primary: sessionStorage (survives tab reload, cleared on tab close)
   let saved = sessionStorage.getItem(getSessionStartKey(userId));
   let savedAt = sessionStorage.getItem(getSessionStartAtKey(userId));
   if (!saved) {
     saved = sessionStorage.getItem(`apex_session_start_bal_${userId}_undefined`);
     savedAt = savedAt || sessionStorage.getItem(`apex_session_start_at_${userId}_undefined`);
+  }
+  // Fallback: localStorage (survives tab close — cleared when user resets baseline)
+  if (!saved) {
+    saved = localStorage.getItem(getSessionStartKey(userId));
+    savedAt = savedAt || localStorage.getItem(getSessionStartAtKey(userId));
   }
   return {
     balance: saved && !Number.isNaN(Number(saved)) ? Number(saved) : null,
@@ -465,8 +471,11 @@ function App() {
     setSessionStartingBalance(balance);
     setSessionStartedAt(startedAt);
     const uid = userRef.current?.id || user?.id || 'guest';
+    // Write to both sessionStorage (fast) and localStorage (survives tab close)
     sessionStorage.setItem(getSessionStartKey(uid), String(balance));
     sessionStorage.setItem(getSessionStartAtKey(uid), startedAt);
+    localStorage.setItem(getSessionStartKey(uid), String(balance));
+    localStorage.setItem(getSessionStartAtKey(uid), startedAt);
   };
 
   const clearSessionStartBalance = () => {
@@ -477,6 +486,8 @@ function App() {
     const uid = userRef.current?.id || user?.id || 'guest';
     sessionStorage.removeItem(getSessionStartKey(uid));
     sessionStorage.removeItem(getSessionStartAtKey(uid));
+    localStorage.removeItem(getSessionStartKey(uid));
+    localStorage.removeItem(getSessionStartAtKey(uid));
   };
 
   const resetSessionBaseline = () => {
@@ -1045,6 +1056,8 @@ function App() {
           entry_price: result.entryPrice,
           exit_price: undefined,
           created_at: new Date().toISOString(),
+          execution_context: 'deriv',
+          deriv_loginid: deriv.account?.loginid ?? null,
         };
 
         // Immediately persist to local user storage and React state
@@ -1167,6 +1180,8 @@ function App() {
       entry_price: entry,
       exit_price: exit,
       created_at: new Date().toISOString(),
+      execution_context: 'synthetic',
+      deriv_loginid: null,
     };
 
     // Immediately persist trade to local storage and state
@@ -1399,15 +1414,31 @@ function App() {
 
   const activeBalance = derivConnected && deriv.account ? deriv.account.balance : (workspace?.balance ?? 0);
   const sessionStartBalance = sessionStartingBalance ?? activeBalance;
+  // Use context-filtered trades so the session loss guardrail only counts
+  // trades from the currently active account (synthetic or specific Deriv loginid)
+  const sessionContextTrades = useMemo(
+    () => filterTradesByContext(trades, getStatsContext(derivConnected, deriv.account)),
+    [trades, derivConnected, deriv.account],
+  );
   const sessionLossUsed = computeSessionLoss(
     sessionStartBalance,
     activeBalance,
-    trades,
+    sessionContextTrades,
     sessionStartedAt,
   );
   const lossLimit = Math.max(1, Number(workspace?.loss_limit ?? 50));
   const guardPercent = computeGuardPercent(sessionLossUsed, lossLimit);
   const lossLimitReached = lossLimit > 0 && sessionLossUsed >= lossLimit;
+
+  // ── Context-isolated trade list ──────────────────────────────────────────
+  // Derives the active context key from the current connection state, then
+  // filters trades so every component only sees trades from the active context.
+  // Synthetic trades are hidden while Deriv is connected, and vice versa.
+  const statsContext = getStatsContext(derivConnected, deriv.account);
+  const contextTrades = useMemo(
+    () => filterTradesByContext(trades, statsContext),
+    [trades, statsContext],
+  );
 
   const content = loading ? (
     <div className="loading"><RefreshCw className="spin" size={18} /> Loading workspace…</div>
@@ -1416,7 +1447,7 @@ function App() {
       page={page}
       workspace={workspace}
       bots={bots}
-      trades={trades}
+      trades={contextTrades}
       tick={tick}
       runTrade={runTrade}
       toggleBot={toggleBot}
@@ -1442,6 +1473,7 @@ function App() {
       guardPercent={guardPercent}
       lossLimitReached={lossLimitReached}
       resetSessionBaseline={resetSessionBaseline}
+      sessionStartedAt={sessionStartedAt}
     />
   );
 
@@ -1707,6 +1739,7 @@ function PageView({
   guardPercent,
   lossLimitReached,
   resetSessionBaseline,
+  sessionStartedAt,
 }: {
   page: Page;
   workspace: Workspace | null;
@@ -1737,9 +1770,10 @@ function PageView({
   guardPercent: number;
   lossLimitReached: boolean;
   resetSessionBaseline: () => void;
+  sessionStartedAt: string | null;
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
-  if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} />;
+  if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} />;
   if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} />;
   if (page === 'manual') {
     return (
@@ -1788,6 +1822,7 @@ function PageView({
       guardPercent={guardPercent}
       lossLimitReached={lossLimitReached}
       resetSessionBaseline={resetSessionBaseline}
+      sessionStartedAt={sessionStartedAt}
     />
   );
 }
@@ -1879,8 +1914,13 @@ function LossGuardRail({
   );
 }
 
-function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivConnected, isDerivReal, derivAccount, sessionLossUsed, lossLimit, guardPercent, lossLimitReached }: { workspace: Workspace; bots: BotRow[]; trades: Trade[]; tick: number; toggleBot: (bot: BotRow) => Promise<void>; setPage: (page: Page) => void; derivConnected: boolean; isDerivReal: boolean; derivAccount: { loginid: string; balance: number; is_virtual: boolean } | null; sessionLossUsed: number; lossLimit: number; guardPercent: number; lossLimitReached: boolean }) {
-  const pnl = trades.reduce((sum, trade) => sum + Number(trade.profit), 0); const active = bots.filter((bot) => bot.active);
+function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivConnected, isDerivReal, derivAccount, sessionLossUsed, lossLimit, guardPercent, lossLimitReached, sessionStartedAt }: { workspace: Workspace; bots: BotRow[]; trades: Trade[]; tick: number; toggleBot: (bot: BotRow) => Promise<void>; setPage: (page: Page) => void; derivConnected: boolean; isDerivReal: boolean; derivAccount: { loginid: string; balance: number; is_virtual: boolean } | null; sessionLossUsed: number; lossLimit: number; guardPercent: number; lossLimitReached: boolean; sessionStartedAt: string | null }) {
+  // Only count trades since this session's baseline was set — consistent with the guardrail
+  const sessionStartMs = sessionStartedAt ? new Date(sessionStartedAt).getTime() - 1000 : 0;
+  const sessionTrades = trades.filter(
+    (t) => (t.result === 'won' || t.result === 'lost') && new Date(t.created_at).getTime() >= sessionStartMs
+  );
+  const pnl = sessionTrades.reduce((sum, trade) => sum + Number(trade.profit), 0); const active = bots.filter((bot) => bot.active);
   const balanceValue = derivConnected && derivAccount ? derivAccount.balance : workspace.balance;
   const balanceLabel = derivConnected && derivAccount ? (isDerivReal ? 'Deriv live account' : 'Deriv demo account') : (workspace.mode === 'demo' ? 'Demo account' : 'Live account');
   const headerDesc = derivConnected ? (isDerivReal ? "You're connected to a real Deriv account. Trades will execute with real funds." : "You're connected to a Deriv demo account. Trades execute on Deriv with virtual funds.") : "Your synthetic trading workspace is running smoothly. Review your guardrails before you deploy.";
