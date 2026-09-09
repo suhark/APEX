@@ -3,7 +3,7 @@ import { createClient, type User } from '@supabase/supabase-js';
 import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, Globe, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
-import { executeTrade, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
+import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
 import { AuthModal } from './auth-modal';
 import { ManualTrader } from './manual-trader';
 import { LandingPage } from './landing-page';
@@ -17,7 +17,7 @@ const supabase = createClient(
 );
 
 type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'record' | 'settings';
-type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string };
+type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 type Workspace = { id: string; user_id?: string | null; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null; active_bots?: string[] | null };
 
@@ -30,6 +30,7 @@ type TradeAlert = {
   stake: number;
   botName?: string;
   accountType: 'Demo' | 'Real';
+  sessionLossAfter?: number;
 };
 
 const instruments = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
@@ -44,6 +45,92 @@ const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
 function priceFor(index: number, tick: number) { return Number((100 + Math.sin((tick + index * 7) / 4) * 2.5 + Math.cos((tick + index) / 8) * 1.4).toFixed(2)); }
 function money(value: number) { return `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`; }
 function timeAgo(date: string) { const minutes = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 60000)); return minutes < 1 ? 'just now' : `${minutes}m ago`; }
+function getStatsContext(derivConnected: boolean, account: { loginid: string } | null): string {
+  if (derivConnected && account) return `deriv_${account.loginid}`;
+  return 'synthetic';
+}
+
+function getStatsContextLabel(context: string, derivConnected: boolean, account: { loginid: string; is_virtual?: boolean } | null): string {
+  if (context.startsWith('deriv_') && account) {
+    return `${account.is_virtual ? 'Deriv Demo' : 'Deriv Real'} (${account.loginid})`;
+  }
+  if (context.startsWith('deriv_')) return `Deriv (${context.replace('deriv_', '')})`;
+  return derivConnected ? 'Synthetic (archived)' : 'Synthetic workspace';
+}
+
+function inferTradeContext(trade: Trade): string {
+  if (trade.execution_context === 'deriv') {
+    return trade.deriv_loginid ? `deriv_${trade.deriv_loginid}` : 'deriv_unknown';
+  }
+  if (trade.execution_context === 'synthetic') return 'synthetic';
+  if (trade.id.startsWith('deriv_')) {
+    return trade.deriv_loginid ? `deriv_${trade.deriv_loginid}` : 'deriv_unknown';
+  }
+  return 'synthetic';
+}
+
+function filterTradesByContext(trades: Trade[], context: string): Trade[] {
+  return trades.filter((trade) => {
+    const tradeContext = inferTradeContext(trade);
+    if (context === 'synthetic') return tradeContext === 'synthetic';
+    if (context.startsWith('deriv_')) {
+      return tradeContext === context || tradeContext === 'deriv_unknown';
+    }
+    return tradeContext === context;
+  });
+}
+
+function getSessionStartKey(userId: string) { return `apex_session_start_bal_${userId}`; }
+function getSessionStartAtKey(userId: string) { return `apex_session_start_at_${userId}`; }
+
+function restoreSessionBaseline(userId: string) {
+  let saved = sessionStorage.getItem(getSessionStartKey(userId));
+  let savedAt = sessionStorage.getItem(getSessionStartAtKey(userId));
+  if (!saved) {
+    saved = sessionStorage.getItem(`apex_session_start_bal_${userId}_undefined`);
+    savedAt = savedAt || sessionStorage.getItem(`apex_session_start_at_${userId}_undefined`);
+  }
+  return {
+    balance: saved && !Number.isNaN(Number(saved)) ? Number(saved) : null,
+    startedAt: savedAt || null,
+  };
+}
+
+function computeSessionLoss(
+  sessionStart: number,
+  currentBalance: number,
+  trades: Trade[] = [],
+  sessionStartedAt: string | null = null,
+) {
+  const balanceLoss = Math.max(0, Number((sessionStart - currentBalance).toFixed(2)));
+  if (!sessionStartedAt) return balanceLoss;
+
+  const startMs = new Date(sessionStartedAt).getTime();
+  const sessionTrades = trades.filter(
+    (trade) =>
+      (trade.result === 'won' || trade.result === 'lost') &&
+      new Date(trade.created_at).getTime() >= startMs - 1000,
+  );
+  if (sessionTrades.length === 0) return balanceLoss;
+
+  const netPnl = sessionTrades.reduce((sum, trade) => sum + Number(trade.profit || 0), 0);
+  const tradeDrawdown = Math.max(0, Number((-netPnl).toFixed(2)));
+  return Math.max(balanceLoss, tradeDrawdown);
+}
+
+function resolveSessionStartBalance(
+  sessionStartingBalance: number | null,
+  sessionStartingBalRef: number | null,
+  derivConnected: boolean,
+  workspace: Workspace | null,
+  activeBalance: number,
+) {
+  if (sessionStartingBalance !== null) return sessionStartingBalance;
+  if (sessionStartingBalRef !== null) return sessionStartingBalRef;
+  if (derivConnected) return activeBalance;
+  return workspace?.starting_balance ?? activeBalance;
+}
+function computeGuardPercent(used: number, limit: number) { if (limit <= 0) return 0; return Math.min(100, (used / limit) * 100); }
 
 // ============================================================================
 // Robust Multi-Layer Local Storage Helpers (Guarantees Stats Never Get Lost)
@@ -152,6 +239,36 @@ function App() {
   const [allowBotLiveTrading, setAllowBotLiveTradingState] = useState(false);
   const [maxBalancePercent, setMaxBalancePercentState] = useState(2);
   const sessionStartingBalRef = useRef<number | null>(null);
+  const sessionStartAtRef = useRef<string | null>(null);
+  const [sessionStartingBalance, setSessionStartingBalance] = useState<number | null>(null);
+  const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
+
+  const syncSessionStartBalance = (balance: number) => {
+    const startedAt = new Date().toISOString();
+    sessionStartingBalRef.current = balance;
+    sessionStartAtRef.current = startedAt;
+    setSessionStartingBalance(balance);
+    setSessionStartedAt(startedAt);
+    const uid = userRef.current?.id || user?.id || 'guest';
+    sessionStorage.setItem(getSessionStartKey(uid), String(balance));
+    sessionStorage.setItem(getSessionStartAtKey(uid), startedAt);
+  };
+
+  const clearSessionStartBalance = () => {
+    sessionStartingBalRef.current = null;
+    sessionStartAtRef.current = null;
+    setSessionStartingBalance(null);
+    setSessionStartedAt(null);
+    const uid = userRef.current?.id || user?.id || 'guest';
+    sessionStorage.removeItem(getSessionStartKey(uid));
+    sessionStorage.removeItem(getSessionStartAtKey(uid));
+  };
+
+  const resetSessionBaseline = () => {
+    const baseline = deriv.account?.balance ?? workspace?.balance ?? workspace?.starting_balance ?? 0;
+    syncSessionStartBalance(baseline);
+    setNotice(`Session baseline reset to ${money(baseline)}. Loss counter cleared.`);
+  };
 
   const setAllowBotLiveTrading = (allowed: boolean) => {
     setAllowBotLiveTradingState(allowed);
@@ -177,24 +294,25 @@ function App() {
   // Track session starting balance for loss limit calculations (restored from sessionStorage across refresh)
   useEffect(() => {
     const uid = user?.id || 'guest';
-    const saved = sessionStorage.getItem(`apex_session_start_bal_${uid}`);
-    if (saved && !isNaN(Number(saved))) {
-      sessionStartingBalRef.current = Number(saved);
+    const restored = restoreSessionBaseline(uid);
+    if (restored.balance !== null) {
+      sessionStartingBalRef.current = restored.balance;
+      setSessionStartingBalance(restored.balance);
+    }
+    if (restored.startedAt) {
+      sessionStartAtRef.current = restored.startedAt;
+      setSessionStartedAt(restored.startedAt);
     }
   }, [user]);
 
   useEffect(() => {
     if (deriv.account) {
       if (sessionStartingBalRef.current === null) {
-        sessionStartingBalRef.current = deriv.account.balance;
-        const uid = user?.id || 'guest';
-        sessionStorage.setItem(`apex_session_start_bal_${uid}`, String(deriv.account.balance));
+        syncSessionStartBalance(deriv.account.balance);
       }
     } else if (workspace) {
       if (sessionStartingBalRef.current === null) {
-        sessionStartingBalRef.current = workspace.starting_balance;
-        const uid = user?.id || 'guest';
-        sessionStorage.setItem(`apex_session_start_bal_${uid}`, String(workspace.starting_balance));
+        syncSessionStartBalance(workspace.starting_balance);
       }
     }
   }, [deriv.account, workspace, user]);
@@ -479,7 +597,7 @@ function App() {
         if (switchAndArm) {
           void (async () => {
             await handleDerivSwitchAccount(realAcc.loginid);
-            sessionStartingBalRef.current = realAcc.balance;
+            syncSessionStartBalance(realAcc.balance);
             setLiveArmed(true);
             setNotice(`Switched to Real account (${realAcc.loginid}) and LIVE TRADING ARMED.`);
           })();
@@ -502,7 +620,7 @@ function App() {
       `Real money will be moved on Deriv. Do you wish to proceed?`
     );
     if (confirmed) {
-      sessionStartingBalRef.current = deriv.account.balance;
+      syncSessionStartBalance(deriv.account.balance);
       setLiveArmed(true);
       setNotice(`LIVE TRADING ARMED on account ${deriv.account.loginid}. Real funds active.`);
     }
@@ -523,7 +641,7 @@ function App() {
         localStorage.setItem(`apex_deriv_token_${userRef.current.id}`, token);
       }
       localStorage.setItem('apex_deriv_token', token);
-      sessionStartingBalRef.current = result.account.balance;
+      syncSessionStartBalance(result.account.balance);
 
       if (!isAutoReconnect) {
         // CRITICAL SAFETY: Stop running bots for this user
@@ -562,7 +680,7 @@ function App() {
     setNotice(`Switching to account ${loginid}…`);
     const result = await deriv.switchAccount(loginid);
     if (result.ok && result.account) {
-      sessionStartingBalRef.current = result.account.balance;
+      syncSessionStartBalance(result.account.balance);
       await updateWorkspace({
         deriv_loginid: result.account.loginid,
         deriv_is_virtual: result.account.is_virtual,
@@ -577,7 +695,7 @@ function App() {
   const handleDerivDisconnect = () => {
     setLiveArmed(false);
     deriv.disconnect();
-    sessionStartingBalRef.current = null;
+    clearSessionStartBalance();
     if (userRef.current) {
       localStorage.removeItem(`apex_deriv_token_${userRef.current.id}`);
     }
@@ -591,7 +709,7 @@ function App() {
       deriv.disconnect();
     }
     setLiveArmed(false);
-    sessionStartingBalRef.current = null;
+    clearSessionStartBalance();
     if (userRef.current) {
       localStorage.removeItem(`apex_deriv_token_${userRef.current.id}`);
     }
@@ -608,10 +726,12 @@ function App() {
   const maxBalancePercentRef = useRef(maxBalancePercent);
   const workspaceRef = useRef(workspace);
   const botsRef = useRef(bots);
+  const tradesRef = useRef(trades);
   const tickRef = useRef(tick);
 
   workspaceRef.current = workspace;
   botsRef.current = bots;
+  tradesRef.current = trades;
   tickRef.current = tick;
   liveArmedRef.current = liveArmed;
   allowBotLiveRef.current = allowBotLiveTrading;
@@ -631,6 +751,20 @@ function App() {
     const botLiveAllowed = allowBotLiveRef.current;
     const maxPercent = maxBalancePercentRef.current;
 
+    const sessionStartBal = sessionStartingBalRef.current ?? (derivConnected && deriv.account ? deriv.account.balance : ws.starting_balance);
+    const sessionCurrentBal = derivConnected && deriv.account ? deriv.account.balance : ws.balance;
+    const sessionLossUsed = computeSessionLoss(
+      sessionStartBal,
+      sessionCurrentBal,
+      tradesRef.current,
+      sessionStartAtRef.current,
+    );
+    if (sessionLossUsed >= ws.loss_limit) {
+      if (isDerivReal && currentlyArmed) setLiveArmed(false);
+      setNotice(`Trading blocked: Session loss limit of ${money(ws.loss_limit)} reached (${money(sessionLossUsed)} lost this session).`);
+      return;
+    }
+
     if (derivConnected && deriv.account) {
       // Safety checks for REAL accounts:
       if (isDerivReal) {
@@ -648,16 +782,7 @@ function App() {
           return;
         }
 
-        // 1. Session loss limit check
-        const startingBal = sessionStartingBalRef.current ?? deriv.account.balance;
-        const currentLoss = Math.max(0, startingBal - deriv.account.balance);
-        if (currentLoss >= ws.loss_limit) {
-          setLiveArmed(false);
-          setNotice(`Live trading blocked: Session loss limit of ${money(ws.loss_limit)} reached! Live trading auto-disarmed for safety.`);
-          return;
-        }
-
-        // 2. Stake cap (% of balance)
+        // Stake cap (% of balance)
         const maxAllowedStake = Math.max(1, Number(((deriv.account.balance * maxPercent) / 100).toFixed(2)));
         if (details.stake > maxAllowedStake) {
           setNotice(`Trade blocked: Stake (${money(details.stake)}) exceeds maximum allowed risk cap of ${maxPercent}% of balance (${money(maxAllowedStake)}).`);
@@ -747,7 +872,22 @@ function App() {
               updateBotStatsFromTrade(details.botName, finalProfit, win);
             }
 
-            // High-visibility Won/Lost alert banner
+            applyBalanceDelta(finalProfit);
+
+            const postBal = (deriv.account?.balance ?? 0) + finalProfit;
+            const postStart = sessionStartingBalRef.current ?? postBal;
+            const settledTrades = tradesRef.current.map((trade) =>
+              trade.id === tradeId
+                ? { ...trade, result: poc.status, profit: finalProfit }
+                : trade
+            );
+            const postLoss = computeSessionLoss(
+              postStart,
+              postBal,
+              settledTrades,
+              sessionStartAtRef.current,
+            );
+
             setTradeAlert({
               id: Date.now(),
               status: poc.status,
@@ -757,17 +897,11 @@ function App() {
               stake: details.stake,
               botName: details.botName,
               accountType: deriv.account?.is_virtual ? 'Demo' : 'Real',
+              sessionLossAfter: postLoss,
             });
-
-            if (isDerivReal) {
-              const postBal = deriv.account?.balance ?? 0;
-              const startingBal = sessionStartingBalRef.current ?? postBal;
-              if (Math.max(0, startingBal - postBal) >= ws.loss_limit) {
-                setLiveArmed(false);
-                setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. Live trading disarmed.`);
-              } else {
-                setNotice(`${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`);
-              }
+            if (postLoss >= ws.loss_limit) {
+              if (isDerivReal) setLiveArmed(false);
+              setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. ${isDerivReal ? 'Live trading disarmed.' : 'New trades blocked until you reset the session baseline.'}`);
             } else {
               setNotice(`${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`);
             }
@@ -826,6 +960,14 @@ function App() {
     if (details.botName) {
       updateBotStatsFromTrade(details.botName, profit, win);
     }
+    const newBalance = Number((ws.balance + profit).toFixed(2));
+    const settledTrades = [trade, ...tradesRef.current.filter((item) => item.id !== trade.id)];
+    const postLoss = computeSessionLoss(
+      sessionStartBal,
+      newBalance,
+      settledTrades,
+      sessionStartAtRef.current,
+    );
     setTradeAlert({
       id: Date.now(),
       status: win ? 'won' : 'lost',
@@ -835,8 +977,13 @@ function App() {
       stake: details.stake,
       botName: details.botName,
       accountType: 'Demo',
+      sessionLossAfter: postLoss,
     });
-    setNotice(`${win ? '🎉' : '📉'} ${details.direction} trade ${win ? 'WON' : 'LOST'} ${win ? '+' : ''}${money(profit)}`);
+    if (postLoss >= ws.loss_limit) {
+      setNotice(`Session loss limit (${money(ws.loss_limit)}) reached. New trades blocked until you reset the session baseline in Settings.`);
+    } else {
+      setNotice(`${win ? '🎉' : '📉'} ${details.direction} trade ${win ? 'WON' : 'LOST'} ${win ? '+' : ''}${money(profit)}`);
+    }
   };
   const toggleBot = async (bot: BotRow) => {
     const nextActive = !bot.active;
@@ -880,6 +1027,18 @@ function App() {
   const runTradeRef = useRef(runTrade);
   runTradeRef.current = runTrade;
 
+  const activeBalance = derivConnected && deriv.account ? deriv.account.balance : (workspace?.balance ?? 0);
+  const sessionStartBalance = sessionStartingBalance ?? activeBalance;
+  const sessionLossUsed = computeSessionLoss(
+    sessionStartBalance,
+    activeBalance,
+    trades,
+    sessionStartedAt,
+  );
+  const lossLimit = Math.max(1, Number(workspace?.loss_limit ?? 50));
+  const guardPercent = computeGuardPercent(sessionLossUsed, lossLimit);
+  const lossLimitReached = lossLimit > 0 && sessionLossUsed >= lossLimit;
+
   const content = loading ? (
     <div className="loading"><RefreshCw className="spin" size={18} /> Loading workspace…</div>
   ) : (
@@ -908,6 +1067,11 @@ function App() {
       setAllowBotLiveTrading={setAllowBotLiveTrading}
       maxBalancePercent={maxBalancePercent}
       setMaxBalancePercent={setMaxBalancePercent}
+      sessionLossUsed={sessionLossUsed}
+      lossLimit={lossLimit}
+      guardPercent={guardPercent}
+      lossLimitReached={lossLimitReached}
+      resetSessionBaseline={resetSessionBaseline}
     />
   );
 
@@ -981,7 +1145,10 @@ function App() {
         <div className="sidebar-footer">
           <div className="guard">
             <ShieldCheck size={17} />
-            <div><b>Loss guard active</b><span>Auto-protect enabled</span></div>
+            <div>
+              <b>{lossLimitReached ? 'Limit reached' : 'Loss guard active'}</b>
+              <span>{money(sessionLossUsed)} / {money(lossLimit)} session loss</span>
+            </div>
           </div>
           {derivConnected && (
             <button className="mini-settings disconnect" onClick={handleDerivDisconnect}>
@@ -1118,39 +1285,18 @@ function App() {
           })}
         </div>
         <div className="page-content">
-          {tradeAlert && (
-            <div className={`trade-result-alert ${tradeAlert.status}`}>
-              <div className="trade-alert-icon">
-                {tradeAlert.status === 'won' ? <CheckCircle2 size={24} /> : <AlertCircle size={24} />}
-              </div>
-              <div className="trade-alert-body">
-                <div className="trade-alert-headline">
-                  <span className={`trade-alert-badge ${tradeAlert.status}`}>
-                    {tradeAlert.status === 'won' ? 'TRADE WON' : 'TRADE LOST'}
-                  </span>
-                  <span className={`trade-alert-profit ${tradeAlert.status}`}>
-                    {tradeAlert.status === 'won' ? `+${money(tradeAlert.profit)}` : `-${money(Math.abs(tradeAlert.profit))}`}
-                  </span>
-                </div>
-                <div className="trade-alert-details">
-                  <b>{tradeAlert.direction}</b> on <b>{tradeAlert.instrument}</b> · Stake: {money(tradeAlert.stake)} · {tradeAlert.accountType}
-                  {tradeAlert.botName ? ` · Bot: ${tradeAlert.botName}` : ' · Manual'}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="trade-alert-close"
-                onClick={() => setTradeAlert(null)}
-                title="Dismiss alert"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          )}
           {notice && <div className="toast"><Check size={16} /> {notice}<button onClick={() => setNotice('')}><X size={14} /></button></div>}
           {content}
         </div>
       </main>
+      {tradeAlert && (
+        <TradeResultToast
+          alert={tradeAlert}
+          sessionLossUsed={sessionLossUsed}
+          lossLimit={lossLimit}
+          onDismiss={() => setTradeAlert(null)}
+        />
+      )}
       {policyTab && (
         <PolicyModal
           initialTab={policyTab}
@@ -1186,6 +1332,11 @@ function PageView({
   setAllowBotLiveTrading,
   maxBalancePercent,
   setMaxBalancePercent,
+  sessionLossUsed,
+  lossLimit,
+  guardPercent,
+  lossLimitReached,
+  resetSessionBaseline,
 }: {
   page: Page;
   workspace: Workspace | null;
@@ -1211,9 +1362,14 @@ function PageView({
   setAllowBotLiveTrading: (allowed: boolean) => void;
   maxBalancePercent: number;
   setMaxBalancePercent: (percent: number) => void;
+  sessionLossUsed: number;
+  lossLimit: number;
+  guardPercent: number;
+  lossLimitReached: boolean;
+  resetSessionBaseline: () => void;
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
-  if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} />;
+  if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} />;
   if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} />;
   if (page === 'manual') {
     return (
@@ -1255,14 +1411,104 @@ function PageView({
       setAllowBotLiveTrading={setAllowBotLiveTrading}
       maxBalancePercent={maxBalancePercent}
       setMaxBalancePercent={setMaxBalancePercent}
+      sessionLossUsed={sessionLossUsed}
+      lossLimit={lossLimit}
+      guardPercent={guardPercent}
+      lossLimitReached={lossLimitReached}
+      resetSessionBaseline={resetSessionBaseline}
     />
   );
 }
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) { return <div className="page-header"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action}</div>; }
 function Stat({ label, value, detail, tone = 'neutral', icon: Icon = Activity }: { label: string; value: string; detail: string; tone?: string; icon?: typeof Activity }) { return <div className="stat"><div className={`stat-icon ${tone}`}><Icon size={18} /></div><div><span>{label}</span><strong>{value}</strong><small className={tone === 'danger' ? 'negative' : tone === 'success' ? 'positive' : ''}>{detail}</small></div></div>; }
-function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivConnected, isDerivReal, derivAccount }: { workspace: Workspace; bots: BotRow[]; trades: Trade[]; tick: number; toggleBot: (bot: BotRow) => Promise<void>; setPage: (page: Page) => void; derivConnected: boolean; isDerivReal: boolean; derivAccount: { loginid: string; balance: number; is_virtual: boolean } | null }) {
-  const pnl = trades.reduce((sum, trade) => sum + Number(trade.profit), 0); const active = bots.filter((bot) => bot.active); const used = Math.max(0, workspace.starting_balance - workspace.balance); const guard = Math.min(100, used / workspace.loss_limit * 100);
+
+function TradeResultToast({
+  alert,
+  sessionLossUsed,
+  lossLimit,
+  onDismiss,
+}: {
+  alert: TradeAlert;
+  sessionLossUsed: number;
+  lossLimit: number;
+  onDismiss: () => void;
+}) {
+  const isWin = alert.status === 'won';
+  const displayLoss = alert.sessionLossAfter ?? sessionLossUsed;
+  const guardPercent = computeGuardPercent(displayLoss, lossLimit);
+  const instrument = alert.instrument.replace('Volatility ', 'Vol ').replace(' Index', '');
+  const source = alert.botName ?? 'Manual';
+
+  return (
+    <div className={`trade-result-toast ${alert.status}`} role="alert">
+      <div className="trade-result-toast-main">
+        {isWin ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
+        <span className={`trade-result-toast-pnl ${alert.status}`}>
+          {isWin ? 'Won' : 'Lost'} {isWin ? '+' : ''}{money(alert.profit)}
+        </span>
+        <span className="trade-result-toast-meta">
+          {alert.direction} · {instrument} · Stake {money(alert.stake)} · {alert.accountType} · {source}
+        </span>
+        <button type="button" className="trade-result-toast-close" onClick={onDismiss} aria-label="Dismiss">
+          <X size={12} />
+        </button>
+      </div>
+      <div className="trade-result-toast-foot">
+        <span>Loss guard {money(displayLoss)}/{money(lossLimit)}</span>
+        <div className={`trade-result-toast-bar ${guardPercent >= 75 ? 'warning' : ''} ${displayLoss >= lossLimit ? 'danger' : ''}`}>
+          <span style={{ width: `${guardPercent}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LossGuardRail({
+  sessionLossUsed,
+  lossLimit,
+  guardPercent,
+  lossLimitReached,
+  onAdjust,
+}: {
+  sessionLossUsed: number;
+  lossLimit: number;
+  guardPercent: number;
+  lossLimitReached: boolean;
+  onAdjust?: () => void;
+}) {
+  const remaining = Math.max(0, lossLimit - sessionLossUsed);
+  return (
+    <>
+      <div className={`guard-value ${lossLimitReached ? 'limit-reached' : ''}`}>
+        <strong>{money(sessionLossUsed)}</strong>
+        <span>of {money(lossLimit)} session loss</span>
+      </div>
+      <div className={`progress ${lossLimitReached ? 'danger' : guardPercent >= 75 ? 'warning' : ''}`}>
+        <span style={{ width: `${guardPercent}%` }} />
+      </div>
+      <div className="guard-footer">
+        <span>
+          <i className={`live-dot ${lossLimitReached ? 'danger-dot' : ''}`} />
+          {lossLimitReached ? 'Limit reached — trades blocked' : `${money(remaining)} remaining`}
+        </span>
+        {onAdjust && (
+          <button type="button" className="text-button" onClick={onAdjust}>
+            Adjust limit <ChevronRight size={15} />
+          </button>
+        )}
+      </div>
+      <div className="guard-note">
+        {lossLimitReached
+          ? 'Reset your session baseline in Settings to start fresh, or raise the limit.'
+          : 'New trades pause automatically when the session loss limit is reached.'}
+      </div>
+    </>
+  );
+}
+
+function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivConnected, isDerivReal, derivAccount, sessionLossUsed, lossLimit, guardPercent, lossLimitReached }: { workspace: Workspace; bots: BotRow[]; trades: Trade[]; tick: number; toggleBot: (bot: BotRow) => Promise<void>; setPage: (page: Page) => void; derivConnected: boolean; isDerivReal: boolean; derivAccount: { loginid: string; balance: number; is_virtual: boolean } | null; sessionLossUsed: number; lossLimit: number; guardPercent: number; lossLimitReached: boolean }) {
+  const pnl = trades.reduce((sum, trade) => sum + Number(trade.profit), 0); const active = bots.filter((bot) => bot.active);
   const balanceValue = derivConnected && derivAccount ? derivAccount.balance : workspace.balance;
   const balanceLabel = derivConnected && derivAccount ? (isDerivReal ? 'Deriv live account' : 'Deriv demo account') : (workspace.mode === 'demo' ? 'Demo account' : 'Live account');
   const headerDesc = derivConnected ? (isDerivReal ? "You're connected to a real Deriv account. Trades will execute with real funds." : "You're connected to a Deriv demo account. Trades execute on Deriv with virtual funds.") : "Your synthetic trading workspace is running smoothly. Review your guardrails before you deploy.";
@@ -1274,7 +1520,7 @@ function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivCon
     const winRate = hasTrades ? Math.round((wins / closed.length) * 100) : 0;
     const botPnl = closed.reduce((sum, t) => sum + Number(t.profit), 0);
     return <div className="bot-row" key={bot.id}><div className="bot-avatar"><Bot size={18} /></div><div className="bot-copy"><strong>{bot.name}</strong><span><i className="live-dot" /> {bot.active ? 'Running — trading every 5s' : 'Paused'}</span></div><div className="bot-metric"><span>{hasTrades ? `${winRate}% win · ${closed.length} trades` : '0 trades · Not run yet'}</span><b className={botPnl > 0 ? 'positive' : botPnl < 0 ? 'negative' : 'muted'}>{money(botPnl)}</b></div><button className="icon-button" onClick={() => void toggleBot(bot)}><Pause size={16} /></button></div>;
-  }) : <EmptyState title="No active bots" text="Activate a free bot and it will watch synthetic markets for you." action={<button className="secondary" onClick={() => setPage('bots')}>Browse free bots</button>} />}</section><section className="panel guard-panel"><div className="panel-title"><div><span className="eyebrow">Risk controls</span><h2>Loss-limit guardrail</h2></div><ShieldCheck className="success-icon" size={22} /></div><div className="guard-value"><strong>{money(used)}</strong><span>of {money(workspace.loss_limit)} used</span></div><div className="progress"><span style={{ width: `${guard}%` }} /></div><div className="guard-footer"><span><i className="live-dot" /> Protection enabled</span><button className="text-button" onClick={() => setPage('settings')}>Adjust limit <ChevronRight size={15} /></button></div><div className="guard-note">New trades pause automatically when the session loss limit is reached.</div></section></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Equity curve</h2></div><button className="text-button" onClick={() => setPage('record')}>Full track record <ChevronRight size={15} /></button></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Latest activity</span><h2>Trade history</h2></div></div><TradeTable trades={trades.slice(0, 5)} /></section></>;
+  }) : <EmptyState title="No active bots" text="Activate a free bot and it will watch synthetic markets for you." action={<button className="secondary" onClick={() => setPage('bots')}>Browse free bots</button>} />}</section><section className="panel guard-panel"><div className="panel-title"><div><span className="eyebrow">Risk controls</span><h2>Loss-limit guardrail</h2></div><ShieldCheck className={lossLimitReached ? 'danger-icon' : 'success-icon'} size={22} /></div><LossGuardRail sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} onAdjust={() => setPage('settings')} /></section></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Equity curve</h2></div><button className="text-button" onClick={() => setPage('record')}>Full track record <ChevronRight size={15} /></button></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Latest activity</span><h2>Trade history</h2></div></div><TradeTable trades={trades.slice(0, 5)} /></section></>;
 }
 
 function BotStats({ bot, userTrades }: { bot: BotRow; userTrades: Trade[] }) {
@@ -1944,6 +2190,11 @@ function Settings({
   setAllowBotLiveTrading,
   maxBalancePercent,
   setMaxBalancePercent,
+  sessionLossUsed,
+  lossLimit,
+  guardPercent,
+  lossLimitReached,
+  resetSessionBaseline,
 }: {
   workspace: Workspace;
   updateWorkspace: (changes: Partial<Workspace>) => Promise<void>;
@@ -1962,9 +2213,26 @@ function Settings({
   setAllowBotLiveTrading: (allowed: boolean) => void;
   maxBalancePercent: number;
   setMaxBalancePercent: (percent: number) => void;
+  sessionLossUsed: number;
+  lossLimit: number;
+  guardPercent: number;
+  lossLimitReached: boolean;
+  resetSessionBaseline: () => void;
 }) {
-  const [limit, setLimit] = useState(workspace.loss_limit);
+  const [limitInput, setLimitInput] = useState(String(Math.max(1, Number(workspace.loss_limit ?? 50))));
   const activeBalance = derivConnected && deriv.account ? deriv.account.balance : workspace.balance;
+  const parsedLimit = Math.max(1, Math.min(100000, Number(limitInput) || lossLimit));
+
+  useEffect(() => {
+    setLimitInput(String(Math.max(1, Number(workspace.loss_limit ?? 50))));
+  }, [workspace.loss_limit]);
+
+  const saveLossLimit = (value: number) => {
+    const validated = Math.max(1, Math.min(100000, value));
+    setLimitInput(String(validated));
+    void updateWorkspace({ loss_limit: validated });
+    setNotice(`Session loss limit saved: ${money(validated)}`);
+  };
 
   return (
     <>
@@ -2116,29 +2384,78 @@ function Settings({
           </div>
         </section>
 
-        <section className="panel">
-          <span className="eyebrow">Risk guardrails</span>
-          <h2>Session loss limit</h2>
-          <p className="muted">New trades stop and live trading disarms automatically when your session loss reaches this amount.</p>
-          <div className="input-prefix big">
-            <span>$</span>
-            <input type="number" value={limit} onChange={(event) => setLimit(Number(event.target.value))} />
+        <section className="panel guard-panel">
+          <div className="panel-title">
+            <div><span className="eyebrow">Risk guardrails</span><h2>Session loss limit</h2></div>
+            <ShieldCheck className={lossLimitReached ? 'danger-icon' : 'success-icon'} size={22} />
           </div>
-          <button className="primary" onClick={() => void updateWorkspace({ loss_limit: limit })}>Save loss limit</button>
+          <p className="muted">New trades stop automatically when your session drawdown reaches this amount. Works on Deriv demo, Deriv live, and synthetic workspace.</p>
+          <LossGuardRail
+            sessionLossUsed={sessionLossUsed}
+            lossLimit={lossLimit}
+            guardPercent={guardPercent}
+            lossLimitReached={lossLimitReached}
+          />
+          <div className="loss-limit-controls">
+            <label className="field-label" htmlFor="loss-limit-input">Set session loss limit</label>
+            <div className="loss-limit-presets">
+              {[50, 100, 250, 500, 1000].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={parsedLimit === preset ? 'selected' : ''}
+                  onClick={() => saveLossLimit(preset)}
+                >
+                  ${preset.toLocaleString()}
+                </button>
+              ))}
+            </div>
+            <div className="input-prefix big">
+              <span>$</span>
+              <input
+                id="loss-limit-input"
+                type="number"
+                min={1}
+                max={100000}
+                step={1}
+                value={limitInput}
+                onChange={(event) => setLimitInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') saveLossLimit(parsedLimit);
+                }}
+              />
+            </div>
+            <div className="loss-limit-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={() => saveLossLimit(parsedLimit)}
+              >
+                Save loss limit
+              </button>
+              <button type="button" className="secondary" onClick={resetSessionBaseline}>
+                <RefreshCw size={16} /> Reset session baseline
+              </button>
+            </div>
+            <div className="guard-note">
+              Current session loss: <b>{money(sessionLossUsed)}</b> · {lossLimitReached ? 'Limit reached — trading blocked' : `${money(Math.max(0, parsedLimit - sessionLossUsed))} remaining at this limit`}
+            </div>
+          </div>
         </section>
 
         <section className="panel reset-panel">
           <span className="eyebrow">Reset controls</span>
           <h2>Start a clean demo session</h2>
-          <p className="muted">Resetting returns the demo balance to $10,000. Your track record stays available for review.</p>
+          <p className="muted">Resetting returns the synthetic demo balance to $10,000 and clears the session loss counter. Your track record stays available for review.</p>
           <button
             className="secondary"
             onClick={() => {
               void updateWorkspace({ balance: workspace.starting_balance });
-              setNotice('Demo balance reset to $10,000.');
+              resetSessionBaseline();
+              setNotice('Demo balance reset to $10,000. Session loss counter cleared.');
             }}
           >
-            <RefreshCw size={16} /> Reset balance
+            <RefreshCw size={16} /> Reset balance & session
           </button>
         </section>
       </div>

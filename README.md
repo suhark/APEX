@@ -1,3 +1,3 @@
 # APEX
 
-[![Open in Bolt](https://bolt.new/static/open-in-bolt.svg)](https://bolt.new/~/sb1-yywdewe5)
+Algorithmic execution terminal for synthetic volatility index trading with built-in risk guardrails.

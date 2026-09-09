@@ -226,6 +226,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   .session-panel { align-items: flex-start; flex-direction: column; gap: 16px; }
   .session-stats { padding: 0; border: 0; text-align: left; }
   .toast { right: 14px; left: 14px; top: 75px; }
+  .trade-result-toast { right: 14px; left: 14px; width: auto; top: 75px; max-width: none; }
   .chart-panel { min-height: 320px; }
   .price-chart { height: 200px; }
   .bot-stats.wide { grid-template-columns: repeat(3, 1fr); }
@@ -482,106 +483,188 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   color: #ffffff;
 }
 
-/* Trade Result Alert Banner */
-.trade-result-alert {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 18px;
+/* Trade result toast — compact */
+.trade-result-toast {
+  position: fixed;
+  z-index: 1200;
+  top: 82px;
+  right: 28px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 8px 10px 7px;
   border-radius: 8px;
-  margin-bottom: 16px;
-  animation: slideInDown 0.25s ease-out;
-  position: relative;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  background: rgba(8, 16, 15, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  animation: tradeResultIn 0.25s ease-out;
+  backdrop-filter: blur(12px);
 }
-@keyframes slideInDown {
+.trade-result-toast.won {
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.trade-result-toast.lost {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.trade-result-toast.won > .trade-result-toast-main > svg {
+  color: #34d399;
+  flex-shrink: 0;
+}
+.trade-result-toast.lost > .trade-result-toast-main > svg {
+  color: #f87171;
+  flex-shrink: 0;
+}
+@keyframes tradeResultIn {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(-6px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
-.trade-result-alert.won {
-  background: linear-gradient(135deg, #062f1a 0%, #0a1f16 100%);
-  border: 1px solid #10b981;
-  color: #ecfdf5;
+.trade-result-toast-main {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  line-height: 1.3;
 }
-.trade-result-alert.lost {
-  background: linear-gradient(135deg, #2f0e0e 0%, #1f0a0a 100%);
-  border: 1px solid #ef4444;
-  color: #fef2f2;
+.trade-result-toast-pnl {
+  flex-shrink: 0;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
-.trade-alert-icon {
+.trade-result-toast-pnl.won {
+  color: #34d399;
+}
+.trade-result-toast-pnl.lost {
+  color: #f87171;
+}
+.trade-result-toast-meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: #8aa39c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trade-result-toast-close {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-}
-.trade-result-alert.won .trade-alert-icon {
-  color: #34d399;
-}
-.trade-result-alert.lost .trade-alert-icon {
-  color: #f87171;
-}
-.trade-alert-body {
-  flex: 1;
-}
-.trade-alert-headline {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 3px;
-}
-.trade-alert-badge {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 2px 7px;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  border: 0;
   border-radius: 4px;
-}
-.trade-alert-badge.won {
-  background: #047857;
-  color: #d1fae5;
-}
-.trade-alert-badge.lost {
-  background: #b91c1c;
-  color: #fee2e2;
-}
-.trade-alert-profit {
-  font-family: 'DM Mono', monospace;
-  font-weight: 700;
-  font-size: 15px;
-}
-.trade-alert-profit.won {
-  color: #34d399;
-}
-.trade-alert-profit.lost {
-  color: #f87171;
-}
-.trade-alert-details {
-  font-size: 11px;
-  color: #94a3b8;
-}
-.trade-alert-details b {
-  color: #f1f5f9;
-}
-.trade-alert-close {
   background: transparent;
-  border: none;
-  color: #94a3b8;
+  color: #64748b;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.trade-result-toast-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+}
+.trade-result-toast-foot {
   display: flex;
   align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
-.trade-alert-close:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+.trade-result-toast-foot > span {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #64748b;
+  font-family: 'DM Mono', monospace;
+}
+.trade-result-toast-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.trade-result-toast-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #059669, #34d399);
+  transition: width 0.35s ease;
+}
+.trade-result-toast-bar.warning span {
+  background: linear-gradient(90deg, #d97706, #f59e0b);
+}
+.trade-result-toast-bar.danger span {
+  background: linear-gradient(90deg, #dc2626, #ef4444);
+}
+
+/* Loss guardrail states */
+.guard-value.limit-reached strong {
+  color: #f87171;
+}
+.progress.warning span {
+  background: linear-gradient(90deg, #d97706, #f59e0b);
+}
+.progress.danger span {
+  background: linear-gradient(90deg, #dc2626, #ef4444);
+}
+.live-dot.danger-dot {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+.danger-icon {
+  color: #f87171;
+}
+.loss-limit-controls {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #1c2926;
+}
+.field-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8aa39c;
+}
+.loss-limit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.loss-limit-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.loss-limit-presets button {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #1c2926;
+  background: #0b1514;
+  color: #8aa39c;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.loss-limit-presets button:hover {
+  border-color: #2d4a44;
+  color: #d1e0dc;
+}
+.loss-limit-presets button.selected {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: rgba(16, 185, 129, 0.12);
+  color: #6ee7b7;
 }
 
 /* Settings quick account switcher bar */

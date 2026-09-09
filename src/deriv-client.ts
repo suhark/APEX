@@ -137,6 +137,20 @@ function setAccountInfo(account: DerivAccount | null) {
   accountListeners.forEach((cb) => cb(account));
 }
 
+export function applyBalanceDelta(delta: number) {
+  if (!accountInfo) return;
+  const nextBalance = Number((accountInfo.balance + delta).toFixed(2));
+  const updated = { ...accountInfo, balance: nextBalance };
+  setAccountInfo(updated);
+  if (availableAccounts.length > 0) {
+    setAvailableAccounts(
+      availableAccounts.map((account) =>
+        account.loginid === updated.loginid ? { ...account, balance: nextBalance } : account
+      )
+    );
+  }
+}
+
 function setAvailableAccounts(accounts: DerivAccount[]) {
   availableAccounts = accounts;
   availableAccountsListeners.forEach((cb) => cb(accounts));
