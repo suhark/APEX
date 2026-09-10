@@ -472,9 +472,10 @@ export function disconnect() {
 
 export async function getProposal(params: {
   symbol: DerivSymbol;
-  contract_type: 'CALL' | 'PUT';
+  contract_type: 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
   stake: number;
   duration: number;
+  barrier?: number; // digit 0–9, required for DIGITOVER/UNDER/MATCH/DIFF
 }): Promise<DerivProposal> {
   const payload: Record<string, unknown> = {
     proposal: 1,
@@ -486,6 +487,10 @@ export async function getProposal(params: {
     duration_unit: 't',
     symbol: params.symbol,
   };
+  // Digit contracts that need a barrier (specific digit)
+  if (params.barrier !== undefined) {
+    payload.barrier = String(params.barrier);
+  }
   // Options API requires underlying_symbol instead of symbol
   if (authToken && isPatToken(authToken)) {
     payload.underlying_symbol = params.symbol;
@@ -619,9 +624,10 @@ export function subscribeContract(contractId: number, cb: (result: DerivTradeRes
 
 export async function executeTrade(params: {
   symbol: DerivSymbol;
-  contract_type: 'CALL' | 'PUT';
+  contract_type: 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
   stake: number;
   duration: number;
+  barrier?: number;
 }): Promise<{ proposal: DerivProposal; contractId: number; buyPrice: number; entryPrice: number }> {
   const proposal = await getProposal(params);
   const buy = await buyContract(proposal.id, proposal.ask_price);

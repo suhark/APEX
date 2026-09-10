@@ -1077,7 +1077,7 @@ function App() {
   allowBotLiveRef.current = allowBotLiveTrading;
   maxBalancePercentRef.current = maxBalancePercent;
 
-  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => {
+  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; barrier?: number }) => {
     if (!workspace) return;
     const ws = workspaceRef.current;
     if (!ws) return;
@@ -1146,9 +1146,10 @@ function App() {
       try {
         const result = await executeTrade({
           symbol: symbol as DerivSymbol,
-          contract_type: details.direction as 'CALL' | 'PUT',
+          contract_type: details.direction as 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF',
           stake: details.stake,
           duration: 5,
+          barrier: details.barrier,
         });
 
         const tradeId = (typeof crypto !== 'undefined' && crypto.randomUUID)
@@ -1945,7 +1946,7 @@ function PageView({
   bots: BotRow[];
   trades: Trade[];
   tick: number;
-  runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>;
+  runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; barrier?: number }) => Promise<void>;
   toggleBot: (bot: BotRow) => Promise<void>;
   updateWorkspace: (changes: Partial<Workspace>) => Promise<void>;
   setPage: (page: Page) => void;
@@ -1998,7 +1999,7 @@ function PageView({
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
   if (page === 'phantom') return <PhantomScalper bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Phantom Scalper', cfg)} initialConfig={botConfig?.['Phantom Scalper'] as PhantomConfig | undefined} />;
   if (page === 'stpv3') return <TrendPullbackV3 bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Trend Pullback V3', cfg)} initialConfig={botConfig?.['Trend Pullback V3'] as StpConfig | undefined} />;
-  if (page === 'digits') return <DigitsAnalyser derivConnected={derivConnected} tick={tick} />;
+  if (page === 'digits') return <DigitsAnalyser derivConnected={derivConnected} tick={tick} runTrade={runTrade} derivAccount={deriv.account} workspaceBalance={workspace?.balance ?? 0} />;
   if (page === 'record') return <Record trades={trades} />;
   return (
     <Settings
