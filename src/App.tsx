@@ -664,6 +664,7 @@ function App() {
     const localWs = loadUserWorkspaceFromStorage(currentUser.id);
 
     // 1. Fetch user-specific workspace
+    // Falls back to unfiltered query if user_id column doesn't exist yet (migration pending)
     try {
       const { data, error } = await supabase
         .from('trading_workspace')
@@ -695,6 +696,12 @@ function App() {
         }
       } else if (error) {
         if (import.meta.env.DEV) console.warn('Workspace user_id query fallback:', error.message);
+        // Column may not exist yet — try legacy single-workspace query
+        const legacy = await supabase.from('trading_workspace').select('*').limit(1).maybeSingle();
+        if (!legacy.error && legacy.data) {
+          ws = legacy.data as Workspace;
+          wsLoaded = true;
+        }
       }
     } catch (e) {
       if (import.meta.env.DEV) console.warn('Failed loading user workspace:', e);
@@ -746,10 +753,20 @@ function App() {
         .order('created_at', { ascending: false })
         .limit(200);
 
-      if (!error && data && Array.isArray(data)) {
+      const fetchedTrades: Trade[] | null = (!error && Array.isArray(data))
+        ? data as Trade[]
+        // Column not yet added — fall back to all trades (pre-migration compatibility)
+        : (!error ? null : await supabase
+            .from('trading_trades')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(200)
+            .then(r => (!r.error && Array.isArray(r.data) ? r.data as Trade[] : null)));
+
+      if (fetchedTrades) {
         const tradeMap = new Map<string, Trade>();
         localTrades.forEach((t) => tradeMap.set(t.id, t));
-        (data as Trade[]).forEach((t) => {
+        fetchedTrades.forEach((t) => {
           const existing = tradeMap.get(t.id);
           if (!existing || existing.result === 'pending') {
             tradeMap.set(t.id, t);
@@ -1159,7 +1176,12 @@ function App() {
         // Background insert to Supabase (non-blocking)
         void (async () => {
           try {
-            await supabase.from('trading_trades').insert(trade);
+            const { error: insErr } = await supabase.from('trading_trades').insert(trade);
+            // If user_id column doesn't exist yet, retry without it
+            if (insErr) {
+              const { user_id: _uid, ...tradeNoUser } = trade;
+              await supabase.from('trading_trades').insert(tradeNoUser);
+            }
           } catch { /* ignore */ }
         })();
 
@@ -1279,7 +1301,11 @@ function App() {
     // Background insert to Supabase
     void (async () => {
       try {
-        await supabase.from('trading_trades').insert(trade);
+        const { error: insErr } = await supabase.from('trading_trades').insert(trade);
+        if (insErr) {
+          const { user_id: _uid, ...tradeNoUser } = trade;
+          await supabase.from('trading_trades').insert(tradeNoUser);
+        }
       } catch { /* ignore */ }
     })();
 
@@ -1584,6 +1610,9 @@ function App() {
         onConfirm,
       })}
       botsLoadError={botsLoadError}
+      botStatus={botStatus}
+      onSaveBotConfig={saveBotConfigAndUpdate}
+      botConfig={botConfigRef.current}
     />
   );
 
@@ -2634,10 +2663,13 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
   botConfig: Record<string, BotConfig>;
   onSaveBotConfig: (botName: string, cfg: BotConfig) => void;
 }) {
-  // Local stake overrides per bot — seeded from botConfig
+  // Local stake overrides per bot — seeded from botConfig (safe against empty/undefined)
   const [stakeMap, setStakeMap] = useState<Record<string, number>>(() => {
     const m: Record<string, number> = {};
-    bots.forEach(b => { m[b.name] = (botConfig[b.name] as DefaultBotConfig)?.stake ?? 10; });
+    bots.forEach(b => {
+      const cfg = botConfig?.[b.name] as DefaultBotConfig | undefined;
+      m[b.name] = cfg?.stake ?? 10;
+    });
     return m;
   });
 
@@ -2792,7 +2824,7 @@ function PhantomScalper({ bots, toggleBot, trades, botStatus, onSaveConfig, init
     onSaveConfig(next);
   };
 
-  const currentStatus = botStatus['Phantom Scalper'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
+  const currentStatus = botStatus?.['Phantom Scalper'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
 
   if (!bot) {
     return (
@@ -3087,7 +3119,7 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
     onSaveConfig(next);
   };
 
-  const currentStatus = botStatus['Trend Pullback V3'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
+  const currentStatus = botStatus?.['Trend Pullback V3'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
 
   if (!bot) {
     return (
