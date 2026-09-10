@@ -13,4 +13,19 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  build: {
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Core React runtime
+          'vendor-react': ['react', 'react-dom'],
+          // Supabase client
+          'vendor-supabase': ['@supabase/supabase-js'],
+          // Lucide icons (largest single dep)
+          'vendor-icons': ['lucide-react'],
+        },
+      },
+    },
+  },
 });

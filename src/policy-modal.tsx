@@ -3,13 +3,38 @@ import { X, Shield, FileText, AlertTriangle, ExternalLink } from 'lucide-react';
 
 export type PolicyTab = 'privacy' | 'terms' | 'risk';
 
+const CONSENT_KEY = 'apex_policy_consent_v1';
+
+export function getPolicyConsent(): { timestamp: string; version: string } | null {
+  try {
+    const raw = localStorage.getItem(CONSENT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+export function recordPolicyConsent(): void {
+  try {
+    localStorage.setItem(CONSENT_KEY, JSON.stringify({
+      timestamp: new Date().toISOString(),
+      version: '1.0',
+    }));
+  } catch { /* ignore */ }
+}
+
 interface PolicyModalProps {
   initialTab?: PolicyTab;
   onClose: () => void;
+  onConsent?: () => void;
 }
 
-export function PolicyModal({ initialTab = 'privacy', onClose }: PolicyModalProps) {
+export function PolicyModal({ initialTab = 'privacy', onClose, onConsent }: PolicyModalProps) {
   const [activeTab, setActiveTab] = useState<PolicyTab>(initialTab);
+
+  const handleAgree = () => {
+    recordPolicyConsent();
+    onConsent?.();
+    onClose();
+  };
 
   return (
     <div className="auth-overlay" onClick={onClose} role="dialog" aria-modal="true">
@@ -180,7 +205,7 @@ export function PolicyModal({ initialTab = 'privacy', onClose }: PolicyModalProp
 
         {/* Footer */}
         <div className="policy-modal-footer">
-          <button type="button" className="primary" onClick={onClose}>
+          <button type="button" className="primary" onClick={handleAgree}>
             I Understand &amp; Agree
           </button>
         </div>

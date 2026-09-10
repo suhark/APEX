@@ -78,9 +78,9 @@ function handleSocketClose() {
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null;
         if (!isManualDisconnect && authToken && appId && authState === 'disconnected') {
-          console.log('[Deriv WebSocket] Reconnecting after connection drop…');
+          if (import.meta.env.DEV) console.log('[Deriv WebSocket] Reconnecting after connection drop…');
           authorize(authToken, appId).catch((err) => {
-            console.warn('[Deriv WebSocket] Auto-reconnect failed:', err);
+            if (import.meta.env.DEV) console.warn('[Deriv WebSocket] Auto-reconnect failed:', err);
           });
         }
       }, 3000);

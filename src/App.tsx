@@ -7,7 +7,7 @@ import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeC
 import { AuthModal } from './auth-modal';
 import { ManualTrader } from './manual-trader';
 import { LandingPage } from './landing-page';
-import { PolicyModal, type PolicyTab } from './policy-modal';
+import { PolicyModal, getPolicyConsent, recordPolicyConsent, type PolicyTab } from './policy-modal';
 
 const DEFAULT_APP_ID = '34khJS0KsSP29i9G8kCiJ';
 
@@ -155,7 +155,7 @@ function loadUserTradesFromStorage(userId: string): Trade[] {
       if (Array.isArray(parsed)) return parsed;
     }
   } catch (err) {
-    console.warn('Failed loading local trades:', err);
+    if (import.meta.env.DEV) console.warn('Failed loading local trades:', err);
   }
   return [];
 }
@@ -164,7 +164,7 @@ function saveUserTradesToStorage(userId: string, trades: Trade[]): void {
   try {
     localStorage.setItem(getUserTradesKey(userId), JSON.stringify(trades.slice(0, 300)));
   } catch (err) {
-    console.warn('Failed saving local trades:', err);
+    if (import.meta.env.DEV) console.warn('Failed saving local trades:', err);
   }
 }
 
@@ -177,7 +177,7 @@ function loadUserWorkspaceFromStorage(userId: string): Partial<Workspace> | null
     const raw = localStorage.getItem(getUserWorkspaceKey(userId));
     if (raw) return JSON.parse(raw);
   } catch (err) {
-    console.warn('Failed loading local workspace:', err);
+    if (import.meta.env.DEV) console.warn('Failed loading local workspace:', err);
   }
   return null;
 }
@@ -186,7 +186,7 @@ function saveUserWorkspaceToStorage(userId: string, ws: Workspace): void {
   try {
     localStorage.setItem(getUserWorkspaceKey(userId), JSON.stringify(ws));
   } catch (err) {
-    console.warn('Failed saving local workspace:', err);
+    if (import.meta.env.DEV) console.warn('Failed saving local workspace:', err);
   }
 }
 
@@ -425,11 +425,19 @@ function App() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tick, setTick] = useState(8);
   const [loading, setLoading] = useState(true);
+  const [botsLoadError, setBotsLoadError] = useState(false);
   const [notice, setNotice] = useState('');
   const [tradeAlert, setTradeAlert] = useState<TradeAlert | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string; body: string;
+    rows?: { label: string; value: string }[];
+    danger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [policyTab, setPolicyTab] = useState<PolicyTab | null>(null);
+  const [consentGiven, setConsentGiven] = useState(() => getPolicyConsent() !== null);
   const deriv = useDerivConnection();
 
   // Prevent background scrolling when mobile sidebar is open
@@ -633,10 +641,10 @@ function App() {
           wsLoaded = true;
         }
       } else if (error) {
-        console.warn('Workspace user_id query fallback:', error.message);
+        if (import.meta.env.DEV) console.warn('Workspace user_id query fallback:', error.message);
       }
     } catch (e) {
-      console.warn('Failed loading user workspace:', e);
+      if (import.meta.env.DEV) console.warn('Failed loading user workspace:', e);
     }
 
     if (!wsLoaded) {
@@ -652,20 +660,15 @@ function App() {
         };
         wsLoaded = true;
       } else {
-        // Fallback to legacy single workspace if migration not yet run
-        const legacyWs = await supabase.from('trading_workspace').select('*').limit(1).maybeSingle();
-        if (legacyWs.data) {
-          ws = legacyWs.data as Workspace;
-        } else {
-          ws = {
-            id: `ws_${currentUser.id}`,
-            user_id: currentUser.id,
-            mode: 'demo',
-            balance: 10000,
-            starting_balance: 10000,
-            loss_limit: 50,
-          };
-        }
+        // Fallback to hardcoded default workspace (legacy query removed — RLS blocks it anyway)
+        ws = {
+          id: `ws_${currentUser.id}`,
+          user_id: currentUser.id,
+          mode: 'demo',
+          balance: 10000,
+          starting_balance: 10000,
+          loss_limit: 50,
+        };
       }
     }
 
@@ -705,7 +708,7 @@ function App() {
         saveUserTradesToStorage(currentUser.id, tradesData);
       }
     } catch (e) {
-      console.warn('Failed loading remote user trades, keeping local trades:', e);
+      if (import.meta.env.DEV) console.warn('Failed loading remote user trades, keeping local trades:', e);
     }
 
     // 3. Fetch bots library and isolate activation & stats strictly per user
@@ -713,6 +716,14 @@ function App() {
     // New bots must be seeded via Supabase migrations run server-side.
     let botsData: BotRow[] = [];
     const botsResult = await supabase.from('trading_bots').select('*').order('name');
+    if (botsResult.error) {
+      if (import.meta.env.DEV) console.warn('Failed to load bot catalog:', botsResult.error.message);
+      setBotsLoadError(true);
+    } else if (!botsResult.data || botsResult.data.length === 0) {
+      setBotsLoadError(true);
+    } else {
+      setBotsLoadError(false);
+    }
     if (botsResult.data) {
       let userActiveBots: string[] = [];
       const cached = localStorage.getItem(`apex_active_bots_${currentUser.id}`);
@@ -768,14 +779,19 @@ function App() {
 
   useEffect(() => {
     // Check initial auth session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const activeUser = session?.user ?? null;
-      setUser(activeUser);
-      setAuthChecking(false);
-      if (activeUser) {
-        void load(activeUser);
-      }
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        const activeUser = session?.user ?? null;
+        setUser(activeUser);
+        setAuthChecking(false);
+        if (activeUser) {
+          void load(activeUser);
+        }
+      })
+      .catch(() => {
+        // Supabase unreachable — unblock the app and show the landing/auth screen
+        setAuthChecking(false);
+      });
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -805,7 +821,7 @@ function App() {
     }
     try {
       const { error } = await supabase.from('trading_workspace').update(changes).eq('id', workspace.id);
-      if (error) console.warn('Supabase workspace update fallback to local:', error.message);
+      if (error && import.meta.env.DEV) console.warn('Supabase workspace update fallback to local:', error.message);
     } catch { /* ignore */ }
   };
 
@@ -818,18 +834,23 @@ function App() {
     if (isDerivDemo) {
       const realAcc = deriv.accounts.find((a) => !a.is_virtual);
       if (realAcc) {
-        const switchAndArm = window.confirm(
-          `You are currently trading on Demo (${deriv.account.loginid}).\n\n` +
-          `Switch to your Real account (${realAcc.loginid} · ${realAcc.currency} ${realAcc.balance.toFixed(2)}) and ARM live trading?`
-        );
-        if (switchAndArm) {
-          void (async () => {
-            await handleDerivSwitchAccount(realAcc.loginid);
-            syncSessionStartBalance(realAcc.balance);
-            setLiveArmed(true);
-            setNotice(`Switched to Real account (${realAcc.loginid}) and LIVE TRADING ARMED.`);
-          })();
-        }
+        setConfirmModal({
+          title: 'Switch to Real account & arm live trading?',
+          body: `You are currently on Demo (${deriv.account.loginid}). This will switch to your Real account and arm live execution.`,
+          rows: [
+            { label: 'Real account', value: realAcc.loginid },
+            { label: 'Balance', value: `${realAcc.currency} ${realAcc.balance.toFixed(2)}` },
+          ],
+          danger: true,
+          onConfirm: () => {
+            void (async () => {
+              await handleDerivSwitchAccount(realAcc.loginid);
+              syncSessionStartBalance(realAcc.balance);
+              setLiveArmed(true);
+              setNotice(`Switched to Real account (${realAcc.loginid}) and LIVE TRADING ARMED.`);
+            })();
+          },
+        });
         return;
       } else {
         setNotice('No real Deriv account found on this token. Connect an API token that has real account access.');
@@ -838,20 +859,23 @@ function App() {
     }
 
     const maxStake = ((deriv.account.balance * maxBalancePercent) / 100).toFixed(2);
-    const confirmed = window.confirm(
-      `ARM LIVE REAL-MONEY TRADING?\n\n` +
-      `Account: ${deriv.account.loginid} (Real Funds)\n` +
-      `Balance: ${deriv.account.currency} ${deriv.account.balance.toFixed(2)}\n` +
-      `Session Loss Limit: ${money(workspace?.loss_limit ?? 50)}\n` +
-      `Max Stake Cap: ${maxBalancePercent}% (${money(Number(maxStake))})\n` +
-      `Automated Bot Trading: ${allowBotLiveTrading ? 'ALLOWED' : 'BLOCKED (Default)'}\n\n` +
-      `Real money will be moved on Deriv. Do you wish to proceed?`
-    );
-    if (confirmed) {
-      syncSessionStartBalance(deriv.account.balance);
-      setLiveArmed(true);
-      setNotice(`LIVE TRADING ARMED on account ${deriv.account.loginid}. Real funds active.`);
-    }
+    setConfirmModal({
+      title: 'Arm live real-money trading?',
+      body: 'Real funds will be moved on Deriv. All trades execute immediately at market price.',
+      rows: [
+        { label: 'Account', value: `${deriv.account.loginid} (Real)` },
+        { label: 'Balance', value: `${deriv.account.currency} ${deriv.account.balance.toFixed(2)}` },
+        { label: 'Session loss limit', value: money(workspace?.loss_limit ?? 50) },
+        { label: 'Max stake cap', value: `${maxBalancePercent}% (${money(Number(maxStake))})` },
+        { label: 'Bot trading', value: allowBotLiveTrading ? 'ALLOWED' : 'Blocked (default)' },
+      ],
+      danger: true,
+      onConfirm: () => {
+        syncSessionStartBalance(deriv.account!.balance);
+        setLiveArmed(true);
+        setNotice(`LIVE TRADING ARMED on account ${deriv.account!.loginid}. Real funds active.`);
+      },
+    });
   };
 
   const disarmLiveTrading = () => {
@@ -1066,11 +1090,7 @@ function App() {
         // Background insert to Supabase (non-blocking)
         void (async () => {
           try {
-            const { error: insErr } = await supabase.from('trading_trades').insert(trade);
-            if (insErr) {
-              const { user_id, ...tradeWithoutUser } = trade;
-              await supabase.from('trading_trades').insert(tradeWithoutUser);
-            }
+            await supabase.from('trading_trades').insert(trade);
           } catch { /* ignore */ }
         })();
 
@@ -1190,11 +1210,7 @@ function App() {
     // Background insert to Supabase
     void (async () => {
       try {
-        const { error: insErr } = await supabase.from('trading_trades').insert(trade);
-        if (insErr) {
-          const { user_id, ...tradeWithoutUser } = trade;
-          await supabase.from('trading_trades').insert(tradeWithoutUser);
-        }
+        await supabase.from('trading_trades').insert(trade);
       } catch { /* ignore */ }
     })();
 
@@ -1266,7 +1282,7 @@ function App() {
     try {
       await updateWorkspace({ active_bots: activeBotNames });
     } catch (e) {
-      console.warn('Could not save user active bots:', e);
+      if (import.meta.env.DEV) console.warn('Could not save user active bots:', e);
     }
 
     setNotice(nextActive ? `${bot.name} is live and watching conditions.` : `${bot.name} paused.`);
@@ -1474,6 +1490,17 @@ function App() {
       lossLimitReached={lossLimitReached}
       resetSessionBaseline={resetSessionBaseline}
       sessionStartedAt={sessionStartedAt}
+      onRequestBotLiveConfirm={(onConfirm) => setConfirmModal({
+        title: 'Allow automated bot live trading?',
+        body: 'Active bots will place trades automatically on your real Deriv account when live mode is armed. Risk caps are strictly enforced.',
+        rows: [
+          { label: 'Session loss limit', value: money(workspace?.loss_limit ?? 50) },
+          { label: 'Balance cap per trade', value: `${maxBalancePercent}% of balance` },
+        ],
+        danger: true,
+        onConfirm,
+      })}
+      botsLoadError={botsLoadError}
     />
   );
 
@@ -1512,6 +1539,7 @@ function App() {
           <PolicyModal
             initialTab={policyTab}
             onClose={() => setPolicyTab(null)}
+            onConsent={() => setConsentGiven(true)}
           />
         )}
       </>
@@ -1703,7 +1731,59 @@ function App() {
         <PolicyModal
           initialTab={policyTab}
           onClose={() => setPolicyTab(null)}
+          onConsent={() => setConsentGiven(true)}
         />
+      )}
+      {confirmModal && (
+        <ConfirmModal
+          title={confirmModal.title}
+          body={confirmModal.body}
+          rows={confirmModal.rows}
+          danger={confirmModal.danger}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
+      {/* Consent banner — shown once until user clicks "I Agree" */}
+      {!consentGiven && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 150,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: '16px', flexWrap: 'wrap',
+          padding: '14px 24px',
+          background: '#0d1c19',
+          borderTop: '1px solid #1e3530',
+          fontSize: '11px', color: '#80948e',
+        }}>
+          <span style={{ flex: 1, minWidth: '200px', lineHeight: 1.6 }}>
+            APEX uses essential cookies and local storage to keep you signed in and save your workspace.
+            By using the platform you agree to our{' '}
+            <button
+              type="button"
+              onClick={() => setPolicyTab('privacy')}
+              style={{ background: 'none', border: 'none', color: '#50b9a9', cursor: 'pointer', padding: 0, fontSize: 'inherit', textDecoration: 'underline' }}
+            >
+              Privacy Policy
+            </button>
+            {' '}and{' '}
+            <button
+              type="button"
+              onClick={() => setPolicyTab('terms')}
+              style={{ background: 'none', border: 'none', color: '#50b9a9', cursor: 'pointer', padding: 0, fontSize: 'inherit', textDecoration: 'underline' }}
+            >
+              Terms of Service
+            </button>
+            .
+          </span>
+          <button
+            type="button"
+            className="primary"
+            style={{ flexShrink: 0, padding: '8px 18px', fontSize: '11px' }}
+            onClick={() => { recordPolicyConsent(); setConsentGiven(true); }}
+          >
+            I Agree
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1740,6 +1820,8 @@ function PageView({
   lossLimitReached,
   resetSessionBaseline,
   sessionStartedAt,
+  onRequestBotLiveConfirm,
+  botsLoadError,
 }: {
   page: Page;
   workspace: Workspace | null;
@@ -1771,10 +1853,12 @@ function PageView({
   lossLimitReached: boolean;
   resetSessionBaseline: () => void;
   sessionStartedAt: string | null;
+  onRequestBotLiveConfirm: (onConfirm: () => void) => void;
+  botsLoadError: boolean;
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
   if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} />;
-  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} />;
+  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} />;
   if (page === 'manual') {
     return (
       <ManualTrader
@@ -1823,12 +1907,84 @@ function PageView({
       lossLimitReached={lossLimitReached}
       resetSessionBaseline={resetSessionBaseline}
       sessionStartedAt={sessionStartedAt}
+      onRequestBotLiveConfirm={onRequestBotLiveConfirm}
     />
   );
 }
 
 function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) { return <div className="page-header"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{action}</div>; }
 function Stat({ label, value, detail, tone = 'neutral', icon: Icon = Activity }: { label: string; value: string; detail: string; tone?: string; icon?: typeof Activity }) { return <div className="stat"><div className={`stat-icon ${tone}`}><Icon size={18} /></div><div><span>{label}</span><strong>{value}</strong><small className={tone === 'danger' ? 'negative' : tone === 'success' ? 'positive' : ''}>{detail}</small></div></div>; }
+
+function ConfirmModal({ title, body, rows, danger, onConfirm, onCancel }: {
+  title: string;
+  body: string;
+  rows?: { label: string; value: string }[];
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="auth-overlay" onClick={onCancel} style={{ zIndex: 200 }}>
+      <div
+        className="auth-card"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: '420px', padding: '28px' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '14px' }}>
+          <div style={{
+            flexShrink: 0, width: '36px', height: '36px', borderRadius: '10px',
+            background: danger ? 'rgba(239,68,68,0.12)' : 'rgba(251,191,36,0.12)',
+            display: 'grid', placeItems: 'center',
+            color: danger ? '#ef4444' : '#fbbf24',
+          }}>
+            <AlertTriangle size={18} />
+          </div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#e8f2f0' }}>{title}</h2>
+            <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#80948e', lineHeight: 1.6 }}>{body}</p>
+          </div>
+        </div>
+        {rows && rows.length > 0 && (
+          <div style={{
+            margin: '14px 0', padding: '12px 14px',
+            background: 'rgba(0,0,0,0.25)', borderRadius: '8px',
+            border: '1px solid rgba(255,255,255,0.06)',
+          }}>
+            {rows.map(({ label, value }) => (
+              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: '11px' }}>
+                <span style={{ color: '#7a908a' }}>{label}</span>
+                <span style={{ fontWeight: 600, color: '#cde0da', fontFamily: "'DM Mono', monospace" }}>{value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: '8px', marginTop: '18px' }}>
+          <button
+            type="button"
+            className="secondary"
+            style={{ flex: 1 }}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            style={{
+              flex: 1,
+              background: danger ? '#7f1d1d' : '#14532d',
+              border: `1px solid ${danger ? '#dc2626' : '#16a34a'}`,
+              color: danger ? '#fca5a5' : '#86efac',
+              borderRadius: '7px', padding: '10px', fontWeight: 700, fontSize: '12px', cursor: 'pointer',
+            }}
+            onClick={() => { onConfirm(); onCancel(); }}
+          >
+            {danger ? 'Yes, proceed' : 'Confirm'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function TradeResultToast({
   alert,
@@ -2383,7 +2539,7 @@ function EquityChart({
   );
 }
 
-function Bots({ bots, toggleBot, runTrade, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>; trades: Trade[] }) {
+function Bots({ bots, toggleBot, runTrade, trades, botsLoadError }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>; trades: Trade[]; botsLoadError?: boolean }) {
   return (
     <>
       <PageHeader
@@ -2391,6 +2547,22 @@ function Bots({ bots, toggleBot, runTrade, trades }: { bots: BotRow[]; toggleBot
         title="Free bots"
         description="Start with a clear strategy, a visible risk tier, and a demo-first execution loop. Multiple bots can run simultaneously."
       />
+      {botsLoadError && (
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: '12px',
+          padding: '14px 16px', marginBottom: '16px',
+          background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)',
+          borderRadius: '9px', fontSize: '12px',
+        }}>
+          <AlertTriangle size={16} style={{ color: '#fbbf24', flexShrink: 0, marginTop: '1px' }} />
+          <div>
+            <strong style={{ color: '#fde68a', display: 'block', marginBottom: '3px' }}>Bot catalog unavailable</strong>
+            <span style={{ color: '#9caa9f', lineHeight: 1.6 }}>
+              The bot catalog could not be loaded from the database. Run the Supabase migrations to seed the bots, then refresh the page.
+            </span>
+          </div>
+        </div>
+      )}
       <div className="bot-grid">
         {bots.map((bot) => {
           const botTrades = trades.filter((trade) => trade.bot_name === bot.name);
@@ -2976,6 +3148,7 @@ function Settings({
   guardPercent,
   lossLimitReached,
   resetSessionBaseline,
+  onRequestBotLiveConfirm,
 }: {
   workspace: Workspace;
   updateWorkspace: (changes: Partial<Workspace>) => Promise<void>;
@@ -2999,6 +3172,7 @@ function Settings({
   guardPercent: number;
   lossLimitReached: boolean;
   resetSessionBaseline: () => void;
+  onRequestBotLiveConfirm: (onConfirm: () => void) => void;
 }) {
   const [limitInput, setLimitInput] = useState(String(Math.max(1, Number(workspace.loss_limit ?? 50))));
   const activeBalance = derivConnected && deriv.account ? deriv.account.balance : workspace.balance;
@@ -3123,11 +3297,10 @@ function Settings({
               type="button"
               className={allowBotLiveTrading ? 'selected' : ''}
               onClick={() => {
-                const confirmed = window.confirm('ALLOW AUTOMATED BOT LIVE TRADING?\n\nActive bots will place trades automatically on your real Deriv account when live mode is armed.\n\nRisk caps (Session loss limit & balance percentage) will be strictly enforced.\n\nProceed?');
-                if (confirmed) {
+                onRequestBotLiveConfirm(() => {
                   setAllowBotLiveTrading(true);
                   setNotice('Automated bot live trading enabled. Bots can place live trades when armed.');
-                }
+                });
               }}
             >
               <div>

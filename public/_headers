@@ -1,0 +1,25 @@
+/*
+  # Prevent clickjacking
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+
+  # Prevent MIME sniffing
+  X-Content-Type-Options: nosniff
+
+  # Referrer — send origin only on cross-origin requests
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # Disable browser features not needed by this app
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+  # Force HTTPS for 1 year
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+  # Content Security Policy
+  #   script-src  — only self (Vite prod builds are self-contained, no eval needed)
+  #   connect-src — Supabase REST + Auth + Realtime, Deriv WebSocket endpoints
+  #   font-src    — Google Fonts
+  #   style-src   — self + Google Fonts CDN
+  #   img-src     — self + data URIs (SVG charts) + blob (CSV export)
+  #   worker-src  — none (no service workers)
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://pnvddbkfxemntbxtmkhm.supabase.co wss://pnvddbkfxemntbxtmkhm.supabase.co https://*.supabase.co wss://*.derivws.com wss://*.binary.com https://*.deriv.com; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'
