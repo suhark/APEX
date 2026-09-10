@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient, type User } from '@supabase/supabase-js';
-import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, Ghost, Globe, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
+import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, Ghost, Globe, Hash, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
 import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
 import { AuthModal } from './auth-modal';
 import { ManualTrader } from './manual-trader';
+import { DigitsAnalyser } from './digits-analyser';
 import { LandingPage } from './landing-page';
 import { PolicyModal, getPolicyConsent, recordPolicyConsent, type PolicyTab } from './policy-modal';
 
@@ -16,7 +17,7 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY ?? '',
 );
 
-type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'record' | 'settings';
+type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings';
 type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 
@@ -90,6 +91,7 @@ const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'quick', label: 'Quick Bot', icon: Zap }, { key: 'apex', label: 'Apex Bot', icon: Rocket },
   { key: 'phantom', label: 'Phantom Scalper', icon: Ghost },
   { key: 'stpv3', label: 'Trend Pullback V3', icon: CandlestickChart },
+  { key: 'digits', label: 'Digits Analyser', icon: Hash },
   { key: 'record', label: 'Track Record', icon: LineChart }, { key: 'settings', label: 'Settings', icon: Settings2 },
 ];
 
@@ -1996,6 +1998,7 @@ function PageView({
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
   if (page === 'phantom') return <PhantomScalper bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Phantom Scalper', cfg)} initialConfig={botConfig?.['Phantom Scalper'] as PhantomConfig | undefined} />;
   if (page === 'stpv3') return <TrendPullbackV3 bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Trend Pullback V3', cfg)} initialConfig={botConfig?.['Trend Pullback V3'] as StpConfig | undefined} />;
+  if (page === 'digits') return <DigitsAnalyser derivConnected={derivConnected} tick={tick} />;
   if (page === 'record') return <Record trades={trades} />;
   return (
     <Settings
