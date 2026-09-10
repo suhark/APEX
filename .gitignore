@@ -21,3 +21,9 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# apex-lab (Deriv bot builder template)
+apex-lab/node_modules
+apex-lab/dist
+apex-lab/out
+apex-lab/.env
