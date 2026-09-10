@@ -19,6 +19,55 @@ const supabase = createClient(
 type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'record' | 'settings';
 type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
+
+// Per-bot user-configurable parameters. Stored in localStorage per user.
+interface PhantomConfig {
+  baseStake: number;           // normal-conditions stake
+  rsiOverbought: number;       // 0–1 scale, default 0.72
+  rsiOversold: number;         // 0–1 scale, default 0.28
+  lossFadeAt: number;          // consecutive losses before fading direction, default 2
+  winStepAt: number;           // consecutive wins before stepping up to V100, default 3
+  sessionFilter: boolean;      // respect UTC prime-window filter, default true
+}
+interface StpConfig {
+  stakeMode: 'fixed' | 'percent'; // fixed $ or % of balance
+  stakeValue: number;             // $ amount (fixed) or % (percent), default 1 (1%)
+  stakeMin: number;               // minimum stake when percent mode, default 5
+  stakeMax: number;               // maximum stake when percent mode, default 50
+  scoreThreshold: number;         // 0–100, default 75
+  adxMin: number;                 // minimum ADX, default 22
+  cooldownMinutes: number;        // cooldown after 3 losses, default 15
+}
+interface DefaultBotConfig {
+  stake: number;                  // fixed stake, default 10
+}
+type BotConfig = PhantomConfig | StpConfig | DefaultBotConfig;
+
+function getBotConfigKey(userId: string, botName: string) {
+  return `apex_bot_cfg_${userId}_${botName.replace(/\s+/g, '_')}`;
+}
+function loadBotConfig<T>(userId: string, botName: string, defaults: T): T {
+  try {
+    const raw = localStorage.getItem(getBotConfigKey(userId, botName));
+    if (raw) return { ...defaults, ...JSON.parse(raw) } as T;
+  } catch { /* ignore */ }
+  return defaults;
+}
+function saveBotConfig(userId: string, botName: string, config: BotConfig): void {
+  try {
+    localStorage.setItem(getBotConfigKey(userId, botName), JSON.stringify(config));
+  } catch { /* ignore */ }
+}
+
+const PHANTOM_DEFAULTS: PhantomConfig = {
+  baseStake: 12, rsiOverbought: 0.72, rsiOversold: 0.28,
+  lossFadeAt: 2, winStepAt: 3, sessionFilter: true,
+};
+const STP_DEFAULTS: StpConfig = {
+  stakeMode: 'percent', stakeValue: 1, stakeMin: 5, stakeMax: 50,
+  scoreThreshold: 75, adxMin: 22, cooldownMinutes: 15,
+};
+const DEFAULT_BOT_DEFAULTS: DefaultBotConfig = { stake: 10 };
 type Workspace = { id: string; user_id?: string | null; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null; active_bots?: string[] | null };
 
 type TradeAlert = {
@@ -348,7 +397,7 @@ function calcStpIndicators(candles: Candle[]): StpIndicators | null {
 }
 
 /** STP-V3 full signal evaluation. Returns null if no trade, or { direction, score } if signal fires. */
-function evalStpV3Signal(ind: StpIndicators): { direction: 'CALL' | 'PUT'; score: number } | null {
+function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): { direction: 'CALL' | 'PUT'; score: number } | null {
   const { ema20, ema50, ema20Prev5, atr14, atr50Avg, adx14, lastCandle, prevCandle } = ind;
   const atrRatio = atr14 / (atr50Avg || 1);
 
@@ -387,7 +436,7 @@ function evalStpV3Signal(ind: StpIndicators): { direction: 'CALL' | 'PUT'; score
   if (isBear && !bearConf) return null;
 
   // ── Stage 5: ADX ────────────────────────────────────────────────────────────
-  if (adx14 < 22) return null;
+  if (adx14 < adxMin) return null;
 
   // ── Scoring (100 pts) ────────────────────────────────────────────────────────
   // Trend quality (25 pts)
@@ -403,13 +452,13 @@ function evalStpV3Signal(ind: StpIndicators): { direction: 'CALL' | 'PUT'; score
   const confirmScore = bodyRatio >= 0.80 ? 20 : bodyRatio >= 0.65 ? 15 : 10;
 
   // ADX (20 pts)
-  const adxScore = adx14 >= 30 ? 20 : adx14 >= 25 ? 15 : adx14 >= 22 ? 10 : 0;
+  const adxScore = adx14 >= 30 ? 20 : adx14 >= 25 ? 15 : adx14 >= adxMin ? 10 : 0;
 
   // Volatility regime (15 pts)
   const volScore = atrRatio <= 1.0 ? 15 : atrRatio <= 1.25 ? 12 : 8;
 
   const totalScore = trendScore + pullbackScore + confirmScore + adxScore + volScore;
-  if (totalScore < 75) return null;
+  if (totalScore < scoreThreshold) return null;
 
   return { direction: isBull ? 'CALL' : 'PUT', score: totalScore };
 }
@@ -462,6 +511,10 @@ function App() {
     consecutiveLosses: 0,
     lastLossTime: 0,
   });
+  // Per-bot live-readable config (read in the setInterval closure)
+  const botConfigRef = useRef<Record<string, BotConfig>>({});
+  // Live signal status per bot — shown on the dedicated pages
+  const [botStatus, setBotStatus] = useState<Record<string, string>>({});
 
   // Safety & Arming controls
   const [liveArmed, setLiveArmed] = useState(false);
@@ -525,9 +578,11 @@ function App() {
     }
   }, [derivConnected, isDerivDemo]);
 
-  // Track session starting balance for loss limit calculations (restored from sessionStorage across refresh)
+  // Restore session baseline from storage on login. Uses userRef so the key matches
+  // what syncSessionStartBalance writes (userRef is always the latest user object).
   useEffect(() => {
-    const uid = user?.id || 'guest';
+    if (!user) return;
+    const uid = user.id;
     const restored = restoreSessionBaseline(uid);
     if (restored.balance !== null) {
       sessionStartingBalRef.current = restored.balance;
@@ -537,19 +592,17 @@ function App() {
       sessionStartAtRef.current = restored.startedAt;
       setSessionStartedAt(restored.startedAt);
     }
-  }, [user]);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Seed a baseline only when there genuinely is none yet (first-ever login, or after reset)
   useEffect(() => {
+    if (sessionStartingBalRef.current !== null) return; // already set — do not overwrite
     if (deriv.account) {
-      if (sessionStartingBalRef.current === null) {
-        syncSessionStartBalance(deriv.account.balance);
-      }
-    } else if (workspace) {
-      if (sessionStartingBalRef.current === null) {
-        syncSessionStartBalance(workspace.starting_balance);
-      }
+      syncSessionStartBalance(deriv.account.balance);
+    } else if (workspace && user) {
+      syncSessionStartBalance(workspace.starting_balance);
     }
-  }, [deriv.account, workspace, user]);
+  }, [deriv.account?.loginid, workspace?.id, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const userRef = useRef<User | null>(null);
   userRef.current = user;
@@ -765,6 +818,17 @@ function App() {
     }
     setBots(botsData);
     setTrades(tradesData);
+
+    // Load per-bot configs from localStorage into the ref so the bot loop can read them
+    const defaultBots = ['Reverse Signal', 'Momentum Pulse', 'Range Scout', 'Apex Momentum'];
+    const defaultCfgs = Object.fromEntries(
+      defaultBots.map(name => [name, loadBotConfig(currentUser.id, name, DEFAULT_BOT_DEFAULTS)])
+    );
+    botConfigRef.current = {
+      ...defaultCfgs,
+      'Phantom Scalper': loadBotConfig(currentUser.id, 'Phantom Scalper', PHANTOM_DEFAULTS),
+      'Trend Pullback V3': loadBotConfig(currentUser.id, 'Trend Pullback V3', STP_DEFAULTS),
+    };
     setLoading(false);
 
     // Auto-reconnect to Deriv if user previously connected (persists across page refresh)
@@ -893,7 +957,12 @@ function App() {
         localStorage.setItem(`apex_deriv_token_${userRef.current.id}`, token);
       }
       localStorage.setItem('apex_deriv_token', token);
-      syncSessionStartBalance(result.account.balance);
+      // Only create a new session baseline if one doesn't already exist.
+      // Reconnecting to the same account should preserve the prior session window
+      // so trades and P&L history remain visible.
+      if (sessionStartingBalRef.current === null) {
+        syncSessionStartBalance(result.account.balance);
+      }
 
       if (!isAutoReconnect) {
         // CRITICAL SAFETY: Stop running bots for this user
@@ -1269,6 +1338,12 @@ function App() {
     botPendingTradesRef.current.clear();
   };
 
+  const saveBotConfigAndUpdate = (botName: string, config: BotConfig) => {
+    const uid = userRef.current?.id || user?.id || 'guest';
+    saveBotConfig(uid, botName, config);
+    botConfigRef.current = { ...botConfigRef.current, [botName]: config };
+  };
+
   const toggleBot = async (bot: BotRow) => {
     const nextActive = !bot.active;
     const nextBots = bots.map((item) => (item.id === bot.id ? { ...item, active: nextActive } : item));
@@ -1313,110 +1388,112 @@ function App() {
 
         if (bot.name === 'Phantom Scalper') {
           // ── Phantom Scalper: multi-signal strategy ──────────────────────────
+          const cfg = (botConfigRef.current['Phantom Scalper'] ?? PHANTOM_DEFAULTS) as PhantomConfig;
+
           // Signal 1: EMA trend bias via tick oscillator
-          //   Short EMA proxy: sin-based oscillator over last 3 ticks
-          //   Long EMA proxy: cos-based oscillator over last 8 ticks
           const shortEma = Math.sin(currentTick / 3);
           const longEma  = Math.cos(currentTick / 8);
           const emaBullish = shortEma > longEma;
 
-          // Signal 2: RSI-like momentum from recent synthetic price deltas
-          //   Uses the priceFor helper (tick-seeded sine wave) to compute
-          //   up-moves vs down-moves over the last 6 ticks across V75
+          // Signal 2: RSI-like momentum — thresholds from user config
           let gains = 0; let losses = 0;
           for (let t = 1; t <= 6; t++) {
             const delta = priceFor(3, currentTick - t + 1) - priceFor(3, currentTick - t);
             if (delta > 0) gains++; else losses++;
           }
-          const rsi = gains / (gains + losses || 1); // 0–1 scale
-          const rsiOverbought  = rsi > 0.72;
-          const rsiOversold    = rsi < 0.28;
+          const rsi = gains / (gains + losses || 1);
+          const rsiOverbought = rsi > cfg.rsiOverbought;
+          const rsiOversold   = rsi < cfg.rsiOversold;
 
-          // Signal 3: Streak-fade / streak-follow from this bot's recent trades
+          // Signal 3: Streak tracking
           const recentBot = tradesRef.current
             .filter((t) => t.bot_name === 'Phantom Scalper' && (t.result === 'won' || t.result === 'lost'))
             .slice(0, 5);
           const recentLosses = recentBot.filter((t) => t.result === 'lost').length;
           const recentWins   = recentBot.filter((t) => t.result === 'won').length;
 
-          // Signal 4: Time-of-day cycle filter (avoid choppy midday window)
+          // Signal 4: Session window filter (user-configurable on/off)
           const hour = new Date().getUTCHours();
-          const inPrimeWindow = (hour >= 7 && hour < 11) || (hour >= 13 && hour < 17) || (hour >= 19 && hour < 23);
+          const inPrimeWindow = !cfg.sessionFilter ||
+            ((hour >= 7 && hour < 11) || (hour >= 13 && hour < 17) || (hour >= 19 && hour < 23));
 
-          // ── Decision logic ─────────────────────────────────────────────────
-          // Prefer V75 for trending conditions, V50 during ranging/recovery
-          if (recentLosses >= 2 && recentWins === 0) {
-            // Cool-down after consecutive losses: drop to lower volatility index
+          // Instrument + stake — scale from base stake
+          if (recentLosses >= cfg.lossFadeAt && recentWins === 0) {
             instrument = 'Volatility 50 Index';
-            stake      = 8;
-          } else if (recentWins >= 3) {
-            // Hot streak: step up to V100 and ride momentum
+            stake      = Math.max(1, cfg.baseStake - 4);
+            setBotStatus(s => ({ ...s, 'Phantom Scalper': '⚠️ Recovery mode — V50' }));
+          } else if (recentWins >= cfg.winStepAt) {
             instrument = 'Volatility 100 Index';
-            stake      = 15;
+            stake      = cfg.baseStake + 3;
+            setBotStatus(s => ({ ...s, 'Phantom Scalper': '🔥 Hot streak — V100' }));
           } else if (inPrimeWindow) {
             instrument = 'Volatility 75 Index';
-            stake      = 12;
+            stake      = cfg.baseStake;
+            setBotStatus(s => ({ ...s, 'Phantom Scalper': '✅ Prime window — V75' }));
           } else {
             instrument = 'Volatility 25 Index';
-            stake      = 8;
+            stake      = Math.max(1, cfg.baseStake - 4);
+            setBotStatus(s => ({ ...s, 'Phantom Scalper': '😴 Off-peak — V25' }));
           }
 
-          // Directional decision: RSI extremes override EMA trend
-          if (rsiOversold && !emaBullish) {
-            // Price deeply oversold AND trend still down → mean-reversion bounce → CALL
-            direction = 'CALL';
-          } else if (rsiOverbought && emaBullish) {
-            // Price deeply overbought AND trend up → momentum continuation → CALL
-            direction = 'CALL';
-          } else if (rsiOverbought && !emaBullish) {
-            // Overbought into a downtrend → reversal → PUT
-            direction = 'PUT';
-          } else if (rsiOversold && emaBullish) {
-            // Oversold but trend is bullish → no clear edge, follow trend
-            direction = 'CALL';
-          } else {
-            // Neutral RSI: fall back to EMA bias
-            direction = emaBullish ? 'CALL' : 'PUT';
-          }
+          // Direction
+          if (rsiOversold && !emaBullish)       direction = 'CALL';
+          else if (rsiOverbought && emaBullish)  direction = 'CALL';
+          else if (rsiOverbought && !emaBullish) direction = 'PUT';
+          else if (rsiOversold && emaBullish)    direction = 'CALL';
+          else                                   direction = emaBullish ? 'CALL' : 'PUT';
 
-          // After 2+ consecutive losses in the same direction, fade that direction
-          if (recentLosses >= 2) {
+          if (recentLosses >= cfg.lossFadeAt) {
             const lastDir = recentBot[0]?.direction as 'CALL' | 'PUT' | undefined;
             if (lastDir) direction = lastDir === 'CALL' ? 'PUT' : 'CALL';
           }
         } else if (bot.name === 'Trend Pullback V3') {
           // ── STP-V3: Six-stage Trend Pullback strategy on V75 ─────────────
-          // Hard stop: ≥3 consecutive losses → pause until 15-min cooldown expires
-          const STP_COOLDOWN_MS = 15 * 60 * 1000;
+          const cfg = (botConfigRef.current['Trend Pullback V3'] ?? STP_DEFAULTS) as StpConfig;
+          const STP_COOLDOWN_MS = cfg.cooldownMinutes * 60 * 1000;
           const stpState = stpV3StateRef.current;
           const msSinceLoss = Date.now() - stpState.lastLossTime;
           if (stpState.consecutiveLosses >= 3 && msSinceLoss < STP_COOLDOWN_MS) {
-            return; // still in cooldown after 3 consecutive losses
+            const remaining = Math.ceil((STP_COOLDOWN_MS - msSinceLoss) / 60000);
+            setBotStatus(s => ({ ...s, 'Trend Pullback V3': `⏸ Cooldown — ${remaining}m remaining` }));
+            return;
           }
           if (stpState.consecutiveLosses >= 3 && msSinceLoss >= STP_COOLDOWN_MS) {
-            stpV3StateRef.current.consecutiveLosses = 0; // cooldown expired — reset
+            stpV3StateRef.current.consecutiveLosses = 0;
           }
 
           // Build 60 synthetic 1-min candles for V75 (instrument index 3)
           const candles = buildSyntheticCandles(3, currentTick, 60);
           const ind = calcStpIndicators(candles);
-          if (!ind) return; // insufficient candle history
+          if (!ind) {
+            setBotStatus(s => ({ ...s, 'Trend Pullback V3': '⏳ Building candle history…' }));
+            return;
+          }
 
-          const signal = evalStpV3Signal(ind);
-          if (!signal) return; // all 6 stages passed but score < 75, or a hard filter blocked
+          // Pass user-configured thresholds into the signal evaluator
+          const signal = evalStpV3Signal(ind, cfg.scoreThreshold, cfg.adxMin);
+          if (!signal) {
+            setBotStatus(s => ({ ...s, 'Trend Pullback V3': `🔍 Scanning — score ${ind ? '' : '—'} below ${cfg.scoreThreshold}` }));
+            return;
+          }
 
+          setBotStatus(s => ({ ...s, 'Trend Pullback V3': `✅ Signal: ${signal.direction} (score ${signal.score})` }));
           instrument = 'Volatility 75 Index';
           direction  = signal.direction;
-          // Stake = 1% of balance, clamped to [$5, $50]
           const stpBal = derivConnected && deriv.account
             ? deriv.account.balance
             : (workspaceRef.current?.balance ?? 1000);
-          stake = Math.min(50, Math.max(5, Number((stpBal * 0.01).toFixed(2))));
+          if (cfg.stakeMode === 'percent') {
+            stake = Math.min(cfg.stakeMax, Math.max(cfg.stakeMin, Number((stpBal * cfg.stakeValue / 100).toFixed(2))));
+          } else {
+            stake = Math.max(1, cfg.stakeValue);
+          }
         } else {
-          // Default strategy for all other bots
+          // Default strategy for all other bots — stake from config
+          const cfg = (botConfigRef.current[bot.name] ?? DEFAULT_BOT_DEFAULTS) as DefaultBotConfig;
           instrument = instruments[(currentTick + i) % instruments.length];
           direction  = (currentTick + i) % 2 ? 'CALL' : 'PUT';
-          stake      = 10;
+          stake      = Math.max(1, cfg.stake);
         }
 
         void runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name });
@@ -1430,11 +1507,21 @@ function App() {
 
   const activeBalance = derivConnected && deriv.account ? deriv.account.balance : (workspace?.balance ?? 0);
   const sessionStartBalance = sessionStartingBalance ?? activeBalance;
+
+  // ── Stable context key ─────────────────────────────────────────────────────
+  // Falls back to the last known Deriv loginid (from workspace) while reconnecting
+  // so trades and stats stay visible during the 'connecting' → 'connected' transition.
+  const activeDerivLoginid = deriv.account?.loginid ?? workspace?.deriv_loginid ?? null;
+  const isDerivContext = derivConnected || (workspace?.deriv_connected && activeDerivLoginid);
+  const statsContext = isDerivContext && activeDerivLoginid
+    ? `deriv_${activeDerivLoginid}`
+    : getStatsContext(derivConnected, deriv.account);
+
   // Use context-filtered trades so the session loss guardrail only counts
   // trades from the currently active account (synthetic or specific Deriv loginid)
   const sessionContextTrades = useMemo(
-    () => filterTradesByContext(trades, getStatsContext(derivConnected, deriv.account)),
-    [trades, derivConnected, deriv.account],
+    () => filterTradesByContext(trades, statsContext),
+    [trades, statsContext],
   );
   const sessionLossUsed = computeSessionLoss(
     sessionStartBalance,
@@ -1446,11 +1533,7 @@ function App() {
   const guardPercent = computeGuardPercent(sessionLossUsed, lossLimit);
   const lossLimitReached = lossLimit > 0 && sessionLossUsed >= lossLimit;
 
-  // ── Context-isolated trade list ──────────────────────────────────────────
-  // Derives the active context key from the current connection state, then
-  // filters trades so every component only sees trades from the active context.
-  // Synthetic trades are hidden while Deriv is connected, and vice versa.
-  const statsContext = getStatsContext(derivConnected, deriv.account);
+  // Context-isolated trade list passed to all page components
   const contextTrades = useMemo(
     () => filterTradesByContext(trades, statsContext),
     [trades, statsContext],
@@ -1822,6 +1905,9 @@ function PageView({
   sessionStartedAt,
   onRequestBotLiveConfirm,
   botsLoadError,
+  botStatus,
+  onSaveBotConfig,
+  botConfig,
 }: {
   page: Page;
   workspace: Workspace | null;
@@ -1858,7 +1944,7 @@ function PageView({
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
   if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} />;
-  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} />;
+  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} botConfig={botConfig} onSaveBotConfig={onSaveBotConfig} />;
   if (page === 'manual') {
     return (
       <ManualTrader
@@ -1879,8 +1965,8 @@ function PageView({
   if (page === 'bulk') return <Bulk tick={tick} runTrade={runTrade} />;
   if (page === 'quick') return <Quick tick={tick} runTrade={runTrade} />;
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
-  if (page === 'phantom') return <PhantomScalper bots={bots} toggleBot={toggleBot} trades={trades} />;
-  if (page === 'stpv3') return <TrendPullbackV3 bots={bots} toggleBot={toggleBot} trades={trades} />;
+  if (page === 'phantom') return <PhantomScalper bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Phantom Scalper', cfg)} initialConfig={botConfig?.['Phantom Scalper'] as PhantomConfig | undefined} />;
+  if (page === 'stpv3') return <TrendPullbackV3 bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Trend Pullback V3', cfg)} initialConfig={botConfig?.['Trend Pullback V3'] as StpConfig | undefined} />;
   if (page === 'record') return <Record trades={trades} />;
   return (
     <Settings
@@ -2539,7 +2625,28 @@ function EquityChart({
   );
 }
 
-function Bots({ bots, toggleBot, runTrade, trades, botsLoadError }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>; trades: Trade[]; botsLoadError?: boolean }) {
+function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onSaveBotConfig }: {
+  bots: BotRow[];
+  toggleBot: (bot: BotRow) => Promise<void>;
+  runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>;
+  trades: Trade[];
+  botsLoadError?: boolean;
+  botConfig: Record<string, BotConfig>;
+  onSaveBotConfig: (botName: string, cfg: BotConfig) => void;
+}) {
+  // Local stake overrides per bot — seeded from botConfig
+  const [stakeMap, setStakeMap] = useState<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    bots.forEach(b => { m[b.name] = (botConfig[b.name] as DefaultBotConfig)?.stake ?? 10; });
+    return m;
+  });
+
+  const setStake = (botName: string, value: number) => {
+    const next = Math.max(1, value);
+    setStakeMap(m => ({ ...m, [botName]: next }));
+    onSaveBotConfig(botName, { ...((botConfig[botName] as DefaultBotConfig) ?? DEFAULT_BOT_DEFAULTS), stake: next });
+  };
+
   return (
     <>
       <PageHeader
@@ -2548,24 +2655,18 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError }: { bots: BotR
         description="Start with a clear strategy, a visible risk tier, and a demo-first execution loop. Multiple bots can run simultaneously."
       />
       {botsLoadError && (
-        <div style={{
-          display: 'flex', alignItems: 'flex-start', gap: '12px',
-          padding: '14px 16px', marginBottom: '16px',
-          background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)',
-          borderRadius: '9px', fontSize: '12px',
-        }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', marginBottom: '16px', background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: '9px', fontSize: '12px' }}>
           <AlertTriangle size={16} style={{ color: '#fbbf24', flexShrink: 0, marginTop: '1px' }} />
           <div>
             <strong style={{ color: '#fde68a', display: 'block', marginBottom: '3px' }}>Bot catalog unavailable</strong>
-            <span style={{ color: '#9caa9f', lineHeight: 1.6 }}>
-              The bot catalog could not be loaded from the database. Run the Supabase migrations to seed the bots, then refresh the page.
-            </span>
+            <span style={{ color: '#9caa9f', lineHeight: 1.6 }}>The bot catalog could not be loaded from the database. Run the Supabase migrations to seed the bots, then refresh the page.</span>
           </div>
         </div>
       )}
       <div className="bot-grid">
         {bots.map((bot) => {
           const botTrades = trades.filter((trade) => trade.bot_name === bot.name);
+          const stake = stakeMap[bot.name] ?? 10;
           return (
             <div className="bot-card" key={bot.id}>
               <div className="card-top">
@@ -2578,21 +2679,34 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError }: { bots: BotR
               {botTrades.length > 0 && (
                 <div className="bot-chart-wrap"><EquityChart trades={botTrades} compact /></div>
               )}
+
+              {/* Stake selector */}
+              <div style={{ margin: '12px 0 10px', fontSize: '10px', color: '#718580' }}>
+                <span style={{ display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700 }}>Stake per trade</span>
+                <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {[1, 5, 10, 25, 50].map(v => (
+                    <button key={v} type="button" onClick={() => setStake(bot.name, v)}
+                      style={{ padding: '4px 9px', borderRadius: '5px', border: `1px solid ${stake === v ? '#2dd4bf' : '#1e3530'}`, background: stake === v ? '#0d2e29' : 'transparent', color: stake === v ? '#2dd4bf' : '#80948e', fontSize: '10px', cursor: 'pointer', fontFamily: "'DM Mono', monospace" }}>
+                      ${v}
+                    </button>
+                  ))}
+                  <input type="number" min={1} max={1000} value={stake}
+                    onChange={e => setStake(bot.name, Number(e.target.value))}
+                    style={{ width: '54px', padding: '4px 7px', background: '#0b1918', border: '1px solid #1e3530', borderRadius: '5px', color: '#e0f0ec', fontSize: '10px', fontFamily: "'DM Mono', monospace" }}
+                  />
+                </div>
+              </div>
+
               <div className="card-actions">
-                <button
-                  className={bot.active ? 'secondary active-button' : 'primary'}
-                  onClick={() => void toggleBot(bot)}
-                >
+                <button className={bot.active ? 'secondary active-button' : 'primary'} onClick={() => void toggleBot(bot)}>
                   {bot.active ? <><Pause size={15} /> Pause bot</> : <><Play size={15} /> Start bot</>}
                 </button>
-                <button
-                  className="ghost"
-                  onClick={() => void runTrade({ instrument: instruments[0], direction: 'CALL', stake: 10, source: 'demo', botName: bot.name })}
-                >
-                  Test trade
+                <button className="ghost"
+                  onClick={() => void runTrade({ instrument: instruments[0], direction: 'CALL', stake, source: 'demo', botName: bot.name })}>
+                  Test ${stake}
                 </button>
               </div>
-              {bot.active && <div className="watching"><i className="live-dot" /> Running — placing trades every 5s</div>}
+              {bot.active && <div className="watching"><i className="live-dot" /> Running · ${stake}/trade · every 5 s</div>}
             </div>
           );
         })}
@@ -2652,7 +2766,14 @@ function Apex({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: Bo
   );
 }
 
-function PhantomScalper({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; trades: Trade[] }) {
+function PhantomScalper({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
+  bots: BotRow[];
+  toggleBot: (bot: BotRow) => Promise<void>;
+  trades: Trade[];
+  botStatus: Record<string, string>;
+  onSaveConfig: (cfg: BotConfig) => void;
+  initialConfig?: PhantomConfig;
+}) {
   const bot = bots.find((b) => b.name === 'Phantom Scalper');
   const phantomTrades = trades.filter((t) => t.bot_name === 'Phantom Scalper');
   const closed = phantomTrades.filter((t) => t.result === 'won' || t.result === 'lost');
@@ -2661,6 +2782,17 @@ function PhantomScalper({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot
   const userWinRate = hasUserTrades ? Math.round((userWins / closed.length) * 100) : null;
   const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '—';
   const totalPnl = closed.reduce((sum, t) => sum + Number(t.profit), 0);
+
+  const [cfg, setCfg] = useState<PhantomConfig>(initialConfig ?? PHANTOM_DEFAULTS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const updateCfg = <K extends keyof PhantomConfig>(key: K, value: PhantomConfig[K]) => {
+    const next = { ...cfg, [key]: value };
+    setCfg(next);
+    onSaveConfig(next);
+  };
+
+  const currentStatus = botStatus['Phantom Scalper'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
 
   if (!bot) {
     return (
@@ -2767,7 +2899,88 @@ VALUES (
             : <><Ghost size={16} /> Start bot</>}
         </button>
       </section>
-      {bot.active && <div className="watching" style={{ marginBottom: '1rem' }}><i className="live-dot" /> Running — placing trades every 5 s</div>}
+      {bot.active && <div className="watching" style={{ marginBottom: '0.5rem' }}><i className="live-dot" /> {currentStatus}</div>}
+
+      {/* ── Settings panel ──────────────────────────────────────────────── */}
+      <section className="panel" style={{ marginBottom: '1rem' }}>
+        <div className="panel-title" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSettingsOpen(o => !o)}>
+          <div><span className="eyebrow">Configuration</span><h2 style={{ margin: '0.2rem 0 0' }}>Bot parameters</h2></div>
+          <span style={{ fontSize: '11px', color: '#50b9a9', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {settingsOpen ? 'Hide' : 'Edit'} <ChevronRight size={13} style={{ transform: settingsOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
+          </span>
+        </div>
+        {settingsOpen && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', paddingTop: '0.5rem' }}>
+            {/* Base stake */}
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              Base stake ($)
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+                {[5, 8, 10, 12, 15, 20, 25].map(v => (
+                  <button key={v} type="button"
+                    style={{ padding: '5px 10px', borderRadius: '5px', border: `1px solid ${cfg.baseStake === v ? '#2dd4bf' : '#1e3530'}`, background: cfg.baseStake === v ? '#0d2e29' : 'transparent', color: cfg.baseStake === v ? '#2dd4bf' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                    onClick={() => updateCfg('baseStake', v)}>${v}</button>
+                ))}
+              </div>
+            </label>
+            {/* RSI thresholds */}
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              RSI overbought (0–1)
+              <input type="number" min="0.5" max="0.95" step="0.01"
+                value={cfg.rsiOverbought}
+                onChange={e => updateCfg('rsiOverbought', Math.min(0.95, Math.max(0.5, Number(e.target.value))))}
+                style={{ display: 'block', width: '100%', marginTop: '6px', padding: '7px 10px', background: '#0b1918', border: '1px solid #1e3530', borderRadius: '6px', color: '#e0f0ec', fontSize: '12px' }}
+              />
+            </label>
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              RSI oversold (0–1)
+              <input type="number" min="0.05" max="0.5" step="0.01"
+                value={cfg.rsiOversold}
+                onChange={e => updateCfg('rsiOversold', Math.min(0.5, Math.max(0.05, Number(e.target.value))))}
+                style={{ display: 'block', width: '100%', marginTop: '6px', padding: '7px 10px', background: '#0b1918', border: '1px solid #1e3530', borderRadius: '6px', color: '#e0f0ec', fontSize: '12px' }}
+              />
+            </label>
+            {/* Streak thresholds */}
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              Loss streak fade trigger (trades)
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                {[1, 2, 3, 4].map(v => (
+                  <button key={v} type="button"
+                    style={{ padding: '5px 10px', borderRadius: '5px', border: `1px solid ${cfg.lossFadeAt === v ? '#2dd4bf' : '#1e3530'}`, background: cfg.lossFadeAt === v ? '#0d2e29' : 'transparent', color: cfg.lossFadeAt === v ? '#2dd4bf' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                    onClick={() => updateCfg('lossFadeAt', v)}>{v}</button>
+                ))}
+              </div>
+            </label>
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              Win streak step-up trigger (trades)
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                {[2, 3, 4, 5].map(v => (
+                  <button key={v} type="button"
+                    style={{ padding: '5px 10px', borderRadius: '5px', border: `1px solid ${cfg.winStepAt === v ? '#2dd4bf' : '#1e3530'}`, background: cfg.winStepAt === v ? '#0d2e29' : 'transparent', color: cfg.winStepAt === v ? '#2dd4bf' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                    onClick={() => updateCfg('winStepAt', v)}>{v}</button>
+                ))}
+              </div>
+            </label>
+            {/* Session filter toggle */}
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              Prime session filter (UTC windows)
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                {[true, false].map(v => (
+                  <button key={String(v)} type="button"
+                    style={{ padding: '5px 12px', borderRadius: '5px', border: `1px solid ${cfg.sessionFilter === v ? '#2dd4bf' : '#1e3530'}`, background: cfg.sessionFilter === v ? '#0d2e29' : 'transparent', color: cfg.sessionFilter === v ? '#2dd4bf' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                    onClick={() => updateCfg('sessionFilter', v)}>{v ? 'On' : 'Off'}</button>
+                ))}
+              </div>
+            </label>
+            {/* Reset to defaults */}
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button type="button" className="secondary" style={{ fontSize: '11px', padding: '7px 14px' }}
+                onClick={() => { setCfg(PHANTOM_DEFAULTS); onSaveConfig(PHANTOM_DEFAULTS); }}>
+                Reset to defaults
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* Summary stat row */}
       {hasUserTrades && (
@@ -2848,7 +3061,14 @@ VALUES (
   );
 }
 
-function TrendPullbackV3({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; trades: Trade[] }) {
+function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
+  bots: BotRow[];
+  toggleBot: (bot: BotRow) => Promise<void>;
+  trades: Trade[];
+  botStatus: Record<string, string>;
+  onSaveConfig: (cfg: BotConfig) => void;
+  initialConfig?: StpConfig;
+}) {
   const bot = bots.find((b) => b.name === 'Trend Pullback V3');
   const stpTrades = trades.filter((t) => t.bot_name === 'Trend Pullback V3');
   const closed = stpTrades.filter((t) => t.result === 'won' || t.result === 'lost');
@@ -2857,6 +3077,17 @@ function TrendPullbackV3({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBo
   const userWinRate = hasUserTrades ? Math.round((userWins / closed.length) * 100) : null;
   const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '—';
   const totalPnl = closed.reduce((sum, t) => sum + Number(t.profit), 0);
+
+  const [cfg, setCfg] = useState<StpConfig>(initialConfig ?? STP_DEFAULTS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const updateCfg = <K extends keyof StpConfig>(key: K, value: StpConfig[K]) => {
+    const next = { ...cfg, [key]: value };
+    setCfg(next);
+    onSaveConfig(next);
+  };
+
+  const currentStatus = botStatus['Trend Pullback V3'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
 
   if (!bot) {
     return (
@@ -2939,7 +3170,113 @@ function TrendPullbackV3({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBo
           {bot.active ? <><Pause size={16} /> Pause bot</> : <><CandlestickChart size={16} /> Start bot</>}
         </button>
       </section>
-      {bot.active && <div className="watching" style={{ marginBottom: '1rem' }}><i className="live-dot" /> Running — scanning V75 every 5 s</div>}
+      {bot.active && <div className="watching" style={{ marginBottom: '0.5rem' }}><i className="live-dot" /> {currentStatus}</div>}
+
+      {/* ── Settings panel ──────────────────────────────────────────────── */}
+      <section className="panel" style={{ marginBottom: '1rem' }}>
+        <div className="panel-title" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSettingsOpen(o => !o)}>
+          <div><span className="eyebrow">Configuration</span><h2 style={{ margin: '0.2rem 0 0' }}>Bot parameters</h2></div>
+          <span style={{ fontSize: '11px', color: '#34d399', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {settingsOpen ? 'Hide' : 'Edit'} <ChevronRight size={13} style={{ transform: settingsOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
+          </span>
+        </div>
+        {settingsOpen && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', paddingTop: '0.5rem' }}>
+            {/* Stake mode */}
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              Stake mode
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                {(['percent', 'fixed'] as const).map(v => (
+                  <button key={v} type="button"
+                    style={{ padding: '5px 12px', borderRadius: '5px', border: `1px solid ${cfg.stakeMode === v ? '#34d399' : '#1e3530'}`, background: cfg.stakeMode === v ? '#0d2e29' : 'transparent', color: cfg.stakeMode === v ? '#34d399' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                    onClick={() => updateCfg('stakeMode', v)}>{v === 'percent' ? '% of balance' : 'Fixed $'}</button>
+                ))}
+              </div>
+            </label>
+            {/* Stake value */}
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              {cfg.stakeMode === 'percent' ? 'Stake % of balance' : 'Fixed stake ($)'}
+              <input type="number" min={cfg.stakeMode === 'percent' ? 0.1 : 1} max={cfg.stakeMode === 'percent' ? 10 : 200} step={cfg.stakeMode === 'percent' ? 0.1 : 1}
+                value={cfg.stakeValue}
+                onChange={e => updateCfg('stakeValue', Math.max(0.1, Number(e.target.value)))}
+                style={{ display: 'block', width: '100%', marginTop: '6px', padding: '7px 10px', background: '#0b1918', border: '1px solid #1e3530', borderRadius: '6px', color: '#e0f0ec', fontSize: '12px' }}
+              />
+              {cfg.stakeMode === 'percent' && (
+                <span style={{ marginTop: '4px', display: 'block', fontSize: '10px', color: '#50b9a9' }}>
+                  Min ${cfg.stakeMin} · Max ${cfg.stakeMax}
+                </span>
+              )}
+            </label>
+            {cfg.stakeMode === 'percent' && (
+              <>
+                <label style={{ fontSize: '11px', color: '#80948e' }}>
+                  Min stake ($)
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+                    {[1, 2, 5, 10].map(v => (
+                      <button key={v} type="button"
+                        style={{ padding: '5px 10px', borderRadius: '5px', border: `1px solid ${cfg.stakeMin === v ? '#34d399' : '#1e3530'}`, background: cfg.stakeMin === v ? '#0d2e29' : 'transparent', color: cfg.stakeMin === v ? '#34d399' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                        onClick={() => updateCfg('stakeMin', v)}>${v}</button>
+                    ))}
+                  </div>
+                </label>
+                <label style={{ fontSize: '11px', color: '#80948e' }}>
+                  Max stake ($)
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+                    {[20, 50, 100, 200].map(v => (
+                      <button key={v} type="button"
+                        style={{ padding: '5px 10px', borderRadius: '5px', border: `1px solid ${cfg.stakeMax === v ? '#34d399' : '#1e3530'}`, background: cfg.stakeMax === v ? '#0d2e29' : 'transparent', color: cfg.stakeMax === v ? '#34d399' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                        onClick={() => updateCfg('stakeMax', v)}>${v}</button>
+                    ))}
+                  </div>
+                </label>
+              </>
+            )}
+            {/* Score threshold */}
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              Score threshold (0–100)
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+                {[60, 65, 70, 75, 80, 85, 90].map(v => (
+                  <button key={v} type="button"
+                    style={{ padding: '5px 9px', borderRadius: '5px', border: `1px solid ${cfg.scoreThreshold === v ? '#34d399' : '#1e3530'}`, background: cfg.scoreThreshold === v ? '#0d2e29' : 'transparent', color: cfg.scoreThreshold === v ? '#34d399' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                    onClick={() => updateCfg('scoreThreshold', v)}>{v}</button>
+                ))}
+              </div>
+              <span style={{ marginTop: '4px', display: 'block', fontSize: '10px', color: '#6b8880' }}>
+                Higher = fewer but higher-quality entries
+              </span>
+            </label>
+            {/* ADX minimum */}
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              Minimum ADX
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+                {[18, 20, 22, 25, 28, 30].map(v => (
+                  <button key={v} type="button"
+                    style={{ padding: '5px 9px', borderRadius: '5px', border: `1px solid ${cfg.adxMin === v ? '#34d399' : '#1e3530'}`, background: cfg.adxMin === v ? '#0d2e29' : 'transparent', color: cfg.adxMin === v ? '#34d399' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                    onClick={() => updateCfg('adxMin', v)}>{v}</button>
+                ))}
+              </div>
+            </label>
+            {/* Cooldown */}
+            <label style={{ fontSize: '11px', color: '#80948e' }}>
+              Cooldown after 3 losses (minutes)
+              <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+                {[5, 10, 15, 20, 30].map(v => (
+                  <button key={v} type="button"
+                    style={{ padding: '5px 9px', borderRadius: '5px', border: `1px solid ${cfg.cooldownMinutes === v ? '#34d399' : '#1e3530'}`, background: cfg.cooldownMinutes === v ? '#0d2e29' : 'transparent', color: cfg.cooldownMinutes === v ? '#34d399' : '#80948e', fontSize: '11px', cursor: 'pointer' }}
+                    onClick={() => updateCfg('cooldownMinutes', v)}>{v}m</button>
+                ))}
+              </div>
+            </label>
+            {/* Reset */}
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button type="button" className="secondary" style={{ fontSize: '11px', padding: '7px 14px' }}
+                onClick={() => { setCfg(STP_DEFAULTS); onSaveConfig(STP_DEFAULTS); }}>
+                Reset to defaults
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* Summary stats */}
       {hasUserTrades && (
