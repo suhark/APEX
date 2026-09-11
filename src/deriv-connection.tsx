@@ -1,15 +1,9 @@
 import { useState } from 'react';
-import { AlertCircle, Check, ExternalLink, Link2, Loader2, LogOut, ShieldCheck, Unlink, Wallet } from 'lucide-react';
+import { AlertCircle, Check, Link2, Loader2, LogOut, ShieldCheck, Unlink, UserPlus, Wallet } from 'lucide-react';
 import { type DerivAuthState, type DerivAccount } from './deriv-client';
+import { redirectToDerivLogin, redirectToDerivSignup, DERIV_CLIENT_ID } from './deriv-oauth';
 
 const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
-
-// Build OAuth URL — redirect URI must match exactly what was registered on developers.deriv.com
-const isProd = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
-const REDIRECT_URI = isProd
-  ? 'https://apextradinglab.app/callback'
-  : `${window.location.origin}/callback`;
-const OAUTH_URL = `https://oauth.deriv.com/oauth2/authorize?app_id=${DEFAULT_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token`;
 
 export function DerivConnectionPanel({
   authState,
@@ -131,6 +125,7 @@ export function DerivConnectionPanel({
   }
 
   const connecting = authState === 'connecting' || authState === 'authorizing';
+  const hasOAuth = Boolean(DERIV_CLIENT_ID);
 
   return (
     <div className="deriv-connect">
@@ -138,31 +133,41 @@ export function DerivConnectionPanel({
         <Link2 size={20} />
         <div>
           <h2>Connect your Deriv account</h2>
-          <p>Sign in with your Deriv account — no token needed.</p>
+          <p>Sign in with your Deriv account or use an API token.</p>
         </div>
       </div>
 
-      {/* ── OAuth button — primary method ── */}
-      <button
-        className="primary"
-        style={{ width: '100%', marginBottom: 6, fontSize: 13, padding: '11px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        disabled={connecting}
-        onClick={() => { window.location.href = OAUTH_URL; }}
-      >
-        {connecting
-          ? <><Loader2 size={16} className="spin" /> Connecting…</>
-          : <><img src="https://brand.deriv.com/images/logos/logo-icon.svg" alt="" style={{ width: 18, height: 18 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> Connect with Deriv</>}
-      </button>
-      <p style={{ fontSize: 10, color: '#718580', textAlign: 'center', margin: '0 0 20px' }}>
-        You'll be redirected to Deriv to approve access, then brought back here automatically.
-      </p>
-
-      {/* ── Divider ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 16px', color: '#2a3e3a', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-        <span style={{ flex: 1, height: 1, background: '#1d2d29' }} />
-        <span>or connect with API token</span>
-        <span style={{ flex: 1, height: 1, background: '#1d2d29' }} />
-      </div>
+      {/* ── OAuth buttons — shown when client_id is configured ── */}
+      {hasOAuth && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+            <button
+              className="primary"
+              style={{ flex: 1, fontSize: 13, padding: '11px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+              disabled={connecting}
+              onClick={() => void redirectToDerivLogin()}
+            >
+              {connecting ? <><Loader2 size={15} className="spin" /> Connecting…</> : <><Link2 size={15} /> Log in with Deriv</>}
+            </button>
+            <button
+              className="secondary"
+              style={{ flex: 1, fontSize: 13, padding: '11px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}
+              disabled={connecting}
+              onClick={() => void redirectToDerivSignup()}
+            >
+              <UserPlus size={15} /> Sign up
+            </button>
+          </div>
+          <p style={{ fontSize: 10, color: '#718580', textAlign: 'center', margin: '0 0 18px' }}>
+            You'll be taken to Deriv to approve access, then brought back automatically.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 16px', color: '#2a3e3a', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <span style={{ flex: 1, height: 1, background: '#1d2d29' }} />
+            <span>or use API token</span>
+            <span style={{ flex: 1, height: 1, background: '#1d2d29' }} />
+          </div>
+        </>
+      )}
 
       {authState === 'error' && (
         <div className="deriv-error">
@@ -189,7 +194,7 @@ export function DerivConnectionPanel({
         </div>
       </label>
       <button
-        className="secondary"
+        className={hasOAuth ? 'secondary' : 'primary'}
         style={{ width: '100%' }}
         disabled={!token.trim() || connecting}
         onClick={() => onConnect(token.trim(), DEFAULT_APP_ID)}
@@ -199,11 +204,10 @@ export function DerivConnectionPanel({
       <div className="deriv-help">
         <Unlink size={14} />
         <span>
-          Tokens can be managed or revoked anytime on{' '}
-          <a href="https://home.deriv.com/dashboard/profile/api-tokens" target="_blank" rel="noopener noreferrer">
-            Deriv Profile &gt; API Tokens
-          </a>
-          .
+          Tokens can be managed or revoked at{' '}
+          <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer">
+            app.deriv.com/account/api-token
+          </a>.
         </span>
       </div>
     </div>

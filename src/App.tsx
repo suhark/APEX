@@ -4,6 +4,7 @@ import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, Cha
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
 import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
+import { handleOAuthCallback } from './deriv-oauth';
 import { AuthModal } from './auth-modal';
 import { ManualTrader } from './manual-trader';
 import { DigitsAnalyser } from './digits-analyser';
@@ -862,21 +863,41 @@ function App() {
     }
   };
 
-  // ── Deriv OAuth callback handler ─────────────────────────────────────────
-  // Fires when Deriv redirects back to /callback?token1=...&acct1=...
+  // ── Deriv OAuth 2.0 + PKCE callback handler ──────────────────────────────
+  // Fires when Deriv redirects back to /callback?code=...&state=...
   useEffect(() => {
     if (window.location.pathname !== '/callback') return;
+
     const params = new URLSearchParams(window.location.search);
-    const token1 = params.get('token1');
-    if (!token1) return;
 
-    // Clean the URL immediately so refreshing doesn't re-trigger
-    window.history.replaceState({}, '', '/');
+    // Check for error first
+    if (params.get('error')) {
+      window.history.replaceState({}, '', '/');
+      setNotice(`Deriv login failed: ${params.get('error_description') ?? params.get('error')}`);
+      return;
+    }
 
-    // Store the token and connect — same path as manual PAT entry
-    // The Supabase auth check runs in parallel; once user is set, load() picks up the token
-    localStorage.setItem('apex_deriv_token', token1);
-    void handleDerivConnect(token1, DEFAULT_APP_ID);
+    // Must have a code param to proceed
+    if (!params.get('code')) return;
+
+    const runCallback = async () => {
+      try {
+        const result = await handleOAuthCallback();
+        if (!result) return;
+
+        // Store the access token and connect
+        const token = result.access_token;
+        if (userRef.current) {
+          localStorage.setItem(`apex_deriv_token_${userRef.current.id}`, token);
+        }
+        localStorage.setItem('apex_deriv_token', token);
+        void handleDerivConnect(token, DEFAULT_APP_ID);
+      } catch (err) {
+        setNotice(`Deriv login error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    };
+
+    void runCallback();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
