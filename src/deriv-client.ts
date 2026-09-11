@@ -40,7 +40,9 @@ type PendingRequest = {
 let ws: WebSocket | null = null;
 let reqId = 1;
 const pending = new Map<number, PendingRequest>();
-const tickCallbacks = new Map<string, (tick: DerivTick) => void>();
+// Multiple callbacks per symbol — keyed by symbol, stored as a Map of id→cb
+const tickCallbacks = new Map<string, Map<number, (tick: DerivTick) => void>>();
+let tickCallbackId = 0;
 const contractCallbacks = new Map<number, (result: DerivTradeResult) => void>();
 let authState: DerivAuthState = 'disconnected';
 let authToken: string | null = null;
@@ -281,8 +283,11 @@ function handleMessage(event: MessageEvent) {
   }
 
   if (data.msg_type === 'tick' && data.tick) {
-    const cb = tickCallbacks.get(data.tick.symbol);
-    if (cb) cb({ symbol: data.tick.symbol, quote: data.tick.quote, epoch: data.tick.epoch });
+    const cbs = tickCallbacks.get(data.tick.symbol);
+    if (cbs) {
+      const tick: DerivTick = { symbol: data.tick.symbol, quote: data.tick.quote, epoch: data.tick.epoch };
+      cbs.forEach(cb => cb(tick));
+    }
   }
 
   if (data.msg_type === 'proposal_open_contract' && data.proposal_open_contract) {
@@ -460,6 +465,7 @@ export function disconnect() {
   setAccountInfo(null);
   setAvailableAccounts([]);
   tickCallbacks.clear();
+  tickCallbackId = 0;
   contractCallbacks.clear();
   pending.clear();
   if (ws) {
@@ -472,10 +478,11 @@ export function disconnect() {
 
 export async function getProposal(params: {
   symbol: DerivSymbol;
-  contract_type: 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
+  contract_type: 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF' | 'ACCU';
   stake: number;
   duration: number;
-  barrier?: number; // digit 0–9, required for DIGITOVER/UNDER/MATCH/DIFF
+  barrier?: number;   // digit 0–9 for digit contracts; not used for ACCU
+  growth_rate?: number; // ACCU only: 0.01–0.05
 }): Promise<DerivProposal> {
   const payload: Record<string, unknown> = {
     proposal: 1,
@@ -483,12 +490,20 @@ export async function getProposal(params: {
     basis: 'stake',
     contract_type: params.contract_type,
     currency: accountInfo?.currency || 'USD',
-    duration: params.duration,
-    duration_unit: 't',
     symbol: params.symbol,
   };
+
+  if (params.contract_type === 'ACCU') {
+    // Accumulators use seconds not ticks, and need a growth_rate
+    payload.growth_rate = params.growth_rate ?? 0.01;
+    // No duration/duration_unit for ACCU — it runs until sold or knocked out
+  } else {
+    payload.duration = params.duration;
+    payload.duration_unit = 't';
+  }
+
   // Digit contracts that need a barrier (specific digit)
-  if (params.barrier !== undefined) {
+  if (params.barrier !== undefined && params.contract_type !== 'ACCU') {
     payload.barrier = String(params.barrier);
   }
   // Options API requires underlying_symbol instead of symbol
@@ -510,7 +525,7 @@ export async function buyContract(proposalId: string, price: number): Promise<{ 
   throw data.error?.message ?? 'Buy failed';
 }
 
-export function subscribeContract(contractId: number, cb: (result: DerivTradeResult) => void): () => void {
+export function subscribeContract(contractId: number, cb: (result: DerivTradeResult) => void, onUpdate?: (result: DerivTradeResult) => void): () => void {
   const normalizedId = Number(contractId);
   let resolved = false;
   let pollInterval: number | null = null;
@@ -553,6 +568,9 @@ export function subscribeContract(contractId: number, cb: (result: DerivTradeRes
       // Refresh balance after contract settles
       void send({ balance: 1 }).catch(() => {});
       cb(tradeResult);
+    } else if (status === 'open' && onUpdate) {
+      // Fire live P&L update for open contracts (used by the open contracts panel)
+      onUpdate(tradeResult);
     }
   };
 
@@ -624,10 +642,11 @@ export function subscribeContract(contractId: number, cb: (result: DerivTradeRes
 
 export async function executeTrade(params: {
   symbol: DerivSymbol;
-  contract_type: 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
+  contract_type: 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF' | 'ACCU';
   stake: number;
   duration: number;
   barrier?: number;
+  growth_rate?: number;
 }): Promise<{ proposal: DerivProposal; contractId: number; buyPrice: number; entryPrice: number }> {
   const proposal = await getProposal(params);
   const buy = await buyContract(proposal.id, proposal.ask_price);
@@ -635,11 +654,25 @@ export async function executeTrade(params: {
 }
 
 export function subscribeTicks(symbol: DerivSymbol, cb: (tick: DerivTick) => void): () => void {
-  tickCallbacks.set(symbol, cb);
-  void send({ ticks: symbol, subscribe: 1 });
+  // Register this callback under a unique id
+  const id = ++tickCallbackId;
+  if (!tickCallbacks.has(symbol)) {
+    tickCallbacks.set(symbol, new Map());
+    // Only send the subscription request when this is the first subscriber
+    void send({ ticks: symbol, subscribe: 1 }).catch(() => {});
+  }
+  tickCallbacks.get(symbol)!.set(id, cb);
+
   return () => {
-    tickCallbacks.delete(symbol);
-    void send({ forget_all: 'ticks' });
+    const cbs = tickCallbacks.get(symbol);
+    if (cbs) {
+      cbs.delete(id);
+      // Only forget the WebSocket feed when the last subscriber unregisters
+      if (cbs.size === 0) {
+        tickCallbacks.delete(symbol);
+        void send({ forget_all: 'ticks' }).catch(() => {});
+      }
+    }
   };
 }
 

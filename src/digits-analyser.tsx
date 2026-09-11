@@ -109,20 +109,72 @@ function DigitGauge({ digit, count, total, isLast, accentColor, onClick, selecte
 }
 
 // ─── Tick history squares ─────────────────────────────────────────────────────
-function TickHistoryRow({ history }: { history: TickPoint[] }) {
+function TickHistoryRow({ history, barrier }: { history: TickPoint[]; barrier: number }) {
   const visible = history.slice(-30);
   return (
-    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-      {visible.map((t, i) => (
-        <div key={`${t.epoch}-${i}`} style={{
-          width: 24, height: 24, borderRadius: 4,
-          background: DIGIT_COLORS[t.digit],
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 11, fontWeight: 800, fontFamily: "'DM Mono', monospace", color: '#000',
-          opacity: 0.5 + (i / visible.length) * 0.5,
-          border: i === visible.length - 1 ? '2px solid #fff' : '2px solid transparent',
-        }}>{t.digit}</div>
-      ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Digit squares */}
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        {visible.map((t, i) => (
+          <div key={`${t.epoch}-${i}`} style={{
+            width: 24, height: 24, borderRadius: 4,
+            background: DIGIT_COLORS[t.digit],
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 11, fontWeight: 800, fontFamily: "'DM Mono', monospace", color: '#000',
+            opacity: 0.5 + (i / visible.length) * 0.5,
+            border: i === visible.length - 1 ? '2px solid #fff' : '2px solid transparent',
+          }}>{t.digit}</div>
+        ))}
+      </div>
+
+      {/* Even/Odd log */}
+      <div>
+        <div style={{ fontSize: 9, color: '#4a6a62', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 4 }}>Even / Odd</div>
+        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+          {visible.map((t, i) => {
+            const isEven = t.digit % 2 === 0;
+            return (
+              <div key={`eo-${t.epoch}-${i}`} style={{
+                width: 22, height: 22, borderRadius: 4, fontSize: 9, fontWeight: 800,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: "'DM Mono', monospace",
+                background: isEven ? 'rgba(45,212,191,0.18)' : 'rgba(248,113,113,0.18)',
+                color: isEven ? '#2dd4bf' : '#f87171',
+                border: `1px solid ${isEven ? 'rgba(45,212,191,0.35)' : 'rgba(248,113,113,0.35)'}`,
+                opacity: 0.5 + (i / visible.length) * 0.5,
+              }}>
+                {isEven ? 'E' : 'O'}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Over/Under log */}
+      <div>
+        <div style={{ fontSize: 9, color: '#4a6a62', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 4 }}>Over / Under {barrier}</div>
+        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+          {visible.map((t, i) => {
+            const isOver = t.digit > barrier;
+            const isUnder = t.digit < barrier;
+            const label = isOver ? `>${barrier}` : isUnder ? `<${barrier}` : `=${barrier}`;
+            const bg    = isOver ? 'rgba(249,115,22,0.18)' : isUnder ? 'rgba(59,130,246,0.18)' : 'rgba(251,191,36,0.18)';
+            const col   = isOver ? '#f97316' : isUnder ? '#60a5fa' : '#fbbf24';
+            const bdr   = isOver ? 'rgba(249,115,22,0.35)' : isUnder ? 'rgba(59,130,246,0.35)' : 'rgba(251,191,36,0.35)';
+            return (
+              <div key={`ou-${t.epoch}-${i}`} style={{
+                minWidth: 22, height: 22, padding: '0 3px', borderRadius: 4, fontSize: 8, fontWeight: 800,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: "'DM Mono', monospace",
+                background: bg, color: col, border: `1px solid ${bdr}`,
+                opacity: 0.5 + (i / visible.length) * 0.5,
+              }}>
+                {label}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -315,7 +367,7 @@ export function DigitsAnalyser({
           {history.length > 0 && (
             <section className='panel' style={{ marginBottom: 14 }}>
               <div className='panel-title'><div><span className='eyebrow'>Recent ticks</span><h2>Last 30 digits</h2></div></div>
-              <TickHistoryRow history={history} />
+              <TickHistoryRow history={history} barrier={selectedBarrier} />
             </section>
           )}
 

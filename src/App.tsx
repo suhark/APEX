@@ -479,6 +479,8 @@ function App() {
   const [botsLoadError, setBotsLoadError] = useState(false);
   const [notice, setNotice] = useState('');
   const [tradeAlert, setTradeAlert] = useState<TradeAlert | null>(null);
+  // Live P&L for open (pending) contracts — keyed by trade id
+  const [openContractPnl, setOpenContractPnl] = useState<Record<string, { profit: number; entryPrice: number; instrument: string; direction: string; stake: number }>>({});
   const [confirmModal, setConfirmModal] = useState<{
     title: string; body: string;
     rows?: { label: string; value: string }[];
@@ -1077,7 +1079,7 @@ function App() {
   allowBotLiveRef.current = allowBotLiveTrading;
   maxBalancePercentRef.current = maxBalancePercent;
 
-  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; barrier?: number }) => {
+  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; barrier?: number; growth_rate?: number; duration?: number }) => {
     if (!workspace) return;
     const ws = workspaceRef.current;
     if (!ws) return;
@@ -1146,10 +1148,11 @@ function App() {
       try {
         const result = await executeTrade({
           symbol: symbol as DerivSymbol,
-          contract_type: details.direction as 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF',
+          contract_type: details.direction as 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF' | 'ACCU',
           stake: details.stake,
-          duration: 5,
+          duration: details.duration ?? 5,
           barrier: details.barrier,
+          growth_rate: details.growth_rate,
         });
 
         const tradeId = (typeof crypto !== 'undefined' && crypto.randomUUID)
@@ -1192,6 +1195,9 @@ function App() {
           if (poc.status === 'won' || poc.status === 'lost') {
             const finalProfit = poc.profit;
             const win = poc.status === 'won';
+
+            // Remove from live P&L panel on settlement
+            setOpenContractPnl(prev => { const next = { ...prev }; delete next[tradeId]; return next; });
 
             // Update persistent trade store and React state
             updatePersistedTrade(tradeId, {
@@ -1260,7 +1266,30 @@ function App() {
               setNotice(`${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`);
             }
           }
+        }, (poc: DerivTradeResult) => {
+          // Live P&L update for the open contracts bar
+          setOpenContractPnl(prev => ({
+            ...prev,
+            [tradeId]: {
+              profit: poc.profit,
+              entryPrice: poc.entry_price,
+              instrument: details.instrument,
+              direction: details.direction,
+              stake: details.stake,
+            },
+          }));
         });
+        // Seed the open contracts panel immediately on purchase
+        setOpenContractPnl(prev => ({
+          ...prev,
+          [tradeId]: {
+            profit: 0,
+            entryPrice: result.entryPrice,
+            instrument: details.instrument,
+            direction: details.direction,
+            stake: details.stake,
+          },
+        }));
         setNotice(`${details.direction} contract purchased on Deriv (${deriv.account.loginid} · ${deriv.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`);
       } catch (err) {
         if (details.botName) botPendingTradesRef.current.delete(details.botName);
@@ -1816,6 +1845,7 @@ function App() {
             </div>
           </div>
         </header>
+        <LiveContractsBar contracts={openContractPnl} />
         <div className="ticker">
           {instruments.map((instrument, index) => {
             const value = priceFor(index, tick);
@@ -2101,6 +2131,44 @@ function ConfirmModal({ title, body, rows, danger, onConfirm, onCancel }: {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LiveContractsBar({ contracts }: { contracts: Record<string, { profit: number; entryPrice: number; instrument: string; direction: string; stake: number }> }) {
+  const entries = Object.entries(contracts);
+  if (entries.length === 0) return null;
+
+  return (
+    <div style={{
+      display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+      padding: '6px 20px', background: '#0b1614', borderBottom: '1px solid #1d2d29',
+      fontSize: 11,
+    }}>
+      <span style={{ color: '#50b9a9', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', flexShrink: 0 }}>
+        <i className='live-dot' style={{ marginRight: 5 }} />
+        Open ({entries.length})
+      </span>
+      {entries.map(([id, c]) => {
+        const isUp = c.profit >= 0;
+        const label = c.direction.startsWith('DIGIT') ? c.direction.replace('DIGIT', '') :
+                      c.direction === 'ACCU' ? 'ACCU' : c.direction;
+        return (
+          <div key={id} style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '4px 10px', borderRadius: 6,
+            background: isUp ? 'rgba(45,212,191,0.08)' : 'rgba(248,113,113,0.08)',
+            border: `1px solid ${isUp ? 'rgba(45,212,191,0.2)' : 'rgba(248,113,113,0.2)'}`,
+          }}>
+            <span style={{ color: '#80948e' }}>{c.instrument.replace('Volatility ', 'V').replace(' Index', '')}</span>
+            <span style={{ color: '#cde0da', fontWeight: 600 }}>{label}</span>
+            <span style={{ fontFamily: "'DM Mono', monospace", fontWeight: 700, color: isUp ? '#2dd4bf' : '#f87171' }}>
+              {isUp ? '+' : ''}{c.profit.toFixed(2)}
+            </span>
+            <span style={{ color: '#4a6a62' }}>/ {c.stake.toFixed(2)}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
