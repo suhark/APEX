@@ -1119,6 +1119,8 @@ function App() {
   const botsRef = useRef(bots);
   const tradesRef = useRef(trades);
   const tickRef = useRef(tick);
+  const derivConnectedRef = useRef(derivConnected);
+  const derivAccountRef = useRef(deriv.account);
 
   workspaceRef.current = workspace;
   botsRef.current = bots;
@@ -1127,6 +1129,8 @@ function App() {
   liveArmedRef.current = liveArmed;
   allowBotLiveRef.current = allowBotLiveTrading;
   maxBalancePercentRef.current = maxBalancePercent;
+  derivConnectedRef.current = derivConnected;
+  derivAccountRef.current = deriv.account;
 
   const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; barrier?: number; growth_rate?: number; duration?: number }) => {
     if (!workspace) return;
@@ -1478,7 +1482,9 @@ function App() {
 
       // Stop all bots immediately if the session loss limit has been reached
       const loopStartBal = sessionStartingBalRef.current ?? ws.starting_balance;
-      const loopCurrentBal = derivConnected && deriv.account ? deriv.account.balance : ws.balance;
+      const loopCurrentBal = derivConnectedRef.current && derivAccountRef.current
+        ? derivAccountRef.current.balance
+        : ws.balance;
       const loopLossUsed = computeSessionLoss(loopStartBal, loopCurrentBal, tradesRef.current, sessionStartAtRef.current);
       if (loopLossUsed >= ws.loss_limit) {
         stopAllBots();
@@ -1587,8 +1593,8 @@ function App() {
           setBotStatus(s => ({ ...s, 'Trend Pullback V3': `✅ Signal: ${signal.direction} (score ${signal.score})` }));
           instrument = 'Volatility 75 Index';
           direction  = signal.direction;
-          const stpBal = derivConnected && deriv.account
-            ? deriv.account.balance
+          const stpBal = derivConnectedRef.current && derivAccountRef.current
+            ? derivAccountRef.current.balance
             : (workspaceRef.current?.balance ?? 1000);
           if (cfg.stakeMode === 'percent') {
             stake = Math.min(cfg.stakeMax, Math.max(cfg.stakeMin, Number((stpBal * cfg.stakeValue / 100).toFixed(2))));
