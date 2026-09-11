@@ -139,13 +139,26 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
     loadedRef.current = true;
     setLoading(true);
     try {
-      const syms = await getActiveSymbols();
-      if (import.meta.env.DEV) {
-        const markets = [...new Set(syms.map(s => s.market))];
-        console.log('[DerivInstruments] available markets:', markets);
-        console.log('[DerivInstruments] total symbols:', syms.length);
+      console.log('[DerivInstruments] calling getActiveSymbols...');
+      let syms: Awaited<ReturnType<typeof getActiveSymbols>>;
+      // Retry up to 5 times with backoff — WS may not be fully ready right after connect
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          syms = await getActiveSymbols();
+          lastErr = undefined;
+          break;
+        } catch (e) {
+          lastErr = e;
+          console.warn(`[DerivInstruments] attempt ${attempt + 1} failed:`, e);
+          await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+        }
       }
-      const infos: InstrumentInfo[] = syms
+      if (lastErr !== undefined || !syms!) {
+        throw lastErr ?? new Error('No symbols returned');
+      }
+      console.log('[DerivInstruments] got', syms!.length, 'symbols, markets:', [...new Set(syms!.map(s => s.market))]);
+      const infos: InstrumentInfo[] = syms!
         .filter(s => !s.is_trading_suspended && s.symbol && s.display_name)
         .map(s => ({
           symbol:       s.symbol,
@@ -160,6 +173,7 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
           priceHistory: [],
           change1m: null, change5m: null, change15m: null, change1h: null,
         }));
+      console.log('[DerivInstruments] filtered to', infos.length, 'instruments');
       setInstruments(infos);
       setLoading(false);
 
@@ -189,7 +203,7 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
         }
       }
     } catch (err) {
-      if (import.meta.env.DEV) console.warn('[DerivInstruments]', err);
+      console.error('[DerivInstruments] load failed:', err);
       // Reset so the next open or connection event can retry
       loadedRef.current = false;
       setLoading(false);
