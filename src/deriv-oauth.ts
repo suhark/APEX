@@ -135,19 +135,17 @@ export async function handleOAuthCallback(): Promise<OAuthResult | null> {
     throw new Error('PKCE verifier missing. Please try connecting again.');
   }
 
-  // Exchange authorization code for access token
-  const body = new URLSearchParams({
-    grant_type:    'authorization_code',
-    client_id:     DERIV_CLIENT_ID,
-    code,
-    code_verifier: codeVerifier,
-    redirect_uri:  REDIRECT_URI,
-  });
-
-  const resp = await fetch(TOKEN_ENDPOINT, {
+  // Exchange authorization code for access token via our server-side proxy
+  // (browser cannot POST to auth.deriv.com/oauth2/token directly due to CORS)
+  const resp = await fetch('/api/deriv-token', {
     method:  'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body:    body.toString(),
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      code,
+      code_verifier: codeVerifier,
+      redirect_uri:  REDIRECT_URI,
+      client_id:     DERIV_CLIENT_ID,
+    }),
   });
 
   if (!resp.ok) {
