@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { subscribeTicks, symbolMap, getTicksHistory, type DerivTick } from './deriv-client';
+import { subscribeTicks, symbolMap, getTicksHistory, getActiveSymbols, type DerivTick } from './deriv-client';
 import { DerivInstruments } from './deriv-instruments';
 import {
   ArrowDown,
