@@ -280,21 +280,24 @@ export function ManualTrader({
 
   // ── When Deriv connects, validate/resolve the instrument symbol ────────────
   // active_symbols gives us exactly what's available for this account.
-  // If the current symbol code isn't available, auto-switch to R_100 or first available.
+  // When Deriv connects, validate the current symbol is actually available.
+  // Uses the correct field names from the Options API response.
   useEffect(() => {
     if (!derivConnected) return;
     let cancelled = false;
     getActiveSymbols().then(syms => {
       if (cancelled) return;
-      const available = new Set(syms.map(s => s.symbol));
+      // Options API returns underlying_symbol, standard WS returns symbol
+      const available = new Set(syms.map(s => (s as any).underlying_symbol ?? s.symbol).filter(Boolean) as string[]);
       const currentCode = selectedSymbolCode ?? (symbolMap[selectedInstrument] as string);
-      if (currentCode && available.has(currentCode)) return; // already valid
+      if (currentCode && available.has(currentCode)) return; // already valid — do nothing
       // Current symbol not available — pick best alternative
       const preferred = ['R_100', 'R_75', 'R_50', 'R_25', 'R_10',
                          '1HZ100V', '1HZ75V', '1HZ50V', '1HZ25V', '1HZ10V'];
       const fallback = preferred.find(s => available.has(s));
       if (fallback) {
-        const displayName = syms.find(s => s.symbol === fallback)?.display_name ?? fallback;
+        const match = syms.find(s => ((s as any).underlying_symbol ?? s.symbol) === fallback);
+        const displayName = (match as any)?.underlying_symbol_name ?? match?.display_name ?? fallback;
         setSelectedSymbolCode(fallback);
         setSelectedInstrument(displayName);
       }
