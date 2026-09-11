@@ -1,17 +1,13 @@
 /**
  * Deriv OAuth 2.0 + PKCE implementation
- * https://auth.deriv.com/oauth2/auth
- *
- * Uses the Authorization Code flow with PKCE — safe for SPAs
- * because no client_secret is required, only the code_verifier.
+ * Docs: https://auth.deriv.com/oauth2/auth
  */
 
-const AUTH_ENDPOINT  = 'https://auth.deriv.com/oauth2/auth';
-const TOKEN_ENDPOINT = 'https://auth.deriv.com/oauth2/token';
+const AUTH_ENDPOINT = 'https://auth.deriv.com/oauth2/auth';
 
-// Your new Deriv OAuth2 client_id — update when you have it
-export const DERIV_CLIENT_ID = import.meta.env.VITE_DERIV_CLIENT_ID ?? '';
-// Legacy app_id for the WebSocket connection (still needed after token exchange)
+// client_id = your Deriv OAuth2 app ID (from developers.deriv.com)
+export const DERIV_CLIENT_ID = import.meta.env.VITE_DERIV_CLIENT_ID ?? '34mV1HDCcx9gNO0aCEQMg';
+// Legacy app_id still needed for WebSocket connection after token exchange
 export const DERIV_LEGACY_APP_ID = import.meta.env.VITE_DERIV_APP_ID ?? '34mV1HDCcx9gNO0aCEQMg';
 
 const REDIRECT_URI = window.location.hostname === 'localhost'
@@ -41,12 +37,8 @@ function generateState(): string {
     .join('');
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ─── Auth redirects ───────────────────────────────────────────────────────────
 
-/**
- * Redirect the user to Deriv's OAuth login page.
- * Stores PKCE verifier + state in sessionStorage before redirecting.
- */
 export async function redirectToDerivLogin(): Promise<void> {
   const { verifier, challenge } = await generatePKCE();
   const state = generateState();
@@ -62,15 +54,15 @@ export async function redirectToDerivLogin(): Promise<void> {
     state,
     code_challenge: challenge,
     code_challenge_method: 'S256',
-    ...(DERIV_LEGACY_APP_ID ? { app_id: DERIV_LEGACY_APP_ID } : {}),
+    ...(DERIV_LEGACY_APP_ID && DERIV_LEGACY_APP_ID !== DERIV_CLIENT_ID
+      ? { app_id: DERIV_LEGACY_APP_ID }
+      : {}),
   });
 
+  console.log('[APEX OAuth] Redirecting to Deriv login:', `${AUTH_ENDPOINT}?${params.toString()}`);
   window.location.href = `${AUTH_ENDPOINT}?${params.toString()}`;
 }
 
-/**
- * Redirect the user to Deriv's OAuth sign-up page.
- */
 export async function redirectToDerivSignup(): Promise<void> {
   const { verifier, challenge } = await generatePKCE();
   const state = generateState();
@@ -87,11 +79,15 @@ export async function redirectToDerivSignup(): Promise<void> {
     code_challenge: challenge,
     code_challenge_method: 'S256',
     prompt: 'registration',
-    ...(DERIV_LEGACY_APP_ID ? { app_id: DERIV_LEGACY_APP_ID } : {}),
+    ...(DERIV_LEGACY_APP_ID && DERIV_LEGACY_APP_ID !== DERIV_CLIENT_ID
+      ? { app_id: DERIV_LEGACY_APP_ID }
+      : {}),
   });
 
   window.location.href = `${AUTH_ENDPOINT}?${params.toString()}`;
 }
+
+// ─── Callback handler ─────────────────────────────────────────────────────────
 
 export interface OAuthResult {
   access_token: string;
@@ -99,11 +95,6 @@ export interface OAuthResult {
   token_type: string;
 }
 
-/**
- * Handle the /callback redirect from Deriv.
- * Verifies state, exchanges the code for a token using PKCE.
- * Returns the access_token on success, throws on failure.
- */
 export async function handleOAuthCallback(): Promise<OAuthResult | null> {
   if (window.location.pathname !== '/callback') return null;
 
@@ -112,47 +103,87 @@ export async function handleOAuthCallback(): Promise<OAuthResult | null> {
   const state = params.get('state');
   const error = params.get('error');
 
-  // Clean URL immediately
+  // Clean URL immediately so refresh doesn't re-trigger
   window.history.replaceState({}, '', '/');
 
   if (error) {
-    throw new Error(`Deriv OAuth error: ${params.get('error_description') ?? error}`);
+    const desc = params.get('error_description') ?? error;
+    console.error('[APEX OAuth] Callback error:', desc);
+    throw new Error(`Deriv login failed: ${desc}`);
   }
 
-  if (!code || !state) return null;
+  if (!code || !state) {
+    console.warn('[APEX OAuth] Callback missing code or state');
+    return null;
+  }
 
   // Verify CSRF state
-  const storedState    = sessionStorage.getItem('oauth_state');
-  const codeVerifier   = sessionStorage.getItem('pkce_code_verifier');
+  const storedState  = sessionStorage.getItem('oauth_state');
+  const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
   sessionStorage.removeItem('oauth_state');
   sessionStorage.removeItem('pkce_code_verifier');
+
+  console.log('[APEX OAuth] State check — stored:', storedState, 'received:', state);
 
   if (!storedState || state !== storedState) {
     throw new Error('OAuth state mismatch — possible CSRF attack. Please try again.');
   }
 
   if (!codeVerifier) {
-    throw new Error('PKCE verifier missing. Please try connecting again.');
+    throw new Error('PKCE code_verifier missing from sessionStorage. Please try again.');
   }
 
-  // Exchange authorization code for access token via our server-side proxy
-  // (browser cannot POST to auth.deriv.com/oauth2/token directly due to CORS)
-  const resp = await fetch('/api/deriv-token', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
+  console.log('[APEX OAuth] Exchanging code for token via /api/deriv-token');
+  console.log('[APEX OAuth] client_id:', DERIV_CLIENT_ID, 'redirect_uri:', REDIRECT_URI);
+
+  // Try server-side proxy first (Vercel function)
+  let resp: Response;
+  try {
+    resp = await fetch('/api/deriv-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: REDIRECT_URI,
+        client_id: DERIV_CLIENT_ID,
+      }),
+    });
+  } catch (fetchErr) {
+    // /api/deriv-token not available (local dev without Vercel) — try direct
+    console.warn('[APEX OAuth] /api/deriv-token unavailable, trying direct:', fetchErr);
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: DERIV_CLIENT_ID,
       code,
       code_verifier: codeVerifier,
-      redirect_uri:  REDIRECT_URI,
-      client_id:     DERIV_CLIENT_ID,
-    }),
-  });
-
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Token exchange failed: ${err}`);
+      redirect_uri: REDIRECT_URI,
+    });
+    resp = await fetch('https://auth.deriv.com/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
   }
 
-  const data: OAuthResult = await resp.json();
+  const responseText = await resp.text();
+  console.log('[APEX OAuth] Token exchange response:', resp.status, responseText);
+
+  if (!resp.ok) {
+    throw new Error(`Token exchange failed (${resp.status}): ${responseText}`);
+  }
+
+  let data: OAuthResult;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    throw new Error(`Invalid token response: ${responseText}`);
+  }
+
+  if (!data.access_token) {
+    throw new Error(`No access_token in response: ${responseText}`);
+  }
+
+  console.log('[APEX OAuth] Token exchange successful, token type:', data.token_type);
   return data;
 }
