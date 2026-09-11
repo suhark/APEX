@@ -146,7 +146,7 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
         console.log('[DerivInstruments] total symbols:', syms.length);
       }
       const infos: InstrumentInfo[] = syms
-        .filter(s => !s.is_trading_suspended)
+        .filter(s => !s.is_trading_suspended && s.symbol && s.display_name)
         .map(s => ({
           symbol:       s.symbol,
           display_name: s.display_name,
@@ -216,7 +216,7 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
   const catMarkets = MARKET_CATEGORIES.find(c => c.key === category)?.markets ?? [];
   const filtered = instruments.filter(i =>
     catMarkets.includes(i.market as any) &&
-    (!search || i.display_name.toLowerCase().includes(search.toLowerCase()) ||
+    (!search || (i.display_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
      i.symbol.toLowerCase().includes(search.toLowerCase()))
   );
 
@@ -313,7 +313,7 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
                   >
                     {/* Badge */}
                     <div style={{ width: 36, height: 36, borderRadius: 8, flexShrink: 0, background: '#131f1d', border: '1px solid #1d2d29', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, fontWeight: 800, color: '#2dd4bf', textAlign: 'center', lineHeight: 1.2, padding: '0 2px' }}>
-                      {inst.display_name.replace('Volatility ', '').replace(' Index', '').replace('(1s)', '1s').replace('/', '/\n').substring(0, 8)}
+                      {(inst.display_name ?? inst.symbol ?? '').replace('Volatility ', '').replace(' Index', '').replace('(1s)', '1s').replace('/', '/\n').substring(0, 8)}
                     </div>
 
                     {/* Name + price */}
