@@ -10,7 +10,7 @@ import { DigitsAnalyser } from './digits-analyser';
 import { LandingPage } from './landing-page';
 import { PolicyModal, getPolicyConsent, recordPolicyConsent, type PolicyTab } from './policy-modal';
 
-const DEFAULT_APP_ID = '34khJS0KsSP29i9G8kCiJ';
+const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL ?? '',
@@ -861,6 +861,24 @@ function App() {
       void handleDerivConnect(storedDerivToken, DEFAULT_APP_ID, true);
     }
   };
+
+  // ── Deriv OAuth callback handler ─────────────────────────────────────────
+  // Fires when Deriv redirects back to /callback?token1=...&acct1=...
+  useEffect(() => {
+    if (window.location.pathname !== '/callback') return;
+    const params = new URLSearchParams(window.location.search);
+    const token1 = params.get('token1');
+    if (!token1) return;
+
+    // Clean the URL immediately so refreshing doesn't re-trigger
+    window.history.replaceState({}, '', '/');
+
+    // Store the token and connect — same path as manual PAT entry
+    // The Supabase auth check runs in parallel; once user is set, load() picks up the token
+    localStorage.setItem('apex_deriv_token', token1);
+    void handleDerivConnect(token1, DEFAULT_APP_ID);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     // Check initial auth session

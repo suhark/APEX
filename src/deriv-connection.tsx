@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { AlertCircle, Check, ExternalLink, Link2, Loader2, LogOut, ShieldCheck, Unlink, Wallet } from 'lucide-react';
 import { type DerivAuthState, type DerivAccount } from './deriv-client';
 
-const DEFAULT_APP_ID = '34khJS0KsSP29i9G8kCiJ';
+const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
+const OAUTH_URL = `https://oauth.deriv.com/oauth2/authorize?app_id=${DEFAULT_APP_ID}&redirect_uri=${encodeURIComponent(window.location.origin + '/callback')}&response_type=token&scope=read,trade,payments`;
 
 export function DerivConnectionPanel({
   authState,
@@ -131,37 +132,30 @@ export function DerivConnectionPanel({
         <Link2 size={20} />
         <div>
           <h2>Connect your Deriv account</h2>
-          <p>Direct browser-to-gateway WebSocket connection. Demo or Real accounts supported.</p>
+          <p>Sign in with your Deriv account — no token needed.</p>
         </div>
       </div>
 
-      <div className="deriv-direct-box">
-        <div className="deriv-direct-lead">
-          <span>Need an API token? Generate one directly on Deriv:</span>
-          <a
-            href="https://home.deriv.com/dashboard/profile/api-tokens"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="deriv-direct-link-btn"
-          >
-            <span>Open Deriv API Tokens</span>
-            <ExternalLink size={14} />
-          </a>
-        </div>
-        <div className="deriv-quick-steps">
-          <div className="deriv-step-item">
-            <span className="step-num">1</span>
-            <span>Click the button above to go straight to API Tokens.</span>
-          </div>
-          <div className="deriv-step-item">
-            <span className="step-num">2</span>
-            <span>Name your token (e.g. <code>APEX</code>) and tick <b>Read</b> & <b>Trade</b> scopes.</span>
-          </div>
-          <div className="deriv-step-item">
-            <span className="step-num">3</span>
-            <span>Copy your generated token and paste it into the field below.</span>
-          </div>
-        </div>
+      {/* ── OAuth button — primary method ── */}
+      <button
+        className="primary"
+        style={{ width: '100%', marginBottom: 6, fontSize: 13, padding: '11px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        disabled={connecting}
+        onClick={() => { window.location.href = OAUTH_URL; }}
+      >
+        {connecting
+          ? <><Loader2 size={16} className="spin" /> Connecting…</>
+          : <><img src="https://brand.deriv.com/images/logos/logo-icon.svg" alt="" style={{ width: 18, height: 18 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> Connect with Deriv</>}
+      </button>
+      <p style={{ fontSize: 10, color: '#718580', textAlign: 'center', margin: '0 0 20px' }}>
+        You'll be redirected to Deriv to approve access, then brought back here automatically.
+      </p>
+
+      {/* ── Divider ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 16px', color: '#2a3e3a', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <span style={{ flex: 1, height: 1, background: '#1d2d29' }} />
+        <span>or connect with API token</span>
+        <span style={{ flex: 1, height: 1, background: '#1d2d29' }} />
       </div>
 
       {authState === 'error' && (
@@ -189,11 +183,12 @@ export function DerivConnectionPanel({
         </div>
       </label>
       <button
-        className="primary"
+        className="secondary"
+        style={{ width: '100%' }}
         disabled={!token.trim() || connecting}
         onClick={() => onConnect(token.trim(), DEFAULT_APP_ID)}
       >
-        {connecting ? <><Loader2 size={16} className="spin" /> Connecting…</> : <><Link2 size={16} /> Connect to Deriv</>}
+        {connecting ? <><Loader2 size={16} className="spin" /> Connecting…</> : <><Link2 size={16} /> Connect with token</>}
       </button>
       <div className="deriv-help">
         <Unlink size={14} />
