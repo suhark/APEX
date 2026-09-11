@@ -274,6 +274,27 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   .panel, .bot-card, .quick-card { padding: 14px; }
 }
 
+/* ── Digits Trader responsive layout ───────────────────────────────────────── */
+/* Desktop: side-by-side analysis + trade panel */
+@media (min-width: 760px) {
+  .digits-layout {
+    grid-template-columns: 1fr 320px !important;
+  }
+  .digits-trade-panel {
+    position: sticky;
+    top: 20px;
+  }
+}
+/* Mobile: single column, trade panel below analysis */
+@media (max-width: 759px) {
+  .digits-layout {
+    grid-template-columns: 1fr !important;
+  }
+  .digits-trade-panel {
+    position: static !important;
+  }
+}
+
 /* Deriv Demo vs Real & Safety Badges */
 .deriv-status-badge.demo { border: 1px solid #1e5a52; color: #2dd4bf; background: #0c2723; }
 .deriv-status-badge.disarmed { border: 1px solid #784c16; color: #fbbf24; background: #281a07; }

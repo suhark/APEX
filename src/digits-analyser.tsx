@@ -292,8 +292,9 @@ export function DigitsAnalyser({
         </div>
       </div>
 
-      {/* Main layout: stats left, trade panel right */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'start' }}>
+      {/* Main layout: stats left, trade panel right — stacks on mobile */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, alignItems: 'start' }}
+        className='digits-layout'>
 
         {/* LEFT — analysis */}
         <div>
@@ -395,7 +396,7 @@ export function DigitsAnalyser({
         </div>
 
         {/* RIGHT — trade panel */}
-        <div style={{ position: 'sticky', top: 20 }}>
+        <div style={{ position: 'sticky', top: 20 }} className='digits-trade-panel'>
           <section className='panel'>
             <div><span className='eyebrow'>Trade execution</span><h2 style={{ margin: '4px 0 16px' }}>Place a trade</h2></div>
 
