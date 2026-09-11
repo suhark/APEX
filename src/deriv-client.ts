@@ -1,4 +1,13 @@
-export type DerivSymbol = '1HZ10V' | '1HZ25V' | '1HZ50V' | '1HZ75V' | '1HZ100V';
+export type DerivSymbol =
+  // Standard volatility indices
+  | '1HZ10V' | '1HZ25V' | '1HZ50V' | '1HZ75V' | '1HZ100V'
+  // 1-second (fast) volatility indices
+  | 'R_10'   | 'R_25'   | 'R_50'   | 'R_75'   | 'R_100'
+  | 'RDBULL' | 'RDBEAR'
+  // Additional synthetic indices
+  | '1HZ150V' | '1HZ250V'
+  | 'OTC_AS51' // keep extensible
+  ;
 
 export type DerivAuthState = 'disconnected' | 'connecting' | 'authorizing' | 'connected' | 'error';
 
@@ -695,13 +704,83 @@ export function isLive(): boolean {
 }
 
 export const symbolMap: Record<string, DerivSymbol> = {
-  'Volatility 10 Index': '1HZ10V',
-  'Volatility 25 Index': '1HZ25V',
-  'Volatility 50 Index': '1HZ50V',
-  'Volatility 75 Index': '1HZ75V',
-  'Volatility 100 Index': '1HZ100V',
-};
+  // Standard Volatility Indices (HZ = 1 tick/sec)
+  'Volatility 10 Index':   '1HZ10V',
+  'Volatility 25 Index':   '1HZ25V',
+  'Volatility 50 Index':   '1HZ50V',
+  'Volatility 75 Index':   '1HZ75V',
+  'Volatility 100 Index':  '1HZ100V',
+  // 1-second Volatility Indices (faster tick rate)
+  'Volatility 10 (1s) Index':  'R_10',
+  'Volatility 25 (1s) Index':  'R_25',
+  'Volatility 50 (1s) Index':  'R_50',
+  'Volatility 75 (1s) Index':  'R_75',
+  'Volatility 100 (1s) Index': 'R_100',
+  // Boom & Crash
+  'Boom 300 Index':   'BOOM300N',
+  'Boom 500 Index':   'BOOM500',
+  'Boom 1000 Index':  'BOOM1000',
+  'Crash 300 Index':  'CRASH300N',
+  'Crash 500 Index':  'CRASH500',
+  'Crash 1000 Index': 'CRASH1000',
+  // Step Index
+  'Step Index': 'STPRNG',
+  // Range Break
+  'Range Break 100 Index': 'RBREAKOUT100',
+  'Range Break 200 Index': 'RBREAKOUT200',
+  // Jump Indices
+  'Jump 10 Index':  'JD10',
+  'Jump 25 Index':  'JD25',
+  'Jump 50 Index':  'JD50',
+  'Jump 75 Index':  'JD75',
+  'Jump 100 Index': 'JD100',
+} as unknown as Record<string, DerivSymbol>;
 
 export const reverseSymbolMap: Record<string, string> = Object.fromEntries(
   Object.entries(symbolMap).map(([k, v]) => [v, k]),
 );
+
+// ─── Active Symbols ───────────────────────────────────────────────────────────
+
+export interface ActiveSymbol {
+  symbol: string;
+  display_name: string;
+  market: string;
+  market_display_name: string;
+  submarket: string;
+  submarket_display_name: string;
+  pip: number;
+  spot: number;
+  spot_time: number;
+  exchange_is_open: boolean;
+  is_trading_suspended: boolean;
+}
+
+/** Fetch the full list of tradeable symbols with current spot prices. */
+export async function getActiveSymbols(): Promise<ActiveSymbol[]> {
+  const data = await send<{ active_symbols?: ActiveSymbol[]; error?: { message: string } }>({
+    active_symbols: 'brief',
+    product_type: 'basic',
+  });
+  if (data.active_symbols) return data.active_symbols;
+  throw data.error?.message ?? 'Could not fetch active symbols';
+}
+
+// ─── Ticks History ────────────────────────────────────────────────────────────
+
+export interface TickHistory {
+  prices: number[];
+  times: number[];
+}
+
+/** Fetch last N ticks of price history for a symbol. */
+export async function getTicksHistory(symbol: string, count = 60): Promise<TickHistory> {
+  const data = await send<{ history?: { prices: number[]; times: number[] }; error?: { message: string } }>({
+    ticks_history: symbol,
+    count,
+    end: 'latest',
+    style: 'ticks',
+  });
+  if (data.history) return data.history;
+  throw data.error?.message ?? 'Could not fetch tick history';
+}

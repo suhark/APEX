@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { subscribeTicks, symbolMap, getTicksHistory, type DerivTick } from './deriv-client';
+import { DerivInstruments } from './deriv-instruments';
 import {
   ArrowDown,
   ArrowUp,
@@ -62,6 +64,21 @@ const INSTRUMENT_CONFIGS: Record<string, { badge: string; basePrice: number; vol
 // ─── Trade type definitions ────────────────────────────────────────────────────
 type TradeCategory = 'directional' | 'growth' | 'digits';
 
+// Directional subtypes
+type DirectionalType = 'rise_fall' | 'higher_lower' | 'touch_no_touch';
+const DIRECTIONAL_TYPES: { key: DirectionalType; label: string; desc: string }[] = [
+  { key: 'rise_fall',      label: 'Rise/Fall',       desc: 'Win if exit price is higher/lower than entry' },
+  { key: 'higher_lower',   label: 'Higher/Lower',    desc: 'Win if price is higher/lower than a set barrier' },
+  { key: 'touch_no_touch', label: 'Touch/No Touch',  desc: 'Win if price touches or never touches a barrier' },
+];
+
+// Growth subtypes
+type GrowthType = 'accumulator' | 'multiplier';
+const GROWTH_TYPES: { key: GrowthType; label: string; desc: string }[] = [
+  { key: 'accumulator', label: 'Accumulators', desc: 'Stake grows each tick if price stays within range' },
+  { key: 'multiplier',  label: 'Multipliers',  desc: 'Multiply profit/loss with leverage, stop loss/take profit' },
+];
+
 const TRADE_CATEGORIES: { key: TradeCategory; label: string; icon: string }[] = [
   { key: 'directional', label: 'Directional', icon: '📈' },
   { key: 'growth',      label: 'Growth',      icon: '🌱' },
@@ -104,9 +121,15 @@ export function ManualTrader({
 
   // Trade type state
   const [tradeCategory, setTradeCategory] = useState<TradeCategory>('directional');
+  const [directionalType, setDirectionalType] = useState<DirectionalType>('rise_fall');
+  const [growthType, setGrowthType] = useState<GrowthType>('accumulator');
   const [digitType, setDigitType] = useState<DigitContractType>('DIGITEVEN');
   const [digitBarrier, setDigitBarrier] = useState<number>(5);
-  const [growthRate, setGrowthRate] = useState<number>(0.01); // Accumulator growth rate
+  const [growthRate, setGrowthRate] = useState<number>(0.01);
+  const [multiplier, setMultiplier] = useState<number>(10);
+  const [stopLoss, setStopLoss] = useState<number>(10);
+  const [takeProfit, setTakeProfit] = useState<number>(10);
+  const [barrier, setBarrier] = useState<string>('1234.56'); // Higher/Lower / Touch barrier
   const [showHowToModal, setShowHowToModal] = useState<boolean>(false);
   const [showInstrumentDropdown, setShowInstrumentDropdown] = useState<boolean>(false);
   const [chartType, setChartType] = useState<'area' | 'line'>('area');
@@ -233,32 +256,87 @@ export function ManualTrader({
   // Tick series generation
   const [tickHistory, setTickHistory] = useState<TickPoint[]>([]);
   const config = INSTRUMENT_CONFIGS[selectedInstrument] || INSTRUMENT_CONFIGS['Volatility 100 Index'];
+  const tickHistoryRef = useRef<TickPoint[]>([]);
+  const realTickUnsubRef = useRef<(() => void) | null>(null);
+  const [showInstrumentPanel, setShowInstrumentPanel] = useState(false);
+  const [instrumentTimeframe, setInstrumentTimeframe] = useState<'1m' | '5m' | '15m' | '1h'>('5m');
 
-  // Initialize tick series on instrument switch (with 220 historical ticks)
+  // ── Tick feed: real when Deriv connected, synthetic fallback ─────────────
   useEffect(() => {
-    const initialTicks: TickPoint[] = [];
-    let currentQuote = config.basePrice;
-    const now = Date.now();
+    // Clean up previous real subscription
+    if (realTickUnsubRef.current) { realTickUnsubRef.current(); realTickUnsubRef.current = null; }
 
-    for (let i = 220; i >= 0; i--) {
-      const delta = (Math.sin(i / 3) * 0.4 + (Math.random() - 0.48) * 0.8) * config.volatility;
-      currentQuote = Number((currentQuote + delta).toFixed(2));
-      const timeStr = new Date(now - i * 1500).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-      const changePct = Number((((currentQuote - config.basePrice) / config.basePrice) * 100).toFixed(2));
-      initialTicks.push({
-        index: 220 - i,
-        quote: currentQuote,
-        time: timeStr,
-        changePct,
+    const derivSymbol = symbolMap[selectedInstrument] as string | undefined;
+
+    if (derivConnected && derivSymbol) {
+      // Seed with real tick history first
+      let cancelled = false;
+      getTicksHistory(derivSymbol, 300).then(hist => {
+        if (cancelled) return;
+        const now = Date.now();
+        const ticks: TickPoint[] = hist.prices.map((q, i) => ({
+          index: i,
+          quote: q,
+          time: new Date(now - (hist.prices.length - 1 - i) * 1500).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+          changePct: hist.prices[0] ? Number((((q - hist.prices[0]) / hist.prices[0]) * 100).toFixed(2)) : 0,
+        }));
+        tickHistoryRef.current = ticks;
+        setTickHistory(ticks);
+      }).catch(() => {});
+
+      // Subscribe to live ticks
+      const unsub = subscribeTicks(derivSymbol as any, (t: DerivTick) => {
+        const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        const prev = tickHistoryRef.current;
+        const baseQ = prev[0]?.quote ?? t.quote;
+        const nextTick: TickPoint = {
+          index: (prev[prev.length - 1]?.index ?? -1) + 1,
+          quote: t.quote,
+          time: nowStr,
+          changePct: Number((((t.quote - baseQ) / baseQ) * 100).toFixed(2)),
+        };
+        const next = [...prev.slice(-400), nextTick];
+        tickHistoryRef.current = next;
+        setTickHistory(next);
+
+        // Advance active contract
+        setActiveContract(prevAc => {
+          if (!prevAc || prevAc.status !== 'running') return prevAc;
+          const nextTicks = [...prevAc.ticks, { quote: t.quote, tickIndex: nextTick.index }];
+          if (nextTicks.length >= prevAc.totalTicks) {
+            const won = prevAc.direction === 'CALL'
+              ? (allowEquals ? t.quote >= prevAc.entryQuote : t.quote > prevAc.entryQuote)
+              : (allowEquals ? t.quote <= prevAc.entryQuote : t.quote < prevAc.entryQuote);
+            return { ...prevAc, currentTickCount: prevAc.totalTicks, ticks: nextTicks, status: won ? 'won' : 'lost' };
+          }
+          return { ...prevAc, currentTickCount: nextTicks.length, ticks: nextTicks };
+        });
       });
+      realTickUnsubRef.current = unsub;
+      return () => { cancelled = true; unsub(); realTickUnsubRef.current = null; };
+    } else {
+      // Synthetic fallback — generate realistic history from config
+      const initialTicks: TickPoint[] = [];
+      let currentQuote = config.basePrice;
+      const now = Date.now();
+      for (let i = 220; i >= 0; i--) {
+        const delta = (Math.sin(i / 3) * 0.4 + (Math.random() - 0.48) * 0.8) * config.volatility;
+        currentQuote = Number((currentQuote + delta).toFixed(2));
+        const timeStr = new Date(now - i * 1500).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        const changePct = Number((((currentQuote - config.basePrice) / config.basePrice) * 100).toFixed(2));
+        initialTicks.push({ index: 220 - i, quote: currentQuote, time: timeStr, changePct });
+      }
+      tickHistoryRef.current = initialTicks;
+      setTickHistory(initialTicks);
+      setScrollOffset(0);
+      setActiveContract(null);
     }
-    setTickHistory(initialTicks);
-    setScrollOffset(0);
-    setActiveContract(null);
-  }, [selectedInstrument]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInstrument, derivConnected]);
 
-  // Append new tick whenever parent `tick` increments
+  // Synthetic tick feed — only runs when NOT connected to Deriv
   useEffect(() => {
+    if (derivConnected) return; // real ticks handle updates when connected
     if (tickHistory.length === 0) return;
 
     setTickHistory((prev) => {
@@ -422,18 +500,20 @@ export function ManualTrader({
   const payoutRate = allowEquals ? 1.74 : 1.9;
   const potentialPayout = Number((stake * payoutRate).toFixed(2));
 
-  // Derived trade info
   const digitMeta = DIGIT_TYPES.find(d => d.type === digitType)!;
-  const tradeLabel = tradeCategory === 'directional'
-    ? direction === 'CALL' ? 'Rise' : 'Fall'
+  const tradeLabel = tradeCategory === 'digits'
+    ? `${digitMeta.label}${digitMeta.needsBarrier ? ` ${digitBarrier}` : ''}`
     : tradeCategory === 'growth'
-    ? 'Accumulate'
-    : `${digitMeta.label}${digitMeta.needsBarrier ? ` ${digitBarrier}` : ''}`;
-  const tradeBtnColor = tradeCategory === 'directional'
-    ? direction === 'CALL' ? 'rise' : 'fall'
-    : tradeCategory === 'growth'
-    ? 'accu'
-    : 'digit';
+    ? growthType === 'accumulator' ? 'Accumulate' : `Multiply ×${multiplier}`
+    : directionalType === 'touch_no_touch'
+    ? direction === 'CALL' ? 'Touch' : 'No Touch'
+    : directionalType === 'higher_lower'
+    ? direction === 'CALL' ? 'Higher' : 'Lower'
+    : direction === 'CALL' ? 'Rise' : 'Fall';
+
+  const tradeBtnColor = tradeCategory === 'digits' ? 'digit'
+    : tradeCategory === 'growth' ? 'accu'
+    : direction === 'CALL' ? 'rise' : 'fall';
 
   const handleBuy = async () => {
     if (isSubmitting) return;
@@ -441,25 +521,38 @@ export function ManualTrader({
 
     try {
       let contractDirection = direction;
-      let barrier: number | undefined;
+      let contractBarrier: number | undefined;
       let growth_rate: number | undefined;
       let duration: number | undefined;
 
       if (tradeCategory === 'digits') {
         contractDirection = digitType;
-        barrier = digitMeta.needsBarrier ? digitBarrier : undefined;
+        contractBarrier = digitMeta.needsBarrier ? digitBarrier : undefined;
         duration = durationTicks;
       } else if (tradeCategory === 'growth') {
-        contractDirection = 'ACCU';
-        growth_rate = growthRate;
-        duration = undefined; // ACCU has no fixed duration
+        if (growthType === 'accumulator') {
+          contractDirection = 'ACCU';
+          growth_rate = growthRate;
+          duration = undefined;
+        } else {
+          // Multiplier: MULTUP / MULTDOWN
+          contractDirection = direction === 'CALL' ? 'MULTUP' : 'MULTDOWN';
+          duration = undefined;
+        }
       } else {
+        // Directional
+        if (directionalType === 'touch_no_touch') {
+          contractDirection = direction === 'CALL' ? 'ONETOUCH' : 'NOTOUCH';
+        } else {
+          // rise_fall and higher_lower both use CALL/PUT — higher_lower just adds a barrier
+          contractDirection = direction;
+        }
         duration = durationTicks;
       }
 
       setActiveContract({
         id: String(Date.now()),
-        direction: tradeCategory === 'directional' ? direction : 'CALL',
+        direction: (contractDirection === 'CALL' || contractDirection === 'PUT') ? contractDirection : 'CALL',
         entryQuote: currentTick.quote,
         entryTickIndex: currentTick.index,
         currentTickCount: 1,
@@ -475,7 +568,7 @@ export function ManualTrader({
         direction: contractDirection,
         stake,
         source: 'manual',
-        barrier,
+        barrier: contractBarrier,
         growth_rate,
         duration,
       });
@@ -496,7 +589,7 @@ export function ManualTrader({
           <button
             type="button"
             className="dtrader-add-btn"
-            onClick={() => setShowInstrumentDropdown(!showInstrumentDropdown)}
+            onClick={() => setShowInstrumentPanel(!showInstrumentPanel)}
             title="Choose Market / Asset"
           >
             <Plus size={16} />
@@ -506,10 +599,10 @@ export function ManualTrader({
             <button
               type="button"
               className="dtrader-asset-btn"
-              onClick={() => setShowInstrumentDropdown(!showInstrumentDropdown)}
+              onClick={() => setShowInstrumentPanel(!showInstrumentPanel)}
             >
               <div className="dtrader-asset-badge">
-                <span>{config.badge}</span>
+                <span>{selectedInstrument.replace('Volatility ', '').replace(' Index', '').replace('(1s)', '1s').substring(0, 5)}</span>
                 <span className="sub">1s</span>
               </div>
               <div className="dtrader-asset-info">
@@ -519,26 +612,6 @@ export function ManualTrader({
                 </span>
               </div>
             </button>
-
-            {showInstrumentDropdown && (
-              <div className="dtrader-dropdown-menu">
-                <div className="dtrader-dropdown-header">Synthetic Volatility Indices</div>
-                {INSTRUMENT_LIST.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    className={`dtrader-dropdown-item ${selectedInstrument === name ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedInstrument(name);
-                      setShowInstrumentDropdown(false);
-                    }}
-                  >
-                    <span className="inst-badge">{INSTRUMENT_CONFIGS[name].badge}</span>
-                    <span>{name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         </div>
 
@@ -940,43 +1013,148 @@ export function ManualTrader({
             ))}
           </div>
 
-          {/* ── Directional: Rise / Fall ── */}
+          {/* ── Directional sub-type ── */}
           {tradeCategory === 'directional' && (
-            <div className="dtrader-direction-tabs">
-              <button type="button"
-                className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`}
-                onClick={() => setDirection('CALL')}>
-                <ArrowUp size={16} /><span>Rise</span>
-              </button>
-              <button type="button"
-                className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`}
-                onClick={() => setDirection('PUT')}>
-                <ArrowDown size={16} /><span>Fall</span>
-              </button>
+            <div style={{ marginBottom: 10 }}>
+              {/* Sub-type selector */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                {DIRECTIONAL_TYPES.map(dt => (
+                  <button key={dt.key} type="button"
+                    onClick={() => setDirectionalType(dt.key)}
+                    style={{
+                      flex: 1, padding: '5px 3px', borderRadius: 6, fontSize: 9, fontWeight: 700, cursor: 'pointer',
+                      border: `1px solid ${directionalType === dt.key ? '#2dd4bf' : '#1d2d29'}`,
+                      background: directionalType === dt.key ? '#0d2e29' : 'transparent',
+                      color: directionalType === dt.key ? '#2dd4bf' : '#718580',
+                    }}>{dt.label}</button>
+                ))}
+              </div>
+
+              {/* Rise/Fall */}
+              {directionalType === 'rise_fall' && (
+                <div className="dtrader-direction-tabs">
+                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                    <ArrowUp size={16} /><span>Rise</span>
+                  </button>
+                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                    <ArrowDown size={16} /><span>Fall</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Higher/Lower */}
+              {directionalType === 'higher_lower' && (
+                <>
+                  <div className="dtrader-direction-tabs">
+                    <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                      <ArrowUp size={16} /><span>Higher</span>
+                    </button>
+                    <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                      <ArrowDown size={16} /><span>Lower</span>
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 11, color: '#80948e', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Barrier</div>
+                    <input type="text" value={barrier} onChange={e => setBarrier(e.target.value)}
+                      placeholder="e.g. 1234.56"
+                      style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
+                    <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 4 }}>Win if exit price is higher/lower than this barrier.</p>
+                  </div>
+                </>
+              )}
+
+              {/* Touch/No Touch */}
+              {directionalType === 'touch_no_touch' && (
+                <>
+                  <div className="dtrader-direction-tabs">
+                    <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                      <span>Touch</span>
+                    </button>
+                    <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                      <span>No Touch</span>
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 11, color: '#80948e', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Barrier</div>
+                    <input type="text" value={barrier} onChange={e => setBarrier(e.target.value)}
+                      placeholder="e.g. 1234.56"
+                      style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
+                    <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 4 }}>Win if price {direction === 'CALL' ? 'touches' : 'never touches'} this barrier before expiry.</p>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
-          {/* ── Growth based: Accumulator ── */}
+          {/* ── Growth based ── */}
           {tradeCategory === 'growth' && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11, color: '#80948e', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                Growth rate
-              </div>
-              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                {[0.01, 0.02, 0.03, 0.04, 0.05].map(r => (
-                  <button key={r} type="button"
-                    onClick={() => setGrowthRate(r)}
+              {/* Sub-type: Accumulator / Multiplier */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+                {GROWTH_TYPES.map(gt => (
+                  <button key={gt.key} type="button"
+                    onClick={() => setGrowthType(gt.key)}
                     style={{
-                      padding: '6px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
-                      border: `1px solid ${growthRate === r ? '#22c55e' : '#1d2d29'}`,
-                      background: growthRate === r ? 'rgba(34,197,94,0.1)' : 'transparent',
-                      color: growthRate === r ? '#22c55e' : '#718580', fontWeight: 700,
-                    }}>{(r * 100).toFixed(0)}%</button>
+                      flex: 1, padding: '6px 4px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                      border: `1px solid ${growthType === gt.key ? '#22c55e' : '#1d2d29'}`,
+                      background: growthType === gt.key ? 'rgba(34,197,94,0.08)' : 'transparent',
+                      color: growthType === gt.key ? '#22c55e' : '#718580',
+                    }}>{gt.label}</button>
                 ))}
               </div>
-              <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 6, lineHeight: 1.5 }}>
-                Your stake grows by the selected % each tick. Contract runs until you sell or knock out.
-              </p>
+
+              {/* Accumulator controls */}
+              {growthType === 'accumulator' && (
+                <>
+                  <div style={{ fontSize: 11, color: '#80948e', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Growth rate</div>
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                    {[0.01, 0.02, 0.03, 0.04, 0.05].map(r => (
+                      <button key={r} type="button" onClick={() => setGrowthRate(r)}
+                        style={{ padding: '6px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: `1px solid ${growthRate === r ? '#22c55e' : '#1d2d29'}`, background: growthRate === r ? 'rgba(34,197,94,0.1)' : 'transparent', color: growthRate === r ? '#22c55e' : '#718580', fontWeight: 700 }}>
+                        {(r * 100).toFixed(0)}%
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 6, lineHeight: 1.5 }}>Stake grows by selected % each tick while price stays in range.</p>
+                </>
+              )}
+
+              {/* Multiplier controls */}
+              {growthType === 'multiplier' && (
+                <>
+                  <div className="dtrader-direction-tabs">
+                    <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                      <ArrowUp size={16} /><span>Up</span>
+                    </button>
+                    <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                      <ArrowDown size={16} /><span>Down</span>
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 11, color: '#80948e', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Multiplier</div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+                      {[10, 20, 30, 40, 50].map(m => (
+                        <button key={m} type="button" onClick={() => setMultiplier(m)}
+                          style={{ padding: '5px 10px', borderRadius: 5, fontSize: 11, cursor: 'pointer', border: `1px solid ${multiplier === m ? '#22c55e' : '#1d2d29'}`, background: multiplier === m ? 'rgba(34,197,94,0.1)' : 'transparent', color: multiplier === m ? '#22c55e' : '#718580', fontWeight: 700 }}>
+                          ×{m}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: '#80948e', marginBottom: 4, fontWeight: 600 }}>Stop loss ($)</div>
+                        <input type="number" min={0} value={stopLoss} onChange={e => setStopLoss(Number(e.target.value))}
+                          style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: '#80948e', marginBottom: 4, fontWeight: 600 }}>Take profit ($)</div>
+                        <input type="number" min={0} value={takeProfit} onChange={e => setTakeProfit(Number(e.target.value))}
+                          style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -985,15 +1163,10 @@ export function ManualTrader({
             <div style={{ marginBottom: 8 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, marginBottom: 8 }}>
                 {DIGIT_TYPES.map(dt => (
-                  <button key={dt.type} type="button"
-                    onClick={() => setDigitType(dt.type)}
-                    style={{
-                      padding: '7px 4px', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                      border: `1px solid ${digitType === dt.type ? dt.color : '#1d2d29'}`,
-                      background: digitType === dt.type ? `rgba(255,255,255,0.04)` : 'transparent',
-                      color: digitType === dt.type ? dt.color : '#718580',
-                      transition: 'all 0.15s',
-                    }}>{dt.label}</button>
+                  <button key={dt.type} type="button" onClick={() => setDigitType(dt.type)}
+                    style={{ padding: '7px 4px', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: `1px solid ${digitType === dt.type ? dt.color : '#1d2d29'}`, background: digitType === dt.type ? 'rgba(255,255,255,0.04)' : 'transparent', color: digitType === dt.type ? dt.color : '#718580', transition: 'all 0.15s' }}>
+                    {dt.label}
+                  </button>
                 ))}
               </div>
               {digitMeta.needsBarrier && (
@@ -1003,15 +1176,10 @@ export function ManualTrader({
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {[0,1,2,3,4,5,6,7,8,9].map(d => (
-                      <button key={d} type="button"
-                        onClick={() => setDigitBarrier(d)}
-                        style={{
-                          width: 28, height: 28, borderRadius: 5, fontSize: 12, fontWeight: 800, cursor: 'pointer',
-                          fontFamily: "'DM Mono', monospace",
-                          border: `1px solid ${digitBarrier === d ? digitMeta.color : '#1d2d29'}`,
-                          background: digitBarrier === d ? 'rgba(167,139,250,0.12)' : 'transparent',
-                          color: digitBarrier === d ? digitMeta.color : '#718580',
-                        }}>{d}</button>
+                      <button key={d} type="button" onClick={() => setDigitBarrier(d)}
+                        style={{ width: 28, height: 28, borderRadius: 5, fontSize: 12, fontWeight: 800, cursor: 'pointer', fontFamily: "'DM Mono', monospace", border: `1px solid ${digitBarrier === d ? digitMeta.color : '#1d2d29'}`, background: digitBarrier === d ? 'rgba(167,139,250,0.12)' : 'transparent', color: digitBarrier === d ? digitMeta.color : '#718580' }}>
+                        {d}
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -1189,6 +1357,67 @@ export function ManualTrader({
                 Got it
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Full Instrument Panel ─────────────────────────────────────── */}
+      {showInstrumentPanel && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 200,
+          display: 'flex',
+        }}>
+          {/* Backdrop */}
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }}
+            onClick={() => setShowInstrumentPanel(false)} />
+          {/* Panel */}
+          <div style={{
+            position: 'relative', width: '100%', maxWidth: 560,
+            background: '#0b1312', borderRight: '1px solid #1d2d29',
+            display: 'flex', flexDirection: 'column', zIndex: 1,
+            height: '100%', overflowY: 'auto',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid #1d2d29' }}>
+              <h2 style={{ margin: 0, fontSize: 14, color: '#e0f0ec', fontWeight: 700 }}>Select Market</h2>
+              <button type='button' onClick={() => setShowInstrumentPanel(false)}
+                style={{ background: 'none', border: 'none', color: '#718580', cursor: 'pointer', padding: 4 }}>
+                <X size={18} />
+              </button>
+            </div>
+            {derivConnected ? (
+              <DerivInstruments
+                selectedSymbol={symbolMap[selectedInstrument] as string ?? ''}
+                timeframe={instrumentTimeframe}
+                onTimeframeChange={setInstrumentTimeframe}
+                onSelect={(sym, displayName) => {
+                  setSelectedInstrument(displayName);
+                  setShowInstrumentPanel(false);
+                }}
+              />
+            ) : (
+              /* Fallback: static list when not connected */
+              <div style={{ padding: 16 }}>
+                <div style={{ fontSize: 10, color: '#50b9a9', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>
+                  Synthetic Volatility Indices
+                </div>
+                {Object.keys(symbolMap).map(name => (
+                  <button key={name} type='button'
+                    onClick={() => { setSelectedInstrument(name); setShowInstrumentPanel(false); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                      padding: '10px 12px', borderRadius: 8, marginBottom: 4, cursor: 'pointer',
+                      background: selectedInstrument === name ? 'rgba(45,212,191,0.08)' : 'transparent',
+                      border: `1px solid ${selectedInstrument === name ? 'rgba(45,212,191,0.3)' : '#1d2d29'}`,
+                      color: selectedInstrument === name ? '#2dd4bf' : '#cde0da', fontSize: 12, textAlign: 'left',
+                    }}>
+                    <span style={{ width: 32, height: 32, borderRadius: 6, background: '#131f1d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: '#2dd4bf', flexShrink: 0 }}>
+                      {name.replace('Volatility ', '').replace(' Index', '').replace('(1s)', '').trim().substring(0, 4)}
+                    </span>
+                    {name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
