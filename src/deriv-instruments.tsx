@@ -158,11 +158,12 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
         throw lastErr ?? new Error('No symbols returned');
       }
       console.log('[DerivInstruments] got', syms!.length, 'symbols, markets:', [...new Set(syms!.map(s => s.market))]);
+      console.log('[DerivInstruments] sample symbol:', JSON.stringify(syms![0]));
       const infos: InstrumentInfo[] = syms!
-        .filter(s => !s.is_trading_suspended && s.symbol && s.display_name)
+        .filter(s => !s.is_trading_suspended && s.symbol)
         .map(s => ({
           symbol:       s.symbol,
-          display_name: s.display_name,
+          display_name: s.display_name ?? s.symbol,
           market:       s.market,
           submarket:    s.submarket,
           submarket_display: SUBMARKET_NAMES[s.submarket] ?? s.submarket_display_name ?? s.submarket,

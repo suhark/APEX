@@ -764,7 +764,7 @@ export interface ActiveSymbol {
 /** Fetch the full list of tradeable symbols with current spot prices. */
 export async function getActiveSymbols(): Promise<ActiveSymbol[]> {
   const data = await send<{ active_symbols?: ActiveSymbol[]; error?: { message: string } }>({
-    active_symbols: 'brief',
+    active_symbols: 'full',
   });
   if (data.active_symbols) return data.active_symbols;
   throw data.error?.message ?? 'Could not fetch active symbols';
