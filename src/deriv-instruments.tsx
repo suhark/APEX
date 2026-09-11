@@ -160,20 +160,25 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
       console.log('[DerivInstruments] got', syms!.length, 'symbols, markets:', [...new Set(syms!.map(s => s.market))]);
       console.log('[DerivInstruments] sample symbol:', JSON.stringify(syms![0]));
       const infos: InstrumentInfo[] = syms!
-        .filter(s => !s.is_trading_suspended && s.symbol)
-        .map(s => ({
-          symbol:       s.symbol,
-          display_name: s.display_name ?? s.symbol,
-          market:       s.market,
-          submarket:    s.submarket,
-          submarket_display: SUBMARKET_NAMES[s.submarket] ?? s.submarket_display_name ?? s.submarket,
-          spot:         s.spot ?? null,
-          pip:          s.pip ?? 0.01,
-          exchange_is_open: s.exchange_is_open ?? true,
-          currentPrice: s.spot ?? null,
-          priceHistory: [],
-          change1m: null, change5m: null, change15m: null, change1h: null,
-        }));
+        .filter(s => !s.is_trading_suspended && (s.symbol ?? (s as any).underlying_symbol))
+        .map(s => {
+          const sym = s.symbol ?? (s as any).underlying_symbol as string;
+          const name = s.display_name ?? (s as any).underlying_symbol_name as string ?? sym;
+          const pip = s.pip ?? (s as any).pip_size ?? 0.01;
+          return {
+            symbol:       sym,
+            display_name: name,
+            market:       s.market,
+            submarket:    s.submarket,
+            submarket_display: SUBMARKET_NAMES[s.submarket] ?? s.submarket_display_name ?? s.submarket,
+            spot:         s.spot ?? null,
+            pip,
+            exchange_is_open: Boolean(s.exchange_is_open),
+            currentPrice: s.spot ?? null,
+            priceHistory: [],
+            change1m: null, change5m: null, change15m: null, change1h: null,
+          };
+        });
       console.log('[DerivInstruments] filtered to', infos.length, 'instruments');
       setInstruments(infos);
       setLoading(false);

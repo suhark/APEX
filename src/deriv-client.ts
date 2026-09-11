@@ -748,17 +748,20 @@ export const reverseSymbolMap: Record<string, string> = Object.fromEntries(
 // ─── Active Symbols ───────────────────────────────────────────────────────────
 
 export interface ActiveSymbol {
-  symbol: string;
-  display_name: string;
+  symbol?: string;
+  underlying_symbol?: string;
+  display_name?: string;
+  underlying_symbol_name?: string;
   market: string;
-  market_display_name: string;
+  market_display_name?: string;
   submarket: string;
-  submarket_display_name: string;
-  pip: number;
-  spot: number;
-  spot_time: number;
-  exchange_is_open: boolean;
-  is_trading_suspended: boolean;
+  submarket_display_name?: string;
+  pip?: number;
+  pip_size?: number;
+  spot?: number;
+  spot_time?: number;
+  exchange_is_open: number | boolean;
+  is_trading_suspended: number | boolean;
 }
 
 /** Fetch the full list of tradeable symbols with current spot prices. */
