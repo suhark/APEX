@@ -3,7 +3,13 @@ import { AlertCircle, Check, ExternalLink, Link2, Loader2, LogOut, ShieldCheck, 
 import { type DerivAuthState, type DerivAccount } from './deriv-client';
 
 const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
-const OAUTH_URL = `https://oauth.deriv.com/oauth2/authorize?app_id=${DEFAULT_APP_ID}&redirect_uri=${encodeURIComponent(window.location.origin + '/callback')}&response_type=token&scope=read,trade,payments`;
+
+// Build OAuth URL — redirect URI must match exactly what was registered on developers.deriv.com
+const isProd = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
+const REDIRECT_URI = isProd
+  ? 'https://apextradinglab.app/callback'
+  : `${window.location.origin}/callback`;
+const OAUTH_URL = `https://oauth.deriv.com/oauth2/authorize?app_id=${DEFAULT_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=token`;
 
 export function DerivConnectionPanel({
   authState,
