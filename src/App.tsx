@@ -3784,7 +3784,7 @@ function Settings({
             <div><span className="eyebrow">Risk guardrails</span><h2>Session loss limit</h2></div>
             <ShieldCheck className={lossLimitReached ? 'danger-icon' : 'success-icon'} size={22} />
           </div>
-          <p className="muted">New trades stop automatically when your session drawdown reaches this amount. Works on Deriv demo, Deriv live, and synthetic workspace.</p>
+          <p className="muted">New trades stop automatically when your session drawdown reaches this amount. Works on Deriv demo, Deriv live, and synthetic workspace-.</p>
           <LossGuardRail
             sessionLossUsed={sessionLossUsed}
             lossLimit={lossLimit}
