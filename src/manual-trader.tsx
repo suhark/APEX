@@ -65,11 +65,16 @@ const INSTRUMENT_CONFIGS: Record<string, { badge: string; basePrice: number; vol
 type TradeCategory = 'directional' | 'growth' | 'digits';
 
 // Directional subtypes
-type DirectionalType = 'rise_fall' | 'higher_lower' | 'touch_no_touch';
+type DirectionalType = 'rise_fall' | 'higher_lower' | 'touch_no_touch' | 'in_out' | 'asians' | 'reset' | 'ticks_hl' | 'runs';
 const DIRECTIONAL_TYPES: { key: DirectionalType; label: string; desc: string }[] = [
-  { key: 'rise_fall',      label: 'Rise/Fall',       desc: 'Win if exit price is higher/lower than entry' },
-  { key: 'higher_lower',   label: 'Higher/Lower',    desc: 'Win if price is higher/lower than a set barrier' },
-  { key: 'touch_no_touch', label: 'Touch/No Touch',  desc: 'Win if price touches or never touches a barrier' },
+  { key: 'rise_fall',      label: 'Rise/Fall',          desc: 'Win if exit price is higher/lower than entry' },
+  { key: 'higher_lower',   label: 'Higher/Lower',       desc: 'Win if price is higher/lower than a set barrier' },
+  { key: 'touch_no_touch', label: 'Touch/No Touch',     desc: 'Win if price touches or never touches a barrier' },
+  { key: 'in_out',         label: 'In/Out',             desc: 'Win if price ends or stays between two barriers' },
+  { key: 'asians',         label: 'Asians',             desc: 'Win if average price is higher/lower than close' },
+  { key: 'reset',          label: 'Reset Call/Put',     desc: 'Entry price resets during the contract' },
+  { key: 'ticks_hl',       label: 'High/Low Ticks',     desc: 'Predict the highest or lowest tick' },
+  { key: 'runs',           label: 'Only Ups/Downs',     desc: 'Win if every tick moves in the same direction' },
 ];
 
 // Growth subtypes
@@ -505,10 +510,13 @@ export function ManualTrader({
     ? `${digitMeta.label}${digitMeta.needsBarrier ? ` ${digitBarrier}` : ''}`
     : tradeCategory === 'growth'
     ? growthType === 'accumulator' ? 'Accumulate' : `Multiply ×${multiplier}`
-    : directionalType === 'touch_no_touch'
-    ? direction === 'CALL' ? 'Touch' : 'No Touch'
-    : directionalType === 'higher_lower'
-    ? direction === 'CALL' ? 'Higher' : 'Lower'
+    : directionalType === 'touch_no_touch' ? (direction === 'CALL' ? 'Touch' : 'No Touch')
+    : directionalType === 'higher_lower'   ? (direction === 'CALL' ? 'Higher' : 'Lower')
+    : directionalType === 'in_out'         ? (direction === 'CALL' ? 'Ends Between' : 'Ends Outside')
+    : directionalType === 'asians'         ? (direction === 'CALL' ? 'Asian Up' : 'Asian Down')
+    : directionalType === 'reset'          ? (direction === 'CALL' ? 'Reset Call' : 'Reset Put')
+    : directionalType === 'ticks_hl'       ? (direction === 'CALL' ? 'High Tick' : 'Low Tick')
+    : directionalType === 'runs'           ? (direction === 'CALL' ? 'Only Ups' : 'Only Downs')
     : direction === 'CALL' ? 'Rise' : 'Fall';
 
   const tradeBtnColor = tradeCategory === 'digits' ? 'digit'
@@ -535,18 +543,24 @@ export function ManualTrader({
           growth_rate = growthRate;
           duration = undefined;
         } else {
-          // Multiplier: MULTUP / MULTDOWN
           contractDirection = direction === 'CALL' ? 'MULTUP' : 'MULTDOWN';
           duration = undefined;
         }
       } else {
-        // Directional
-        if (directionalType === 'touch_no_touch') {
-          contractDirection = direction === 'CALL' ? 'ONETOUCH' : 'NOTOUCH';
-        } else {
-          // rise_fall and higher_lower both use CALL/PUT — higher_lower just adds a barrier
-          contractDirection = direction;
-        }
+        // Directional — map subtype to contract code
+        const dirMap: Record<DirectionalType, [string, string]> = {
+          rise_fall:      ['CALL',      'PUT'],
+          higher_lower:   ['CALL',      'PUT'],
+          touch_no_touch: ['ONETOUCH',  'NOTOUCH'],
+          in_out:         ['EXPIRYRANGE','EXPIRYMISS'],
+          asians:         ['ASIANU',    'ASIAND'],
+          reset:          ['RESETCALL', 'RESETPUT'],
+          ticks_hl:       ['TICKHIGH',  'TICKLOW'],
+          runs:           ['RUNHIGH',   'RUNLOW'],
+        };
+        contractDirection = direction === 'CALL'
+          ? dirMap[directionalType][0]
+          : dirMap[directionalType][1];
         duration = durationTicks;
       }
 
@@ -1082,6 +1096,69 @@ export function ManualTrader({
                     <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 4 }}>Win if price {direction === 'CALL' ? 'touches' : 'never touches'} this barrier before expiry.</p>
                   </div>
                 </>
+              )}
+
+              {/* In/Out */}
+              {directionalType === 'in_out' && (
+                <>
+                  <div className="dtrader-direction-tabs">
+                    <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                      <span>Ends Between</span>
+                    </button>
+                    <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                      <span>Ends Outside</span>
+                    </button>
+                  </div>
+                  <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 6 }}>Win if exit price {direction === 'CALL' ? 'ends between' : 'ends outside'} the two barrier levels.</p>
+                </>
+              )}
+
+              {/* Asians */}
+              {directionalType === 'asians' && (
+                <div className="dtrader-direction-tabs">
+                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                    <ArrowUp size={15} /><span>Asian Up</span>
+                  </button>
+                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                    <ArrowDown size={15} /><span>Asian Down</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Reset */}
+              {directionalType === 'reset' && (
+                <div className="dtrader-direction-tabs">
+                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                    <span>Reset Call</span>
+                  </button>
+                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                    <span>Reset Put</span>
+                  </button>
+                </div>
+              )}
+
+              {/* High/Low Ticks */}
+              {directionalType === 'ticks_hl' && (
+                <div className="dtrader-direction-tabs">
+                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                    <span>High Tick</span>
+                  </button>
+                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                    <span>Low Tick</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Only Ups/Downs */}
+              {directionalType === 'runs' && (
+                <div className="dtrader-direction-tabs">
+                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                    <ArrowUp size={15} /><span>Only Ups</span>
+                  </button>
+                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                    <ArrowDown size={15} /><span>Only Downs</span>
+                  </button>
+                </div>
               )}
             </div>
           )}
