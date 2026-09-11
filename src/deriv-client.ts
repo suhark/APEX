@@ -171,7 +171,9 @@ export function isAccountVirtual(account: Record<string, unknown>, id?: string):
 }
 
 function isPatToken(token: string): boolean {
-  return token.startsWith('pat_');
+  // PAT tokens start with pat_ — OAuth Bearer tokens start with ory_at_
+  // Both use the REST→OTP→WebSocket flow (not the legacy WebSocket authorize)
+  return token.startsWith('pat_') || token.startsWith('ory_at_');
 }
 
 function isLegacyAppId(id: string): boolean {
