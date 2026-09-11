@@ -2008,6 +2008,24 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   cursor: not-allowed;
 }
 
+.dtrader-buy-action-btn.accu {
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+  color: #ffffff;
+}
+.dtrader-buy-action-btn.accu:hover:not(:disabled) {
+  background: linear-gradient(135deg, #15803d, #16a34a);
+  box-shadow: 0 6px 20px rgba(34, 197, 94, 0.4);
+}
+
+.dtrader-buy-action-btn.digit {
+  background: linear-gradient(135deg, #6d28d9, #8b5cf6);
+  color: #ffffff;
+}
+.dtrader-buy-action-btn.digit:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5b21b6, #6d28d9);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+}
+
 .buy-headline {
   font-size: 18px;
   font-weight: 800;

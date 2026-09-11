@@ -21,7 +21,7 @@ import {
 
 export interface ManualTraderProps {
   tick: number;
-  runTrade: (details: { instrument: string; direction: string; stake: number; source: string }) => Promise<void>;
+  runTrade: (details: { instrument: string; direction: string; stake: number; source: string; barrier?: number; growth_rate?: number; duration?: number }) => Promise<void>;
   derivConnected: boolean;
   isDerivReal: boolean;
   derivAccount: { loginid: string; balance: number; is_virtual: boolean; currency?: string } | null;
@@ -59,6 +59,26 @@ const INSTRUMENT_CONFIGS: Record<string, { badge: string; basePrice: number; vol
   'Volatility 10 Index': { badge: '10', basePrice: 128.0, volatility: 0.2 },
 };
 
+// ─── Trade type definitions ────────────────────────────────────────────────────
+type TradeCategory = 'directional' | 'growth' | 'digits';
+
+const TRADE_CATEGORIES: { key: TradeCategory; label: string; icon: string }[] = [
+  { key: 'directional', label: 'Directional', icon: '📈' },
+  { key: 'growth',      label: 'Growth',      icon: '🌱' },
+  { key: 'digits',      label: 'Digits',      icon: '🔢' },
+];
+
+type DigitContractType = 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
+
+const DIGIT_TYPES: { type: DigitContractType; label: string; needsBarrier: boolean; color: string }[] = [
+  { type: 'DIGITEVEN',  label: 'Even',    needsBarrier: false, color: '#2dd4bf' },
+  { type: 'DIGITODD',   label: 'Odd',     needsBarrier: false, color: '#f87171' },
+  { type: 'DIGITOVER',  label: 'Over',    needsBarrier: true,  color: '#f97316' },
+  { type: 'DIGITUNDER', label: 'Under',   needsBarrier: true,  color: '#3b82f6' },
+  { type: 'DIGITMATCH', label: 'Matches', needsBarrier: true,  color: '#a78bfa' },
+  { type: 'DIGITDIFF',  label: 'Differs', needsBarrier: true,  color: '#fbbf24' },
+];
+
 const INSTRUMENT_LIST = Object.keys(INSTRUMENT_CONFIGS);
 
 function formatCurrency(val: number): string {
@@ -81,6 +101,12 @@ export function ManualTrader({
   const [stake, setStake] = useState<number>(2);
   const [durationTicks, setDurationTicks] = useState<number>(5);
   const [allowEquals, setAllowEquals] = useState<boolean>(false);
+
+  // Trade type state
+  const [tradeCategory, setTradeCategory] = useState<TradeCategory>('directional');
+  const [digitType, setDigitType] = useState<DigitContractType>('DIGITEVEN');
+  const [digitBarrier, setDigitBarrier] = useState<number>(5);
+  const [growthRate, setGrowthRate] = useState<number>(0.01); // Accumulator growth rate
   const [showHowToModal, setShowHowToModal] = useState<boolean>(false);
   const [showInstrumentDropdown, setShowInstrumentDropdown] = useState<boolean>(false);
   const [chartType, setChartType] = useState<'area' | 'line'>('area');
@@ -396,19 +422,48 @@ export function ManualTrader({
   const payoutRate = allowEquals ? 1.74 : 1.9;
   const potentialPayout = Number((stake * payoutRate).toFixed(2));
 
+  // Derived trade info
+  const digitMeta = DIGIT_TYPES.find(d => d.type === digitType)!;
+  const tradeLabel = tradeCategory === 'directional'
+    ? direction === 'CALL' ? 'Rise' : 'Fall'
+    : tradeCategory === 'growth'
+    ? 'Accumulate'
+    : `${digitMeta.label}${digitMeta.needsBarrier ? ` ${digitBarrier}` : ''}`;
+  const tradeBtnColor = tradeCategory === 'directional'
+    ? direction === 'CALL' ? 'rise' : 'fall'
+    : tradeCategory === 'growth'
+    ? 'accu'
+    : 'digit';
+
   const handleBuy = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
 
     try {
-      // Start in-chart 5-tick contract tracking
+      let contractDirection = direction;
+      let barrier: number | undefined;
+      let growth_rate: number | undefined;
+      let duration: number | undefined;
+
+      if (tradeCategory === 'digits') {
+        contractDirection = digitType;
+        barrier = digitMeta.needsBarrier ? digitBarrier : undefined;
+        duration = durationTicks;
+      } else if (tradeCategory === 'growth') {
+        contractDirection = 'ACCU';
+        growth_rate = growthRate;
+        duration = undefined; // ACCU has no fixed duration
+      } else {
+        duration = durationTicks;
+      }
+
       setActiveContract({
         id: String(Date.now()),
-        direction,
+        direction: tradeCategory === 'directional' ? direction : 'CALL',
         entryQuote: currentTick.quote,
         entryTickIndex: currentTick.index,
         currentTickCount: 1,
-        totalTicks: durationTicks,
+        totalTicks: tradeCategory === 'growth' ? 999 : durationTicks,
         stake,
         payout: potentialPayout,
         ticks: [{ quote: currentTick.quote, tickIndex: currentTick.index }],
@@ -417,9 +472,12 @@ export function ManualTrader({
 
       await runTrade({
         instrument: selectedInstrument,
-        direction,
+        direction: contractDirection,
         stake,
         source: 'manual',
+        barrier,
+        growth_rate,
+        duration,
       });
     } finally {
       setIsSubmitting(false);
@@ -457,7 +515,7 @@ export function ManualTrader({
               <div className="dtrader-asset-info">
                 <strong>{selectedInstrument}</strong>
                 <span className="dtrader-trade-type">
-                  Rise/Fall <ChevronDown size={13} />
+                  {tradeCategory === 'directional' ? 'Rise/Fall' : tradeCategory === 'growth' ? 'Accumulator' : 'Digits'} <ChevronDown size={13} />
                 </span>
               </div>
             </button>
@@ -865,27 +923,104 @@ export function ManualTrader({
             </button>
           </div>
 
-          {/* Direction Tabs (Rise / Fall) */}
-          <div className="dtrader-direction-tabs">
-            <button
-              type="button"
-              className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`}
-              onClick={() => setDirection('CALL')}
-            >
-              <ArrowUp size={16} />
-              <span>Rise</span>
-            </button>
-            <button
-              type="button"
-              className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`}
-              onClick={() => setDirection('PUT')}
-            >
-              <ArrowDown size={16} />
-              <span>Fall</span>
-            </button>
+          {/* ── Trade Category Selector ── */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+            {TRADE_CATEGORIES.map(cat => (
+              <button key={cat.key} type="button"
+                onClick={() => setTradeCategory(cat.key)}
+                style={{
+                  flex: 1, padding: '7px 4px', borderRadius: 7, fontSize: 10, fontWeight: 700,
+                  cursor: 'pointer', border: `1px solid ${tradeCategory === cat.key ? '#2dd4bf' : '#1d2d29'}`,
+                  background: tradeCategory === cat.key ? '#0d2e29' : 'transparent',
+                  color: tradeCategory === cat.key ? '#2dd4bf' : '#718580',
+                  transition: 'all 0.15s',
+                }}>
+                {cat.icon} {cat.label}
+              </button>
+            ))}
           </div>
 
-          {/* Duration Card */}
+          {/* ── Directional: Rise / Fall ── */}
+          {tradeCategory === 'directional' && (
+            <div className="dtrader-direction-tabs">
+              <button type="button"
+                className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`}
+                onClick={() => setDirection('CALL')}>
+                <ArrowUp size={16} /><span>Rise</span>
+              </button>
+              <button type="button"
+                className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`}
+                onClick={() => setDirection('PUT')}>
+                <ArrowDown size={16} /><span>Fall</span>
+              </button>
+            </div>
+          )}
+
+          {/* ── Growth based: Accumulator ── */}
+          {tradeCategory === 'growth' && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: '#80948e', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Growth rate
+              </div>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                {[0.01, 0.02, 0.03, 0.04, 0.05].map(r => (
+                  <button key={r} type="button"
+                    onClick={() => setGrowthRate(r)}
+                    style={{
+                      padding: '6px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                      border: `1px solid ${growthRate === r ? '#22c55e' : '#1d2d29'}`,
+                      background: growthRate === r ? 'rgba(34,197,94,0.1)' : 'transparent',
+                      color: growthRate === r ? '#22c55e' : '#718580', fontWeight: 700,
+                    }}>{(r * 100).toFixed(0)}%</button>
+                ))}
+              </div>
+              <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 6, lineHeight: 1.5 }}>
+                Your stake grows by the selected % each tick. Contract runs until you sell or knock out.
+              </p>
+            </div>
+          )}
+
+          {/* ── Digit based ── */}
+          {tradeCategory === 'digits' && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, marginBottom: 8 }}>
+                {DIGIT_TYPES.map(dt => (
+                  <button key={dt.type} type="button"
+                    onClick={() => setDigitType(dt.type)}
+                    style={{
+                      padding: '7px 4px', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                      border: `1px solid ${digitType === dt.type ? dt.color : '#1d2d29'}`,
+                      background: digitType === dt.type ? `rgba(255,255,255,0.04)` : 'transparent',
+                      color: digitType === dt.type ? dt.color : '#718580',
+                      transition: 'all 0.15s',
+                    }}>{dt.label}</button>
+                ))}
+              </div>
+              {digitMeta.needsBarrier && (
+                <div>
+                  <div style={{ fontSize: 11, color: '#80948e', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    {digitType === 'DIGITOVER' ? 'Over digit' : digitType === 'DIGITUNDER' ? 'Under digit' : 'Digit'}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {[0,1,2,3,4,5,6,7,8,9].map(d => (
+                      <button key={d} type="button"
+                        onClick={() => setDigitBarrier(d)}
+                        style={{
+                          width: 28, height: 28, borderRadius: 5, fontSize: 12, fontWeight: 800, cursor: 'pointer',
+                          fontFamily: "'DM Mono', monospace",
+                          border: `1px solid ${digitBarrier === d ? digitMeta.color : '#1d2d29'}`,
+                          background: digitBarrier === d ? 'rgba(167,139,250,0.12)' : 'transparent',
+                          color: digitBarrier === d ? digitMeta.color : '#718580',
+                        }}>{d}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Duration Card — hidden for Accumulators */}
+          {tradeCategory !== 'growth' && (
           <div className="dtrader-card-field">
             <span className="field-label">Duration</span>
             <div className="field-input-row">
@@ -911,6 +1046,7 @@ export function ManualTrader({
               ))}
             </div>
           </div>
+          )}
 
           {/* Stake Card */}
           <div className="dtrader-card-field">
@@ -939,7 +1075,8 @@ export function ManualTrader({
             </div>
           </div>
 
-          {/* Allow Equals Toggle */}
+          {/* Allow Equals Toggle — directional only */}
+          {tradeCategory === 'directional' && (
           <div className="dtrader-toggle-field">
             <div className="toggle-label-wrap">
               <span className="toggle-title">Allow equals</span>
@@ -954,11 +1091,12 @@ export function ManualTrader({
               <span className="slider" />
             </label>
           </div>
+          )}
 
           {/* Big Buy Action Button */}
           <button
             type="button"
-            className={`dtrader-buy-action-btn ${direction === 'CALL' ? 'rise' : 'fall'}`}
+            className={`dtrader-buy-action-btn ${tradeBtnColor}`}
             disabled={isSubmitting || (activeContract !== null && activeContract.status === 'running')}
             onClick={() => void handleBuy()}
           >
@@ -969,11 +1107,9 @@ export function ManualTrader({
               </span>
             ) : (
               <>
-                <strong className="buy-headline">
-                  Buy {direction === 'CALL' ? 'Rise' : 'Fall'}
-                </strong>
+                <strong className="buy-headline">Buy {tradeLabel}</strong>
                 <span className="buy-payout">
-                  Payout <b>${potentialPayout.toFixed(2)}</b>
+                  {tradeCategory === 'growth' ? `Growth ${(growthRate * 100).toFixed(0)}% / tick` : `Payout \$${potentialPayout.toFixed(2)}`}
                 </span>
               </>
             )}
