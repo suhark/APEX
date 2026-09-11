@@ -104,9 +104,10 @@ interface Props {
   selectedSymbol:    string;
   timeframe:         '1m' | '5m' | '15m' | '1h';
   onTimeframeChange: (tf: '1m' | '5m' | '15m' | '1h') => void;
+  derivConnected?:   boolean;
 }
 
-export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimeframeChange }: Props) {
+export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimeframeChange, derivConnected }: Props) {
   const [category, setCategory]     = useState<CategoryKey>('synthetic_index');
   const [instruments, setInstruments] = useState<InstrumentInfo[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -136,6 +137,7 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
   const load = useCallback(async () => {
     if (loadedRef.current) return;
     loadedRef.current = true;
+    setLoading(true);
     try {
       const syms = await getActiveSymbols();
       const infos: InstrumentInfo[] = syms
@@ -183,14 +185,26 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
       }
     } catch (err) {
       if (import.meta.env.DEV) console.warn('[DerivInstruments]', err);
+      // Reset so the next open or connection event can retry
+      loadedRef.current = false;
       setLoading(false);
     }
   }, [buildInfo]);
 
+  // Load on mount
   useEffect(() => {
     load();
     return () => { unsubRefs.current.forEach(u => u()); unsubRefs.current.clear(); };
   }, [load]);
+
+  // Retry when Deriv connects (handles the case where panel opened before WS was ready)
+  useEffect(() => {
+    if (derivConnected) {
+      loadedRef.current = false; // allow fresh load with the live connection
+      void load();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [derivConnected]);
 
   // Filter by category and search
   const catMarkets = MARKET_CATEGORIES.find(c => c.key === category)?.markets ?? [];

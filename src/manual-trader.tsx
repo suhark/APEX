@@ -1594,9 +1594,10 @@ export function ManualTrader({
                 selectedSymbol={selectedSymbolCode ?? (symbolMap[selectedInstrument] as string) ?? ''}
                 timeframe={instrumentTimeframe}
                 onTimeframeChange={setInstrumentTimeframe}
+                derivConnected={derivConnected}
                 onSelect={(sym, displayName) => {
                   setSelectedInstrument(displayName);
-                  setSelectedSymbolCode(sym);       // store the exact Deriv symbol code
+                  setSelectedSymbolCode(sym);
                   setShowInstrumentPanel(false);
                 }}
               />
