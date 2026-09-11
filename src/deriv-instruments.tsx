@@ -9,7 +9,7 @@ import { getActiveSymbols, getTicksHistory, subscribeTicks, type DerivTick } fro
 // ─── Market categories matching Deriv's classification ───────────────────────
 
 const MARKET_CATEGORIES = [
-  { key: 'synthetic_index', label: 'Derived',           markets: ['synthetic_index', 'random_index'] },
+  { key: 'synthetic_index', label: 'Derived',           markets: ['synthetic_index', 'random_index', 'synthetic', 'derived'] },
   { key: 'forex',           label: 'Forex',             markets: ['forex'] },
   { key: 'indices',         label: 'Stocks & Indices',  markets: ['indices', 'stocks'] },
   { key: 'commodities',     label: 'Commodities',       markets: ['commodities'] },
@@ -140,6 +140,11 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
     setLoading(true);
     try {
       const syms = await getActiveSymbols();
+      if (import.meta.env.DEV) {
+        const markets = [...new Set(syms.map(s => s.market))];
+        console.log('[DerivInstruments] available markets:', markets);
+        console.log('[DerivInstruments] total symbols:', syms.length);
+      }
       const infos: InstrumentInfo[] = syms
         .filter(s => !s.is_trading_suspended)
         .map(s => ({
@@ -191,16 +196,17 @@ export function DerivInstruments({ onSelect, selectedSymbol, timeframe, onTimefr
     }
   }, [buildInfo]);
 
-  // Load on mount
+  // Load on mount — or immediately if already connected
   useEffect(() => {
-    load();
+    void load();
     return () => { unsubRefs.current.forEach(u => u()); unsubRefs.current.clear(); };
-  }, [load]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Retry when Deriv connects (handles the case where panel opened before WS was ready)
+  // Also retry whenever the Deriv connection becomes available
   useEffect(() => {
     if (derivConnected) {
-      loadedRef.current = false; // allow fresh load with the live connection
+      loadedRef.current = false;
       void load();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

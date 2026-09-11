@@ -765,7 +765,6 @@ export interface ActiveSymbol {
 export async function getActiveSymbols(): Promise<ActiveSymbol[]> {
   const data = await send<{ active_symbols?: ActiveSymbol[]; error?: { message: string } }>({
     active_symbols: 'brief',
-    product_type: 'basic',
   });
   if (data.active_symbols) return data.active_symbols;
   throw data.error?.message ?? 'Could not fetch active symbols';
