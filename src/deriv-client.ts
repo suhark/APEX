@@ -51,6 +51,8 @@ let reqId = 1;
 const pending = new Map<number, PendingRequest>();
 // Multiple callbacks per symbol — keyed by symbol, stored as a Map of id→cb
 const tickCallbacks = new Map<string, Map<number, (tick: DerivTick) => void>>();
+// Stores the Deriv subscription.id returned per symbol so we can forget precisely
+const symbolSubscriptionIds = new Map<string, string>();
 let tickCallbackId = 0;
 const contractCallbacks = new Map<number, (result: DerivTradeResult) => void>();
 let authState: DerivAuthState = 'disconnected';
@@ -185,8 +187,9 @@ function isPatToken(token: string): boolean {
   return token.startsWith('pat_') || token.startsWith('ory_at_');
 }
 
-function isLegacyAppId(id: string): boolean {
-  return /^\d+$/.test(id);
+function isLegacyAppId(_id: string): boolean {
+  // All app IDs use the standard WebSocket flow
+  return true;
 }
 
 async function getOptionsAccounts(token: string, app: string): Promise<DerivAccount[]> {
@@ -476,6 +479,7 @@ export function disconnect() {
   setAccountInfo(null);
   setAvailableAccounts([]);
   tickCallbacks.clear();
+  symbolSubscriptionIds.clear();
   tickCallbackId = 0;
   contractCallbacks.clear();
   pending.clear();
@@ -665,12 +669,12 @@ export async function executeTrade(params: {
 }
 
 export function subscribeTicks(symbol: DerivSymbol, cb: (tick: DerivTick) => void): () => void {
-  // Register this callback under a unique id
   const id = ++tickCallbackId;
   if (!tickCallbacks.has(symbol)) {
     tickCallbacks.set(symbol, new Map());
-    // Only send the subscription request when this is the first subscriber
-    void send({ ticks: symbol, subscribe: 1 }).catch(() => {});
+    send<{ subscription?: { id: string } }>({ ticks: symbol, subscribe: 1 })
+      .then(resp => { if (resp.subscription?.id) symbolSubscriptionIds.set(symbol, resp.subscription.id); })
+      .catch(() => {});
   }
   tickCallbacks.get(symbol)!.set(id, cb);
 
@@ -678,10 +682,11 @@ export function subscribeTicks(symbol: DerivSymbol, cb: (tick: DerivTick) => voi
     const cbs = tickCallbacks.get(symbol);
     if (cbs) {
       cbs.delete(id);
-      // Only forget the WebSocket feed when the last subscriber unregisters
       if (cbs.size === 0) {
         tickCallbacks.delete(symbol);
-        void send({ forget_all: 'ticks' }).catch(() => {});
+        const subId = symbolSubscriptionIds.get(symbol);
+        symbolSubscriptionIds.delete(symbol);
+        if (subId) void send({ forget: subId }).catch(() => {});
       }
     }
   };

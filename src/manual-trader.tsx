@@ -54,11 +54,16 @@ interface ActiveContract {
 }
 
 const INSTRUMENT_CONFIGS: Record<string, { badge: string; basePrice: number; volatility: number }> = {
-  'Volatility 100 Index': { badge: '100', basePrice: 927.0, volatility: 0.75 },
-  'Volatility 75 Index': { badge: '75', basePrice: 785.0, volatility: 0.65 },
-  'Volatility 50 Index': { badge: '50', basePrice: 512.0, volatility: 0.5 },
-  'Volatility 25 Index': { badge: '25', basePrice: 342.0, volatility: 0.35 },
-  'Volatility 10 Index': { badge: '10', basePrice: 128.0, volatility: 0.2 },
+  'Volatility 100 Index':      { badge: '100',  basePrice: 720.0,  volatility: 0.75 },
+  'Volatility 75 Index':       { badge: '75',   basePrice: 520.0,  volatility: 0.65 },
+  'Volatility 50 Index':       { badge: '50',   basePrice: 340.0,  volatility: 0.5  },
+  'Volatility 25 Index':       { badge: '25',   basePrice: 225.0,  volatility: 0.35 },
+  'Volatility 10 Index':       { badge: '10',   basePrice: 110.0,  volatility: 0.2  },
+  'Volatility 100 (1s) Index': { badge: '100s', basePrice: 720.0,  volatility: 0.75 },
+  'Volatility 75 (1s) Index':  { badge: '75s',  basePrice: 520.0,  volatility: 0.65 },
+  'Volatility 50 (1s) Index':  { badge: '50s',  basePrice: 340.0,  volatility: 0.5  },
+  'Volatility 25 (1s) Index':  { badge: '25s',  basePrice: 225.0,  volatility: 0.35 },
+  'Volatility 10 (1s) Index':  { badge: '10s',  basePrice: 110.0,  volatility: 0.2  },
 };
 
 // ─── Trade type definitions ────────────────────────────────────────────────────
@@ -118,7 +123,10 @@ export function ManualTrader({
   linkedRealAccount,
   linkedDemoAccount,
 }: ManualTraderProps) {
-  const [selectedInstrument, setSelectedInstrument] = useState<string>('Volatility 100 Index');
+  const [selectedInstrument, setSelectedInstrument] = useState<string>('Volatility 100 (1s) Index');
+  // The actual Deriv symbol code (e.g. 'R_100') — set when user picks from DerivInstruments
+  // Falls back to symbolMap lookup for the display name when null
+  const [selectedSymbolCode, setSelectedSymbolCode] = useState<string | null>('R_100');
   const [direction, setDirection] = useState<'CALL' | 'PUT'>('CALL'); // CALL = Rise, PUT = Fall
   const [stake, setStake] = useState<number>(2);
   const [durationTicks, setDurationTicks] = useState<number>(5);
@@ -137,6 +145,8 @@ export function ManualTrader({
   const [barrier, setBarrier] = useState<string>('1234.56'); // Higher/Lower / Touch barrier
   const [showHowToModal, setShowHowToModal] = useState<boolean>(false);
   const [showInstrumentDropdown, setShowInstrumentDropdown] = useState<boolean>(false);
+  const [showTradeTypeDropdown, setShowTradeTypeDropdown] = useState<boolean>(false);
+  const [showPositionsPanel, setShowPositionsPanel] = useState<boolean>(false);
   const [chartType, setChartType] = useState<'area' | 'line'>('area');
   const [zoomLevel, setZoomLevel] = useState<number>(35); // number of visible ticks
   const [showZoomPill, setShowZoomPill] = useState<boolean>(false);
@@ -260,34 +270,74 @@ export function ManualTrader({
 
   // Tick series generation
   const [tickHistory, setTickHistory] = useState<TickPoint[]>([]);
-  const config = INSTRUMENT_CONFIGS[selectedInstrument] || INSTRUMENT_CONFIGS['Volatility 100 Index'];
+  const config = INSTRUMENT_CONFIGS[selectedInstrument]
+    || INSTRUMENT_CONFIGS['Volatility 100 (1s) Index']
+    || { badge: '100', basePrice: 720.0, volatility: 0.75 };
   const tickHistoryRef = useRef<TickPoint[]>([]);
   const realTickUnsubRef = useRef<(() => void) | null>(null);
   const [showInstrumentPanel, setShowInstrumentPanel] = useState(false);
   const [instrumentTimeframe, setInstrumentTimeframe] = useState<'1m' | '5m' | '15m' | '1h'>('5m');
+
+  // ── When Deriv connects, validate/resolve the instrument symbol ────────────
+  // active_symbols gives us exactly what's available for this account.
+  // If the current symbol code isn't available, auto-switch to R_100 or first available.
+  useEffect(() => {
+    if (!derivConnected) return;
+    let cancelled = false;
+    getActiveSymbols().then(syms => {
+      if (cancelled) return;
+      const available = new Set(syms.map(s => s.symbol));
+      const currentCode = selectedSymbolCode ?? (symbolMap[selectedInstrument] as string);
+      if (currentCode && available.has(currentCode)) return; // already valid
+      // Current symbol not available — pick best alternative
+      const preferred = ['R_100', 'R_75', 'R_50', 'R_25', 'R_10',
+                         '1HZ100V', '1HZ75V', '1HZ50V', '1HZ25V', '1HZ10V'];
+      const fallback = preferred.find(s => available.has(s));
+      if (fallback) {
+        const displayName = syms.find(s => s.symbol === fallback)?.display_name ?? fallback;
+        setSelectedSymbolCode(fallback);
+        setSelectedInstrument(displayName);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [derivConnected]);
 
   // ── Tick feed: real when Deriv connected, synthetic fallback ─────────────
   useEffect(() => {
     // Clean up previous real subscription
     if (realTickUnsubRef.current) { realTickUnsubRef.current(); realTickUnsubRef.current = null; }
 
-    const derivSymbol = symbolMap[selectedInstrument] as string | undefined;
+    const derivSymbol = (selectedSymbolCode ?? symbolMap[selectedInstrument]) as string | undefined;
 
     if (derivConnected && derivSymbol) {
+      // Immediately clear stale tick history so the chart doesn't show old/fake prices
+      tickHistoryRef.current = [];
+      setTickHistory([]);
+      setScrollOffset(0);
+      setActiveContract(null);
+
+      if (import.meta.env.DEV) {
+        console.log(`[ManualTrader] Subscribing to ${derivSymbol} (${selectedInstrument})`);
+      }
+
       // Seed with real tick history first
       let cancelled = false;
       getTicksHistory(derivSymbol, 300).then(hist => {
         if (cancelled) return;
-        const now = Date.now();
+        if (!hist.prices.length) return;
         const ticks: TickPoint[] = hist.prices.map((q, i) => ({
           index: i,
           quote: q,
-          time: new Date(now - (hist.prices.length - 1 - i) * 1500).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
+          time: new Date(hist.times[i] * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }),
           changePct: hist.prices[0] ? Number((((q - hist.prices[0]) / hist.prices[0]) * 100).toFixed(2)) : 0,
         }));
         tickHistoryRef.current = ticks;
         setTickHistory(ticks);
-      }).catch(() => {});
+      }).catch((err) => {
+        // History unavailable — live ticks will build the chart from scratch
+        if (import.meta.env.DEV) console.warn(`[ManualTrader] getTicksHistory failed for ${derivSymbol}:`, err);
+      });
 
       // Subscribe to live ticks
       const unsub = subscribeTicks(derivSymbol as any, (t: DerivTick) => {
@@ -337,7 +387,7 @@ export function ManualTrader({
       setActiveContract(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedInstrument, derivConnected]);
+  }, [selectedInstrument, selectedSymbolCode, derivConnected]);
 
   // Synthetic tick feed — only runs when NOT connected to Deriv
   useEffect(() => {
@@ -401,12 +451,10 @@ export function ManualTrader({
   }, [tick]);
 
   // Current live quote
-  const currentTick = tickHistory[tickHistory.length - 1] || {
-    quote: config.basePrice,
-    changePct: 0.02,
-    time: '11:36:23',
-    index: 0,
-  };
+  const currentTick = tickHistory[tickHistory.length - 1] ?? null;
+  const isChartLoading = derivConnected && tickHistory.length === 0;
+  // Safe quote reference — null when loading, used in JSX via optional chaining
+  const liveQuote = currentTick?.quote ?? null;
 
   // Slice visible ticks based on zoom level and scrollOffset
   const visibleTicks = useMemo(() => {
@@ -567,13 +615,13 @@ export function ManualTrader({
       setActiveContract({
         id: String(Date.now()),
         direction: (contractDirection === 'CALL' || contractDirection === 'PUT') ? contractDirection : 'CALL',
-        entryQuote: currentTick.quote,
-        entryTickIndex: currentTick.index,
+        entryQuote: currentTick?.quote ?? 0,
+        entryTickIndex: currentTick?.index ?? 0,
         currentTickCount: 1,
         totalTicks: tradeCategory === 'growth' ? 999 : durationTicks,
         stake,
         payout: potentialPayout,
-        ticks: [{ quote: currentTick.quote, tickIndex: currentTick.index }],
+        ticks: [{ quote: currentTick?.quote ?? 0, tickIndex: currentTick?.index ?? 0 }],
         status: 'running',
       });
 
@@ -617,7 +665,7 @@ export function ManualTrader({
             >
               <div className="dtrader-asset-badge">
                 <span>{selectedInstrument.replace('Volatility ', '').replace(' Index', '').replace('(1s)', '1s').substring(0, 5)}</span>
-                <span className="sub">1s</span>
+                {selectedInstrument.includes('(1s)') && <span className="sub">1s</span>}
               </div>
               <div className="dtrader-asset-info">
                 <strong>{selectedInstrument}</strong>
@@ -674,14 +722,80 @@ export function ManualTrader({
               <span>Tick Feed</span>
               <b>1 tick = 1.5s</b>
             </div>
+            <div className="dtrader-chart-header-actions">
+              <button
+                type="button"
+                className={`dtrader-positions-btn ${showPositionsPanel ? 'active' : ''}`}
+                onClick={() => setShowPositionsPanel(v => !v)}
+                title="Toggle Positions"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+                </svg>
+                Positions
+              </button>
+            </div>
             <div className="dtrader-chart-spot">
               <span>Spot:</span>
-              <strong>{currentTick.quote.toFixed(2)}</strong>
-              <em className={currentTick.changePct >= 0 ? 'positive' : 'negative'}>
-                {currentTick.changePct >= 0 ? `+${currentTick.changePct}%` : `${currentTick.changePct}%`}
-              </em>
+              {isChartLoading ? (
+                <strong className="chart-loading-price">—</strong>
+              ) : (
+                <>
+                  <strong>{currentTick?.quote.toFixed(2) ?? '—'}</strong>
+                  <em className={( currentTick?.changePct ?? 0) >= 0 ? 'positive' : 'negative'}>
+                    {(currentTick?.changePct ?? 0) >= 0 ? `+${currentTick?.changePct ?? 0}%` : `${currentTick?.changePct ?? 0}%`}
+                  </em>
+                </>
+              )}
             </div>
           </div>
+
+          {/* Collapsible Positions Panel */}
+          {showPositionsPanel && (
+            <div className="dtrader-positions-panel">
+              <div className="positions-panel-header">
+                <span className="positions-panel-title">Positions</span>
+                <div className="positions-panel-tabs">
+                  <span className="pos-tab active">Open</span>
+                  <span className="pos-tab">Closed</span>
+                </div>
+                <button
+                  type="button"
+                  className="positions-panel-close"
+                  onClick={() => setShowPositionsPanel(false)}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+              <div className="positions-panel-body">
+                {activeContract ? (
+                  <div className={`position-row ${activeContract.status}`}>
+                    <div className="position-row-icon">
+                      <span>{selectedInstrument.replace('Volatility ', 'V').replace(' Index', '')}</span>
+                    </div>
+                    <div className="position-row-info">
+                      <strong>{selectedInstrument}</strong>
+                      <span>{activeContract.direction === 'CALL' ? 'Rise' : 'Fall'} · ${activeContract.stake.toFixed(2)}</span>
+                    </div>
+                    <div className="position-row-status">
+                      <span className={`pos-status-badge ${activeContract.status}`}>
+                        {activeContract.status === 'running' ? `${activeContract.currentTickCount}/${activeContract.totalTicks}t` : activeContract.status}
+                      </span>
+                      <strong className={activeContract.status === 'won' ? 'positive' : activeContract.status === 'lost' ? 'negative' : ''}>
+                        {activeContract.status === 'won' ? `+$${activeContract.payout.toFixed(2)}` :
+                         activeContract.status === 'lost' ? `-$${activeContract.stake.toFixed(2)}` :
+                         `$${activeContract.payout.toFixed(2)}`}
+                      </strong>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="positions-empty">
+                    <span>No open positions</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Floating Left Toolbar */}
           <div className="dtrader-left-toolbar">
@@ -764,36 +878,35 @@ export function ManualTrader({
             onMouseLeave={handleMouseUp}
             onWheel={handleWheelZoom}
           >
+            {/* Chart loading overlay */}
+            {isChartLoading && (
+              <div className="chart-loading-overlay">
+                <span className="chart-loading-dot" />
+                <span>Connecting to live feed…</span>
+              </div>
+            )}
             <svg viewBox="0 0 100 65" preserveAspectRatio="none" className="dtrader-svg">
               <defs>
                 <linearGradient id="dtraderAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#2dd4bf" stopOpacity="0.22" />
-                  <stop offset="65%" stopColor="#2dd4bf" stopOpacity="0.04" />
+                  <stop offset="0%"   stopColor="#2dd4bf" stopOpacity="0.18" />
+                  <stop offset="55%"  stopColor="#2dd4bf" stopOpacity="0.05" />
                   <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0" />
                 </linearGradient>
                 <filter id="lineGlow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feDropShadow dx="0" dy="0" stdDeviation="0.4" floodColor="#2dd4bf" floodOpacity="0.4" />
+                  <feDropShadow dx="0" dy="0" stdDeviation="0.35" floodColor="#2dd4bf" floodOpacity="0.35" />
                 </filter>
               </defs>
 
-              {/* Dotted Grid Lines */}
-              {chartMath.yLabels.map((yl, i) => (
+              {/* Clean subtle horizontal guides — only 3, very faint */}
+              {chartMath.yLabels.filter((_, i) => i === 1 || i === 2 || i === 3).map((yl, i) => (
                 <line
                   key={i}
-                  x1="0"
-                  y1={yl.yPos}
-                  x2="100"
-                  y2={yl.yPos}
-                  stroke="#162824"
-                  strokeWidth="0.75"
+                  x1="0" y1={yl.yPos} x2="100" y2={yl.yPos}
+                  stroke="#1a2e2a"
+                  strokeWidth="0.5"
                   vectorEffect="non-scaling-stroke"
-                  strokeDasharray="2 3"
                 />
               ))}
-              <line x1="20" y1="0" x2="20" y2="65" stroke="#13231f" strokeWidth="0.75" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
-              <line x1="40" y1="0" x2="40" y2="65" stroke="#13231f" strokeWidth="0.75" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
-              <line x1="60" y1="0" x2="60" y2="65" stroke="#13231f" strokeWidth="0.75" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
-              <line x1="80" y1="0" x2="80" y2="65" stroke="#13231f" strokeWidth="0.75" vectorEffect="non-scaling-stroke" strokeDasharray="2 3" />
 
               {/* Area Fill */}
               {chartType === 'area' && chartMath.fillStr && (
@@ -914,14 +1027,18 @@ export function ManualTrader({
 
             {/* Floating Live Price Callout (aligned neatly without covering chart waves) */}
             <div className="dtrader-floating-callout">
-              <div className={`callout-pct ${currentTick.changePct >= 0 ? 'positive' : 'negative'}`}>
-                {scrollOffset > 0 ? `Past: -${scrollOffset}t` : currentTick.changePct >= 0 ? `+${currentTick.changePct}%` : `${currentTick.changePct}%`}
+              <div className={`callout-pct ${(currentTick?.changePct ?? 0) >= 0 ? 'positive' : 'negative'}`}>
+                {scrollOffset > 0 ? `Past: -${scrollOffset}t` : (currentTick?.changePct ?? 0) >= 0 ? `+${currentTick?.changePct ?? 0}%` : `${currentTick?.changePct ?? 0}%`}
               </div>
               <div className="callout-price">
-                {scrollOffset > 0 && visibleTicks.length > 0 ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2) : currentTick.quote.toFixed(2)}
+                {scrollOffset > 0 && visibleTicks.length > 0
+                  ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2)
+                  : currentTick?.quote.toFixed(2) ?? '—'}
               </div>
               <div className="callout-time">
-                {scrollOffset > 0 && visibleTicks.length > 0 ? visibleTicks[visibleTicks.length - 1].time : currentTick.time}
+                {scrollOffset > 0 && visibleTicks.length > 0
+                  ? visibleTicks[visibleTicks.length - 1].time
+                  : currentTick?.time ?? '—'}
               </div>
             </div>
 
@@ -943,7 +1060,7 @@ export function ManualTrader({
                 style={{ top: `${(chartMath.currentY / 65) * 100}%` }}
               >
                 <span className={`badge-dot ${scrollOffset > 0 ? 'past' : ''}`} />
-                <b>{scrollOffset > 0 && visibleTicks.length > 0 ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2) : currentTick.quote.toFixed(2)}</b>
+                <b>{scrollOffset > 0 && visibleTicks.length > 0 ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2) : currentTick?.quote.toFixed(2) ?? '—'}</b>
               </div>
             </div>
           </div>
@@ -1010,40 +1127,79 @@ export function ManualTrader({
             </button>
           </div>
 
-          {/* ── Trade Category Selector ── */}
-          <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
-            {TRADE_CATEGORIES.map(cat => (
-              <button key={cat.key} type="button"
-                onClick={() => setTradeCategory(cat.key)}
-                style={{
-                  flex: 1, padding: '7px 4px', borderRadius: 7, fontSize: 10, fontWeight: 700,
-                  cursor: 'pointer', border: `1px solid ${tradeCategory === cat.key ? '#2dd4bf' : '#1d2d29'}`,
-                  background: tradeCategory === cat.key ? '#0d2e29' : 'transparent',
-                  color: tradeCategory === cat.key ? '#2dd4bf' : '#718580',
-                  transition: 'all 0.15s',
-                }}>
-                {cat.icon} {cat.label}
-              </button>
-            ))}
+          {/* ── Trade Type Dropdown ── */}
+          <div className="dtrader-type-selector" ref={(el) => {
+            // close on outside click
+            if (!el) return;
+            const handler = (e: MouseEvent) => {
+              if (!el.contains(e.target as Node)) setShowTradeTypeDropdown(false);
+            };
+            document.addEventListener('mousedown', handler);
+            return () => document.removeEventListener('mousedown', handler);
+          }}>
+            <button
+              type="button"
+              className="dtrader-type-btn"
+              onClick={() => setShowTradeTypeDropdown(v => !v)}
+            >
+              <span className="type-btn-label">
+                {tradeCategory === 'directional'
+                  ? DIRECTIONAL_TYPES.find(d => d.key === directionalType)?.label ?? 'Rise/Fall'
+                  : tradeCategory === 'growth'
+                  ? GROWTH_TYPES.find(g => g.key === growthType)?.label ?? 'Accumulators'
+                  : DIGIT_TYPES.find(d => d.type === digitType)?.label ?? 'Even'}
+              </span>
+              <ChevronDown size={13} className={showTradeTypeDropdown ? 'rotated' : ''} />
+            </button>
+
+            {showTradeTypeDropdown && (
+              <div className="dtrader-type-dropdown">
+                {/* Directional */}
+                <div className="type-dropdown-group">
+                  <span className="type-dropdown-group-label">Directional</span>
+                  {DIRECTIONAL_TYPES.map(dt => (
+                    <button key={dt.key} type="button"
+                      className={`type-dropdown-item ${tradeCategory === 'directional' && directionalType === dt.key ? 'active' : ''}`}
+                      onClick={() => { setTradeCategory('directional'); setDirectionalType(dt.key); setShowTradeTypeDropdown(false); }}
+                    >
+                      <span className="type-item-label">{dt.label}</span>
+                      <span className="type-item-desc">{dt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                {/* Growth */}
+                <div className="type-dropdown-group">
+                  <span className="type-dropdown-group-label">Growth based</span>
+                  {GROWTH_TYPES.map(gt => (
+                    <button key={gt.key} type="button"
+                      className={`type-dropdown-item ${tradeCategory === 'growth' && growthType === gt.key ? 'active' : ''}`}
+                      onClick={() => { setTradeCategory('growth'); setGrowthType(gt.key); setShowTradeTypeDropdown(false); }}
+                    >
+                      <span className="type-item-label">{gt.label}</span>
+                      <span className="type-item-desc">{gt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                {/* Digits */}
+                <div className="type-dropdown-group">
+                  <span className="type-dropdown-group-label">Digit based</span>
+                  {DIGIT_TYPES.map(dt => (
+                    <button key={dt.type} type="button"
+                      className={`type-dropdown-item ${tradeCategory === 'digits' && digitType === dt.type ? 'active' : ''}`}
+                      style={{ '--type-color': dt.color } as React.CSSProperties}
+                      onClick={() => { setTradeCategory('digits'); setDigitType(dt.type); setShowTradeTypeDropdown(false); }}
+                    >
+                      <span className="type-item-label" style={{ color: tradeCategory === 'digits' && digitType === dt.type ? dt.color : undefined }}>{dt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* ── Directional sub-type ── */}
+          {/* ── Directional direction tabs ── */}
           {tradeCategory === 'directional' && (
-            <div style={{ marginBottom: 10 }}>
-              {/* Sub-type selector */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-                {DIRECTIONAL_TYPES.map(dt => (
-                  <button key={dt.key} type="button"
-                    onClick={() => setDirectionalType(dt.key)}
-                    style={{
-                      flex: 1, padding: '5px 3px', borderRadius: 6, fontSize: 9, fontWeight: 700, cursor: 'pointer',
-                      border: `1px solid ${directionalType === dt.key ? '#2dd4bf' : '#1d2d29'}`,
-                      background: directionalType === dt.key ? '#0d2e29' : 'transparent',
-                      color: directionalType === dt.key ? '#2dd4bf' : '#718580',
-                    }}>{dt.label}</button>
-                ))}
-              </div>
-
+            <div>
               {/* Rise/Fall */}
               {directionalType === 'rise_fall' && (
                 <div className="dtrader-direction-tabs">
@@ -1072,7 +1228,6 @@ export function ManualTrader({
                     <input type="text" value={barrier} onChange={e => setBarrier(e.target.value)}
                       placeholder="e.g. 1234.56"
                       style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
-                    <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 4 }}>Win if exit price is higher/lower than this barrier.</p>
                   </div>
                 </>
               )}
@@ -1093,24 +1248,20 @@ export function ManualTrader({
                     <input type="text" value={barrier} onChange={e => setBarrier(e.target.value)}
                       placeholder="e.g. 1234.56"
                       style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
-                    <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 4 }}>Win if price {direction === 'CALL' ? 'touches' : 'never touches'} this barrier before expiry.</p>
                   </div>
                 </>
               )}
 
               {/* In/Out */}
               {directionalType === 'in_out' && (
-                <>
-                  <div className="dtrader-direction-tabs">
-                    <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                      <span>Ends Between</span>
-                    </button>
-                    <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                      <span>Ends Outside</span>
-                    </button>
-                  </div>
-                  <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 6 }}>Win if exit price {direction === 'CALL' ? 'ends between' : 'ends outside'} the two barrier levels.</p>
-                </>
+                <div className="dtrader-direction-tabs">
+                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
+                    <span>Ends Between</span>
+                  </button>
+                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
+                    <span>Ends Outside</span>
+                  </button>
+                </div>
               )}
 
               {/* Asians */}
@@ -1165,21 +1316,7 @@ export function ManualTrader({
 
           {/* ── Growth based ── */}
           {tradeCategory === 'growth' && (
-            <div style={{ marginBottom: 8 }}>
-              {/* Sub-type: Accumulator / Multiplier */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
-                {GROWTH_TYPES.map(gt => (
-                  <button key={gt.key} type="button"
-                    onClick={() => setGrowthType(gt.key)}
-                    style={{
-                      flex: 1, padding: '6px 4px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer',
-                      border: `1px solid ${growthType === gt.key ? '#22c55e' : '#1d2d29'}`,
-                      background: growthType === gt.key ? 'rgba(34,197,94,0.08)' : 'transparent',
-                      color: growthType === gt.key ? '#22c55e' : '#718580',
-                    }}>{gt.label}</button>
-                ))}
-              </div>
-
+            <div style={{ marginBottom: 2 }}>
               {/* Accumulator controls */}
               {growthType === 'accumulator' && (
                 <>
@@ -1192,7 +1329,6 @@ export function ManualTrader({
                       </button>
                     ))}
                   </div>
-                  <p style={{ fontSize: 10, color: '#4a6a62', marginTop: 6, lineHeight: 1.5 }}>Stake grows by selected % each tick while price stays in range.</p>
                 </>
               )}
 
@@ -1237,15 +1373,7 @@ export function ManualTrader({
 
           {/* ── Digit based ── */}
           {tradeCategory === 'digits' && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5, marginBottom: 8 }}>
-                {DIGIT_TYPES.map(dt => (
-                  <button key={dt.type} type="button" onClick={() => setDigitType(dt.type)}
-                    style={{ padding: '7px 4px', borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: `1px solid ${digitType === dt.type ? dt.color : '#1d2d29'}`, background: digitType === dt.type ? 'rgba(255,255,255,0.04)' : 'transparent', color: digitType === dt.type ? dt.color : '#718580', transition: 'all 0.15s' }}>
-                    {dt.label}
-                  </button>
-                ))}
-              </div>
+            <div style={{ marginBottom: 2 }}>
               {digitMeta.needsBarrier && (
                 <div>
                   <div style={{ fontSize: 11, color: '#80948e', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -1382,7 +1510,7 @@ export function ManualTrader({
                 </div>
                 <div>
                   <small>Current</small>
-                  <strong>{currentTick.quote.toFixed(2)}</strong>
+                  <strong>{currentTick?.quote.toFixed(2) ?? '—'}</strong>
                 </div>
                 <div>
                   <small>Payout</small>
@@ -1452,7 +1580,7 @@ export function ManualTrader({
             position: 'relative', width: '100%', maxWidth: 560,
             background: '#0b1312', borderRight: '1px solid #1d2d29',
             display: 'flex', flexDirection: 'column', zIndex: 1,
-            height: '100%', overflowY: 'auto',
+            height: '100%', overflowY: 'auto', scrollbarWidth: 'none',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid #1d2d29' }}>
               <h2 style={{ margin: 0, fontSize: 14, color: '#e0f0ec', fontWeight: 700 }}>Select Market</h2>
@@ -1463,11 +1591,12 @@ export function ManualTrader({
             </div>
             {derivConnected ? (
               <DerivInstruments
-                selectedSymbol={symbolMap[selectedInstrument] as string ?? ''}
+                selectedSymbol={selectedSymbolCode ?? (symbolMap[selectedInstrument] as string) ?? ''}
                 timeframe={instrumentTimeframe}
                 onTimeframeChange={setInstrumentTimeframe}
                 onSelect={(sym, displayName) => {
                   setSelectedInstrument(displayName);
+                  setSelectedSymbolCode(sym);       // store the exact Deriv symbol code
                   setShowInstrumentPanel(false);
                 }}
               />
@@ -1479,7 +1608,7 @@ export function ManualTrader({
                 </div>
                 {Object.keys(symbolMap).map(name => (
                   <button key={name} type='button'
-                    onClick={() => { setSelectedInstrument(name); setShowInstrumentPanel(false); }}
+                    onClick={() => { setSelectedInstrument(name); setSelectedSymbolCode(null); setShowInstrumentPanel(false); }}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                       padding: '10px 12px', borderRadius: 8, marginBottom: 4, cursor: 'pointer',

@@ -1914,7 +1914,7 @@ function App() {
             );
           })}
         </div>
-        <div className="page-content">
+        <div className={`page-content${page === 'manual' ? ' page-content--trader' : ''}`}>
           {notice && <div className="toast"><Check size={16} /> {notice}<button onClick={() => setNotice('')}><X size={14} /></button></div>}
           {content}
         </div>
