@@ -511,6 +511,8 @@ function App() {
   const linkedRealAccount = deriv.accounts.find((a) => !a.is_virtual);
   const linkedDemoAccount = deriv.accounts.find((a) => a.is_virtual);
   const botPendingTradesRef = useRef<Set<string>>(new Set());
+  // Prevents load() auto-reconnect from racing with an OAuth callback
+  const oauthConnectingRef = useRef(false);
   // Per-bot runtime state for STP-V3 (cooldown + consecutive loss counter)
   const stpV3StateRef = useRef<{ consecutiveLosses: number; lastLossTime: number }>({
     consecutiveLosses: 0,
@@ -854,11 +856,12 @@ function App() {
     setLoading(false);
 
     // Auto-reconnect to Deriv if user previously connected (persists across page refresh)
+    // Skip if an OAuth callback is currently handling the connection
     const storedDerivToken =
       localStorage.getItem(`apex_deriv_token_${currentUser.id}`) ||
       localStorage.getItem('apex_deriv_token');
 
-    if (storedDerivToken && deriv.authState !== 'connected' && deriv.authState !== 'connecting') {
+    if (storedDerivToken && !oauthConnectingRef.current && deriv.authState !== 'connected' && deriv.authState !== 'connecting') {
       void handleDerivConnect(storedDerivToken, DEFAULT_APP_ID, true);
     }
   };
@@ -882,18 +885,25 @@ function App() {
 
     const runCallback = async () => {
       try {
-        const result = await handleOAuthCallback();
-        if (!result) return;
+        // Block load()'s auto-reconnect while we handle the OAuth token
+        oauthConnectingRef.current = true;
 
-        // Store the access token and connect
+        const result = await handleOAuthCallback();
+        if (!result) { oauthConnectingRef.current = false; return; }
+
         const token = result.access_token;
+        // Store before load() runs so it finds the right token on next page load
         if (userRef.current) {
           localStorage.setItem(`apex_deriv_token_${userRef.current.id}`, token);
         }
         localStorage.setItem('apex_deriv_token', token);
-        void handleDerivConnect(token, DEFAULT_APP_ID);
+
+        // Connect — oauthConnectingRef prevents load() from stomping this
+        await handleDerivConnect(token, DEFAULT_APP_ID);
       } catch (err) {
         setNotice(`Deriv login error: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        oauthConnectingRef.current = false;
       }
     };
 
