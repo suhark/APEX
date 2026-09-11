@@ -1614,7 +1614,7 @@ function App() {
     ? `deriv_${activeDerivLoginid}`
     : getStatsContext(derivConnected, deriv.account);
 
-  // Use context-filtered trades so the session loss guardrail only counts
+  // Use  context-filtered trades so the session loss guardrail only counts
   // trades from the currently active account (synthetic or specific Deriv loginid)
   const sessionContextTrades = useMemo(
     () => filterTradesByContext(trades, statsContext),
