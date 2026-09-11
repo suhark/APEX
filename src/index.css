@@ -24,7 +24,7 @@ button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 .app-shell { display: flex; height: 100vh; overflow: hidden; background: #08100f; }
-.sidebar { width: 246px; height: 100vh; display: flex; flex-direction: column; padding: 25px 16px 18px; background: #0c1514; border-right: 1px solid #1c2926; flex-shrink: 0; overflow: hidden; }
+.sidebar { width: 246px; height: 100vh; display: flex; flex-direction: column; padding: 25px 16px 18px; background: #0c1514; border-right: 1px solid #1c2926; flex-shrink: 0; overflow-y: auto; overflow-x: hidden; }
 .brand { display: flex; align-items: center; padding: 4px 6px 20px; }
 .sidebar-brand-logo { max-width: 190px; height: 40px; object-fit: contain; object-position: left center; display: block; }
 .brand-mark { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 10px; color: #071211; background: #36d6bb; }
