@@ -26,11 +26,13 @@ export interface ManualTraderProps {
   runTrade: (details: { instrument: string; direction: string; stake: number; source: string; barrier?: number; growth_rate?: number; duration?: number }) => Promise<void>;
   derivConnected: boolean;
   isDerivReal: boolean;
+  liveArmed?: boolean;
   derivAccount: { loginid: string; balance: number; is_virtual: boolean; currency?: string } | null;
   workspaceBalance: number;
   onSwitchAccount?: (loginid: string) => void;
   linkedRealAccount?: { loginid: string; balance: number; currency: string };
   linkedDemoAccount?: { loginid: string; balance: number; currency: string };
+  onGoToSettings?: () => void;
 }
 
 interface TickPoint {
@@ -117,11 +119,13 @@ export function ManualTrader({
   runTrade,
   derivConnected,
   isDerivReal,
+  liveArmed,
   derivAccount,
   workspaceBalance,
   onSwitchAccount,
   linkedRealAccount,
   linkedDemoAccount,
+  onGoToSettings,
 }: ManualTraderProps) {
   const [selectedInstrument, setSelectedInstrument] = useState<string>('Volatility 100 (1s) Index');
   // The actual Deriv symbol code (e.g. 'R_100') — set when user picks from DerivInstruments
@@ -685,7 +689,9 @@ export function ManualTrader({
             <>
               <div className="dtrader-account-card">
                 <span className={`dtrader-acc-type ${isDemo ? 'demo' : 'real'}`}>
-                  {isDemo ? 'Demo account' : 'Real account'}
+                  {isDerivReal
+                    ? (liveArmed ? 'Real account · LIVE' : 'Real account · Safe')
+                    : 'Demo account'}
                 </span>
                 <strong className="dtrader-acc-balance">
                   {formatCurrency(activeBalance ?? 0).replace('$', '')} {activeCurrency}
@@ -707,10 +713,13 @@ export function ManualTrader({
               )}
             </>
           ) : (
-            <div className="dtrader-not-connected">
-              <span>No account connected</span>
-              <span className="dtrader-not-connected-hint">Connect Deriv in Settings to trade</span>
-            </div>
+            <button
+              type="button"
+              className="connect-deriv-topbar-btn"
+              onClick={() => onGoToSettings?.()}
+            >
+              Connect Deriv
+            </button>
           )}
         </div>
       </div>

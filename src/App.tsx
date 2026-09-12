@@ -1762,7 +1762,8 @@ function App() {
       )}
 
       <main className="main">
-        <header className="topbar">
+        {page !== 'manual' && (
+          <header className="topbar">
           <button className="menu-button" onClick={() => setMobileNav(!mobileNav)}>
             <Menu size={20} />
           </button>
@@ -1858,7 +1859,9 @@ function App() {
             </div>
           </div>
         </header>
-        <LiveContractsBar contracts={openContractPnl} />
+        )}
+        {page !== 'manual' && <LiveContractsBar contracts={openContractPnl} />}
+        {page !== 'manual' && (
         <div className="ticker">
           {instruments.map((instrument, index) => {
             const value = priceFor(index, tick);
@@ -1872,6 +1875,7 @@ function App() {
             );
           })}
         </div>
+        )}
         <div className={`page-content${page === 'manual' ? ' page-content--trader' : ''}`}>
           {notice && <div className="toast"><Check size={16} /> {notice}<button onClick={() => setNotice('')}><X size={14} /></button></div>}
           {content}
@@ -2027,11 +2031,13 @@ function PageView({
         runTrade={runTrade}
         derivConnected={derivConnected}
         isDerivReal={isDerivReal}
+        liveArmed={liveArmed}
         derivAccount={deriv.account}
-        workspaceBalance={workspace.balance}
+        workspaceBalance={workspace?.balance ?? 0}
         onSwitchAccount={onDerivSwitchAccount}
         linkedRealAccount={deriv.accounts.find((a) => !a.is_virtual)}
         linkedDemoAccount={deriv.accounts.find((a) => a.is_virtual)}
+        onGoToSettings={() => setPage('settings')}
       />
     );
   }

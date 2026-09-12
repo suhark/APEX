@@ -1188,10 +1188,11 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   overflow-y: auto !important;
   flex: 1 !important;
   display: block !important;
+  min-height: 100vh;
 }
 
 .page-content--trader .dtrader-container {
-  padding: 14px 18px 32px;
+  padding: 12px 16px 32px;
 }
 
 .dtrader-container {
@@ -1493,7 +1494,8 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  height: 580px;
+  height: calc(100vh - 130px);
+  min-height: 420px;
 }
 
 .dtrader-chart-header {
@@ -1838,6 +1840,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 @media (max-width: 768px) {
   .dtrader-chart-panel {
     height: 360px;
+    min-height: 320px;
   }
   .dtrader-y-axis {
     width: 52px;
