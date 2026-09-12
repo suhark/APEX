@@ -88,7 +88,7 @@ const PHANTOM_DEFAULTS: PhantomConfig = {
 };
 const STP_DEFAULTS: StpConfig = {
   stakeMode: 'percent', stakeValue: 1, stakeMin: 5, stakeMax: 50,
-  scoreThreshold: 75, adxMin: 22, cooldownMinutes: 15,
+  scoreThreshold: 50, adxMin: 15, cooldownMinutes: 15,
 };
 const DEFAULT_BOT_DEFAULTS: DefaultBotConfig = { stake: 10 };
 const DIGIT_SURGE_DEFAULTS: DigitSurgeConfig   = { stake: 5, lookback: 8, biasThreshold: 0.75, maxConsecLosses: 3 };
@@ -440,7 +440,7 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
   const emaSlopeUp   = ema20 > ema20Prev5;
   const emaSlopeDown = ema20 < ema20Prev5;
   const emaGap = Math.abs(ema20 - ema50);
-  if (emaGap < 0.10 * atr14) return null;          // insufficient separation
+  if (emaGap < 0.05 * atr14) return null;          // insufficient separation (relaxed for synthetic)
   if (!bullish && !bearish)   return null;
   const isBull = bullish && emaSlopeUp;
   const isBear = bearish && emaSlopeDown;
@@ -450,7 +450,7 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
   const pullDist = isBull
     ? Math.abs(lastCandle.low  - ema20)
     : Math.abs(lastCandle.high - ema20);
-  if (pullDist > 0.30 * atr14) return null;         // pullback too deep / not close enough
+  if (pullDist > 0.60 * atr14) return null;         // pullback too deep (relaxed for synthetic)
 
   // ── Stage 3: Structure — swing high/low must stay intact ────────────────────
   // Approximate: previous candle must form a higher low (bull) or lower high (bear)
@@ -459,7 +459,7 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
 
   // ── Stage 4: Confirmation candle ────────────────────────────────────────────
   const bodySize = Math.abs(lastCandle.close - lastCandle.open);
-  if (bodySize < 0.50 * atr14) return null;         // body too small
+  if (bodySize < 0.20 * atr14) return null;         // body too small (relaxed for synthetic)
   const bullConf = lastCandle.close > lastCandle.open && lastCandle.close > ema20;
   const bearConf = lastCandle.close < lastCandle.open && lastCandle.close < ema20;
   if (isBull && !bullConf) return null;
@@ -552,6 +552,8 @@ function App() {
   });
   // Boom/Crash Rider runtime state — tracks last trade time for cooldown
   const boomCrashStateRef = useRef<{ lastTradeTime: number }>({ lastTradeTime: 0 });
+  // Digit Surge — tracks consecutive losses in a ref so it resets when bot is restarted
+  const digitSurgeLossRef = useRef<number>(0);
   // Per-bot live-readable config (read in the setInterval closure)
   const botConfigRef = useRef<Record<string, BotConfig>>({});
   // Live signal status per bot — shown on the dedicated pages
@@ -1329,6 +1331,14 @@ function App() {
                   stpV3StateRef.current.consecutiveLosses = 0;
                 }
               }
+              // Digit Surge consecutive loss tracking (ref-based, resets on restart)
+              if (details.botName === 'Digit Surge') {
+                if (!win) {
+                  digitSurgeLossRef.current += 1;
+                } else {
+                  digitSurgeLossRef.current = 0;
+                }
+              }
             }
 
             applyBalanceDelta(finalProfit);
@@ -1430,6 +1440,13 @@ function App() {
 
   const toggleBot = async (bot: BotRow) => {
     const nextActive = !bot.active;
+    // Reset per-bot runtime state when (re)starting
+    if (nextActive && bot.name === 'Digit Surge') {
+      digitSurgeLossRef.current = 0;
+    }
+    if (nextActive && bot.name === 'Boom/Crash Rider') {
+      boomCrashStateRef.current.lastTradeTime = 0;
+    }
     const nextBots = bots.map((item) => (item.id === bot.id ? { ...item, active: nextActive } : item));
     setBots(nextBots);
 
@@ -1579,20 +1596,14 @@ function App() {
             stake = Math.max(1, cfg.stakeValue);
           }
         } else if (bot.name === 'Digit Surge') {
-          // ── Digit Surge: Even/Odd parity bias on fast 1s indices ─────────
-          // Strategy: track last N ticks on V10 (1s). If the last digit shows a
-          // strong parity imbalance (≥biasThreshold), trade the dominant side.
-          // After maxConsecLosses pause one cycle. Uses DIGITEVEN / DIGITODD.
           const cfg = (botConfigRef.current['Digit Surge'] ?? DIGIT_SURGE_DEFAULTS) as DigitSurgeConfig;
 
-          // Consecutive loss guard
-          const dsRecent = tradesRef.current
-            .filter(t => t.bot_name === 'Digit Surge' && (t.result === 'won' || t.result === 'lost'))
-            .slice(0, cfg.maxConsecLosses);
-          const dsConsecLosses = dsRecent.length > 0 && dsRecent.every(t => t.result === 'lost')
-            ? dsRecent.length : 0;
-          if (dsConsecLosses >= cfg.maxConsecLosses) {
-            setBotStatus(s => ({ ...s, 'Digit Surge': `⏸ Paused — ${dsConsecLosses} consecutive losses` }));
+          // Use a ref-based counter so it resets cleanly when the bot is restarted
+          if (digitSurgeLossRef.current >= cfg.maxConsecLosses) {
+            setBotStatus(s => ({ ...s, 'Digit Surge': `🛑 Stopped — ${digitSurgeLossRef.current} consecutive losses. Restart to resume.` }));
+            // Deactivate the bot so the UI shows Start instead of Pause
+            setBots(prev => prev.map(b => b.name === 'Digit Surge' ? { ...b, active: false } : b));
+            botPendingTradesRef.current.delete('Digit Surge');
             return;
           }
 
@@ -1613,7 +1624,7 @@ function App() {
           }
 
           const digitDir = evenBias >= oddBias ? 'DIGITEVEN' : 'DIGITODD';
-          setBotStatus(s => ({ ...s, 'Digit Surge': `✅ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias, oddBias) * 100).toFixed(0)}%` }));
+          setBotStatus(s => ({ ...s, 'Digit Surge': `✅ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias, oddBias) * 100).toFixed(0)}% — losses: ${digitSurgeLossRef.current}/${cfg.maxConsecLosses}` }));
           instrument = 'Volatility 10 (1s) Index';
           direction  = digitDir;
           stake      = Math.max(0.35, cfg.stake);
@@ -1640,22 +1651,21 @@ function App() {
             if (cur < prev) fallingTicks++; else if (cur > prev) risingTicks++;
           }
 
-          const lastMove = Math.abs(priceFor(2, currentTick) - priceFor(2, currentTick - 1));
-          const avgMove  = Math.abs(priceFor(2, currentTick) - priceFor(2, currentTick - cfg.trendTicks)) / cfg.trendTicks || 0.001;
-          const compressed = lastMove < avgMove * cfg.spikeThreshold;
+          // Simplified: directional dominance only — compression check was too tight
+          // with synthetic priceFor() prices. ≥70% in one direction is the signal.
           const strongFall = fallingTicks >= Math.ceil(cfg.trendTicks * 0.70);
           const strongRise = risingTicks  >= Math.ceil(cfg.trendTicks * 0.70);
 
-          if (strongFall && compressed) {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ BOOM setup — ${fallingTicks}/${cfg.trendTicks} fall + compression` }));
+          if (strongFall) {
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ BOOM setup — ${fallingTicks}/${cfg.trendTicks} falling ticks` }));
             instrument = 'Boom 1000 Index';
             direction  = 'CALL';
-          } else if (strongRise && compressed) {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ CRASH setup — ${risingTicks}/${cfg.trendTicks} rise + compression` }));
+          } else if (strongRise) {
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ CRASH setup — ${risingTicks}/${cfg.trendTicks} rising ticks` }));
             instrument = 'Crash 1000 Index';
             direction  = 'PUT';
           } else {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔍 Scanning — fall:${fallingTicks} rise:${risingTicks}` }));
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔍 Scanning — fall:${fallingTicks} rise:${risingTicks}/${cfg.trendTicks}` }));
             return;
           }
 
