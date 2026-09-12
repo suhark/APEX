@@ -1408,16 +1408,18 @@ export function ManualTrader({
           {/* Duration Card — hidden for Accumulators */}
           {tradeCategory !== 'growth' && (
           <div className="dtrader-card-field">
-            <span className="field-label">Duration</span>
-            <div className="field-input-row">
-              <input
-                type="number"
-                min="1"
-                max="60"
-                value={durationTicks}
-                onChange={(e) => setDurationTicks(Math.max(1, Number(e.target.value)))}
-              />
-              <span className="field-unit">ticks</span>
+            <div className="field-header-row">
+              <span className="field-label">Duration</span>
+              <div className="field-input-row">
+                <input
+                  type="number"
+                  min="1"
+                  max="60"
+                  value={durationTicks}
+                  onChange={(e) => setDurationTicks(Math.max(1, Number(e.target.value)))}
+                />
+                <span className="field-unit">ticks</span>
+              </div>
             </div>
             <div className="quick-ticks-row">
               {[5, 10, 15].map((t) => (
@@ -1436,16 +1438,18 @@ export function ManualTrader({
 
           {/* Stake Card */}
           <div className="dtrader-card-field">
-            <span className="field-label">Stake</span>
-            <div className="field-input-row">
-              <span className="field-currency">$</span>
-              <input
-                type="number"
-                min="0.35"
-                step="1"
-                value={stake}
-                onChange={(e) => setStake(Math.max(0.35, Number(e.target.value)))}
-              />
+            <div className="field-header-row">
+              <span className="field-label">Stake</span>
+              <div className="field-input-row">
+                <span className="field-currency">$</span>
+                <input
+                  type="number"
+                  min="0.35"
+                  step="1"
+                  value={stake}
+                  onChange={(e) => setStake(Math.max(0.35, Number(e.target.value)))}
+                />
+              </div>
             </div>
             <div className="quick-stake-row">
               {[1, 2, 5, 10, 25].map((amt) => (
