@@ -471,7 +471,12 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [page, setPage] = useState<Page>('dashboard');
+  const [page, setPageState] = useState<Page>(() => {
+    const saved = sessionStorage.getItem('apex_page');
+    const valid: Page[] = ['dashboard','bots','manual','builder','signals','bulk','quick','apex','phantom','stpv3','digits','record','settings'];
+    return (saved && valid.includes(saved as Page)) ? saved as Page : 'dashboard';
+  });
+  const setPage = (p: Page) => { sessionStorage.setItem('apex_page', p); setPageState(p); };
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [bots, setBots] = useState<BotRow[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
