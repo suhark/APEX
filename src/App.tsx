@@ -110,17 +110,17 @@ type TradeAlert = {
 
 const instruments = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
 const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { key: 'bots', label: 'Free Bots', icon: Bot },
-  { key: 'manual', label: 'Manual Trader', icon: Target }, { key: 'builder', label: 'Bot Builder', icon: Code2 },
-  { key: 'signals', label: 'Signal AI', icon: Sparkles }, { key: 'bulk', label: 'Bulk Trader', icon: ListFilter },
-  { key: 'quick', label: 'Quick Bot', icon: Zap }, { key: 'apex', label: 'Apex Bot', icon: Rocket },
-  { key: 'phantom', label: 'Phantom Scalper', icon: Ghost },
-  { key: 'stpv3', label: 'Trend Pullback V3', icon: CandlestickChart },
-  { key: 'digitsurge', label: 'Digit Surge', icon: Hash },
-  { key: 'boomcrash', label: 'Boom/Crash Rider', icon: Zap },
-  { key: 'asiandrift', label: 'Asian Drift', icon: Globe },
-  { key: 'digits', label: 'Digits Analyser', icon: Hash },
-  { key: 'record', label: 'Track Record', icon: LineChart }, { key: 'settings', label: 'Settings', icon: Settings2 },
+  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { key: 'bots',      label: 'Free Bots',      icon: Bot },
+  { key: 'manual',    label: 'Manual Trader',   icon: Target },
+  { key: 'builder',   label: 'Bot Builder',     icon: Code2 },
+  { key: 'signals',   label: 'Signal AI',       icon: Sparkles },
+  { key: 'bulk',      label: 'Bulk Trader',     icon: ListFilter },
+  { key: 'quick',     label: 'Quick Bot',       icon: Zap },
+  { key: 'apex',      label: 'Apex Bot',        icon: Rocket },
+  { key: 'digits',    label: 'Digits Analyser', icon: Hash },
+  { key: 'record',    label: 'Track Record',    icon: LineChart },
+  { key: 'settings',  label: 'Settings',        icon: Settings2 },
 ];
 
 function priceFor(index: number, tick: number) { return Number((100 + Math.sin((tick + index * 7) / 4) * 2.5 + Math.cos((tick + index) / 8) * 1.4).toFixed(2)); }
@@ -2166,7 +2166,7 @@ function PageView({
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
   if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} />;
-  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} botConfig={botConfig} onSaveBotConfig={onSaveBotConfig} />;
+  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} botConfig={botConfig} onSaveBotConfig={onSaveBotConfig} setPage={setPage} />;
   if (page === 'manual') {
     return (
       <ManualTrader
@@ -2893,7 +2893,7 @@ function EquityChart({
   );
 }
 
-function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onSaveBotConfig }: {
+function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onSaveBotConfig, setPage }: {
   bots: BotRow[];
   toggleBot: (bot: BotRow) => Promise<void>;
   runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>;
@@ -2901,6 +2901,7 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
   botsLoadError?: boolean;
   botConfig: Record<string, BotConfig>;
   onSaveBotConfig: (botName: string, cfg: BotConfig) => void;
+  setPage: (page: Page) => void;
 }) {
   // Local stake overrides per bot — seeded from botConfig (safe against empty/undefined)
   const [stakeMap, setStakeMap] = useState<Record<string, number>>(() => {
@@ -2916,6 +2917,15 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
     const next = Math.max(1, value);
     setStakeMap(m => ({ ...m, [botName]: next }));
     onSaveBotConfig(botName, { ...((botConfig[botName] as DefaultBotConfig) ?? DEFAULT_BOT_DEFAULTS), stake: next });
+  };
+
+  // Bots that have a dedicated detail page
+  const BOT_DETAIL_PAGE: Record<string, Page> = {
+    'Phantom Scalper':  'phantom',
+    'Trend Pullback V3': 'stpv3',
+    'Digit Surge':      'digitsurge',
+    'Boom/Crash Rider': 'boomcrash',
+    'Asian Drift':      'asiandrift',
   };
 
   return (
@@ -2972,10 +2982,16 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
                 <button className={bot.active ? 'secondary active-button' : 'primary'} onClick={() => void toggleBot(bot)}>
                   {bot.active ? <><Pause size={15} /> Pause bot</> : <><Play size={15} /> Start bot</>}
                 </button>
-                <button className="ghost"
-                  onClick={() => void runTrade({ instrument: instruments[0], direction: 'CALL', stake, source: 'demo', botName: bot.name })}>
-                  Test ${stake}
-                </button>
+                {BOT_DETAIL_PAGE[bot.name] ? (
+                  <button className="secondary" onClick={() => setPage(BOT_DETAIL_PAGE[bot.name])}>
+                    <ChevronRight size={14} /> Details
+                  </button>
+                ) : (
+                  <button className="ghost"
+                    onClick={() => void runTrade({ instrument: instruments[0], direction: 'CALL', stake, source: 'demo', botName: bot.name })}>
+                    Test ${stake}
+                  </button>
+                )}
               </div>
               {bot.active && <div className="watching"><i className="live-dot" /> Running · ${stake}/trade · every 5 s</div>}
             </div>
