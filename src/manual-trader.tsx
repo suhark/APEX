@@ -642,8 +642,8 @@ export function ManualTrader({
     }
   };
 
-  const activeBalance = derivConnected && derivAccount ? derivAccount.balance : workspaceBalance;
-  const activeCurrency = derivConnected && derivAccount ? derivAccount.currency : 'USD';
+  const activeBalance = derivConnected && derivAccount ? derivAccount.balance : null;
+  const activeCurrency = derivConnected && derivAccount ? (derivAccount.currency ?? 'USD') : 'USD';
   const isDemo = !derivConnected || Boolean(derivAccount?.is_virtual);
 
   return (
@@ -681,35 +681,36 @@ export function ManualTrader({
         </div>
 
         <div className="dtrader-topbar-right">
-          <div className="dtrader-account-card">
-            <span className={`dtrader-acc-type ${isDemo ? 'demo' : 'real'}`}>
-              {isDemo ? 'Demo account' : 'Real account'}
-            </span>
-            <strong className="dtrader-acc-balance">
-              {formatCurrency(activeBalance).replace('$', '')} {activeCurrency}
-            </strong>
-          </div>
-
-          {isDemo && linkedRealAccount && onSwitchAccount && (
-            <button
-              type="button"
-              className="dtrader-switch-real-btn"
-              onClick={() => onSwitchAccount(linkedRealAccount.loginid)}
-              title="Switch to Real Account"
-            >
-              Try real
-            </button>
-          )}
-
-          {!isDemo && linkedDemoAccount && onSwitchAccount && (
-            <button
-              type="button"
-              className="dtrader-switch-demo-btn"
-              onClick={() => onSwitchAccount(linkedDemoAccount.loginid)}
-              title="Switch to Demo Account"
-            >
-              Use demo
-            </button>
+          {derivConnected && derivAccount ? (
+            <>
+              <div className="dtrader-account-card">
+                <span className={`dtrader-acc-type ${isDemo ? 'demo' : 'real'}`}>
+                  {isDemo ? 'Demo account' : 'Real account'}
+                </span>
+                <strong className="dtrader-acc-balance">
+                  {formatCurrency(activeBalance ?? 0).replace('$', '')} {activeCurrency}
+                </strong>
+              </div>
+              {isDemo && linkedRealAccount && onSwitchAccount && (
+                <button type="button" className="dtrader-switch-real-btn"
+                  onClick={() => onSwitchAccount(linkedRealAccount.loginid)}
+                  title="Switch to Real Account">
+                  Try real
+                </button>
+              )}
+              {!isDemo && linkedDemoAccount && onSwitchAccount && (
+                <button type="button" className="dtrader-switch-demo-btn"
+                  onClick={() => onSwitchAccount(linkedDemoAccount.loginid)}
+                  title="Switch to Demo Account">
+                  Use demo
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="dtrader-not-connected">
+              <span>No account connected</span>
+              <span className="dtrader-not-connected-hint">Connect Deriv in Settings to trade</span>
+            </div>
           )}
         </div>
       </div>
@@ -1473,7 +1474,7 @@ export function ManualTrader({
           <button
             type="button"
             className={`dtrader-buy-action-btn ${tradeBtnColor}`}
-            disabled={isSubmitting || (activeContract !== null && activeContract.status === 'running')}
+            disabled={!derivConnected || isSubmitting || (activeContract !== null && activeContract.status === 'running')}
             onClick={() => void handleBuy()}
           >
             {isSubmitting ? (
@@ -1481,6 +1482,8 @@ export function ManualTrader({
                 <RefreshCw size={18} className="spin" />
                 Purchasing contract…
               </span>
+            ) : !derivConnected ? (
+              <strong className="buy-headline">Connect Deriv to trade</strong>
             ) : (
               <>
                 <strong className="buy-headline">Buy {tradeLabel}</strong>

@@ -1394,6 +1394,22 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   font-family: 'DM Mono', monospace;
 }
 
+.dtrader-not-connected {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.dtrader-not-connected span:first-child {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4a6a64;
+}
+.dtrader-not-connected-hint {
+  font-size: 10px;
+  color: #2d4a45;
+}
+
 .dtrader-switch-real-btn {
   background: #ef4444;
   border: none;
