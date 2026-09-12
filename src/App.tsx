@@ -1695,11 +1695,13 @@ function App() {
             className="sidebar-brand-logo"
           />
         </div>
-        <div className="workspace-chip">
-          <span className="live-dot" />{' '}
-          {derivConnected ? (isDerivReal ? (liveArmed ? 'Deriv Live (ARMED)' : 'Deriv Real (Safe)') : 'Deriv Demo') : 'Synthetic workspace'}{' '}
-          <b>{derivConnected ? (isDerivReal ? (liveArmed ? 'LIVE' : 'SAFE') : 'DEMO') : 'DEMO'}</b>
-        </div>
+        {derivConnected && (
+          <div className="workspace-chip">
+            <span className="live-dot" />{' '}
+            {isDerivReal ? (liveArmed ? 'Deriv Live (ARMED)' : 'Deriv Real (Safe)') : 'Deriv Demo'}{' '}
+            <b>{isDerivReal ? (liveArmed ? 'LIVE' : 'SAFE') : 'DEMO'}</b>
+          </div>
+        )}
         <nav>
           {nav.map(({ key, label, icon: Icon }) => (
             <button
@@ -1833,10 +1835,21 @@ function App() {
               </button>
             </div>
             <div className="balance topbar-balance">
-              <span className="balance-label hide-mobile">
-                {derivConnected ? (isDerivReal ? (liveArmed ? 'Deriv live' : 'Deriv real') : 'Deriv demo') : 'Demo balance'}
-              </span>
-              <strong>{money(derivConnected ? (deriv.account?.balance ?? 0) : (workspace?.balance ?? 0))}</strong>
+              {derivConnected ? (
+                <>
+                  <span className="balance-label hide-mobile">
+                    {isDerivReal ? (liveArmed ? 'Deriv live' : 'Deriv real') : 'Deriv demo'}
+                  </span>
+                  <strong>{money(deriv.account?.balance ?? 0)}</strong>
+                </>
+              ) : (
+                <button
+                  className="connect-deriv-topbar-btn"
+                  onClick={() => setPage('settings')}
+                >
+                  Connect Deriv
+                </button>
+              )}
             </div>
           </div>
         </header>
@@ -2259,10 +2272,12 @@ function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivCon
     (t) => (t.result === 'won' || t.result === 'lost') && new Date(t.created_at).getTime() >= sessionStartMs
   );
   const pnl = sessionTrades.reduce((sum, trade) => sum + Number(trade.profit), 0); const active = bots.filter((bot) => bot.active);
-  const balanceValue = derivConnected && derivAccount ? derivAccount.balance : workspace.balance;
-  const balanceLabel = derivConnected && derivAccount ? (isDerivReal ? 'Deriv live account' : 'Deriv demo account') : (workspace.mode === 'demo' ? 'Demo account' : 'Live account');
-  const headerDesc = derivConnected ? (isDerivReal ? "You're connected to a real Deriv account. Trades will execute with real funds." : "You're connected to a Deriv demo account. Trades execute on Deriv with virtual funds.") : "Your synthetic trading workspace is running smoothly. Review your guardrails before you deploy.";
-  return <><PageHeader eyebrow="Overview / Today" title="Good morning, trader." description={headerDesc} action={<button className="primary" onClick={() => setPage('manual')}><Plus size={16} /> New trade</button>} /><div className="stats-grid"><Stat label="Available balance" value={money(balanceValue)} detail={balanceLabel} tone="success" icon={Wallet} /><Stat label="Session P/L" value={money(pnl)} detail={`${trades.filter((trade) => trade.profit > 0).length} winning trades`} tone={pnl >= 0 ? 'success' : 'danger'} icon={pnl >= 0 ? TrendingUp : TrendingDown} /><Stat label="Active bots" value={String(active.length)} detail={`${bots.length} in library`} icon={Bot} /><Stat label="Market status" value="Open" detail={derivConnected ? "Deriv feeds online" : "Synthetic feeds online"} tone="success" icon={Activity} /></div><div className="grid-2"><section className="panel"><div className="panel-title"><div><span className="eyebrow">Live automation</span><h2>Active bots</h2></div><button className="text-button" onClick={() => setPage('bots')}>View library <ChevronRight size={15} /></button></div>{active.length ? active.map((bot) => {
+  const balanceValue = derivConnected && derivAccount ? derivAccount.balance : null;
+  const balanceLabel = derivConnected && derivAccount ? (isDerivReal ? 'Deriv live account' : 'Deriv demo account') : null;
+  const headerDesc = derivConnected
+    ? (isDerivReal ? "You're connected to a real Deriv account. Trades will execute with real funds." : "You're connected to a Deriv demo account. Trades execute on Deriv with virtual funds.")
+    : "Connect your Deriv account to start trading. Go to Settings to connect.";
+  return <><PageHeader eyebrow="Overview / Today" title="Good morning, trader." description={headerDesc} action={derivConnected ? <button className="primary" onClick={() => setPage('manual')}><Plus size={16} /> New trade</button> : <button className="primary" onClick={() => setPage('settings')}><Wallet size={16} /> Connect Deriv</button>} /><div className="stats-grid"><Stat label="Available balance" value={balanceValue !== null ? money(balanceValue) : '—'} detail={balanceLabel ?? 'Connect Deriv to see balance'} tone={balanceValue !== null ? 'success' : undefined} icon={Wallet} /><Stat label="Session P/L" value={derivConnected ? money(pnl) : '—'} detail={derivConnected ? `${trades.filter((trade) => trade.profit > 0).length} winning trades` : 'No active session'} tone={pnl >= 0 ? 'success' : 'danger'} icon={pnl >= 0 ? TrendingUp : TrendingDown} /><Stat label="Active bots" value={String(active.length)} detail={`${bots.length} in library`} icon={Bot} /><Stat label="Market status" value="Open" detail={derivConnected ? "Deriv feeds online" : "Connect Deriv to trade"} tone={derivConnected ? 'success' : undefined} icon={Activity} /></div><div className="grid-2"><section className="panel"><div className="panel-title"><div><span className="eyebrow">Live automation</span><h2>Active bots</h2></div><button className="text-button" onClick={() => setPage('bots')}>View library <ChevronRight size={15} /></button></div>{active.length ? active.map((bot) => {
     const botTrades = trades.filter((trade) => trade.bot_name === bot.name);
     const closed = botTrades.filter((t) => t.result === 'won' || t.result === 'lost');
     const hasTrades = closed.length > 0;
@@ -3611,7 +3626,7 @@ function Settings({
   onRequestBotLiveConfirm: (onConfirm: () => void) => void;
 }) {
   const [limitInput, setLimitInput] = useState(String(Math.max(1, Number(workspace.loss_limit ?? 50))));
-  const activeBalance = derivConnected && deriv.account ? deriv.account.balance : workspace.balance;
+  const activeBalance = derivConnected && deriv.account ? deriv.account.balance : null;
   const parsedLimit = Math.max(1, Math.min(100000, Number(limitInput) || lossLimit));
 
   useEffect(() => {
@@ -3835,17 +3850,16 @@ function Settings({
 
         <section className="panel reset-panel">
           <span className="eyebrow">Reset controls</span>
-          <h2>Start a clean demo session</h2>
-          <p className="muted">Resetting returns the synthetic demo balance to $10,000 and clears the session loss counter. Your track record stays available for review.</p>
+          <h2>Reset session baseline</h2>
+          <p className="muted">Resets the session loss counter to your current Deriv balance. Use this after funding your account or starting a new trading session.</p>
           <button
             className="secondary"
             onClick={() => {
-              void updateWorkspace({ balance: workspace.starting_balance });
               resetSessionBaseline();
-              setNotice('Demo balance reset to $10,000. Session loss counter cleared.');
+              setNotice('Session baseline reset. Loss counter cleared.');
             }}
           >
-            <RefreshCw size={16} /> Reset balance & session
+            <RefreshCw size={16} /> Reset session baseline
           </button>
         </section>
       </div>

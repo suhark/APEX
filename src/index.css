@@ -511,6 +511,34 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   color: #fee2e2;
 }
 
+/* Connect Deriv CTA in topbar — shown when no account is connected */
+.connect-deriv-topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #2dd4bf;
+  background: linear-gradient(135deg, #0d2e29, #0f3832);
+  color: #2dd4bf;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.03em;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 0 0 #2dd4bf00;
+  animation: pulse-connect 2.4s infinite;
+}
+.connect-deriv-topbar-btn:hover {
+  background: linear-gradient(135deg, #14382f, #1a4840);
+  box-shadow: 0 4px 14px rgba(45, 212, 191, 0.25);
+  transform: translateY(-1px);
+}
+@keyframes pulse-connect {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45,212,191,0.3); }
+  50%       { box-shadow: 0 0 0 5px rgba(45,212,191,0); }
+}
+
 /* Switch to Real button in topbar */
 .arm-action-btn.switch-real {
   background: #1e1b4b;
