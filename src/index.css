@@ -1181,22 +1181,17 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 /* ==========================================================================
    DERIV DTRADER MANUAL TRADING TERMINAL & CHART
    ========================================================================== */
-/* Manual Trader — full-bleed layout (no page padding) */
+/* Manual Trader — full-bleed layout, normal page scroll */
 .page-content--trader {
   padding: 0 !important;
   max-width: 100% !important;
-  overflow: hidden !important;
+  overflow-y: auto !important;
   flex: 1 !important;
-  display: flex !important;
-  flex-direction: column !important;
+  display: block !important;
 }
 
 .page-content--trader .dtrader-container {
-  padding: 14px 18px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  padding: 14px 18px 32px;
 }
 
 .dtrader-container {
@@ -1204,9 +1199,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  height: 100%;
   box-sizing: border-box;
-  overflow: hidden;
 }
 
 /* Top Bar: Asset Selector & Account Status */
@@ -1442,23 +1435,18 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   background: #d97706;
 }
 
-/* Main Terminal Grid: Chart + Ticket */
+/* Main Terminal Grid: Chart + Ticket — normal flow, no fixed heights */
 .dtrader-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 310px;
-  grid-template-rows: 1fr;        /* single row that fills the flex parent */
   gap: 12px;
-  align-items: stretch;
+  align-items: start;
   min-width: 0;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
 }
 
 @media (max-width: 960px) {
   .dtrader-grid {
     grid-template-columns: 1fr;
-    overflow-y: auto;
   }
 }
 
@@ -1505,7 +1493,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-height: 0;
+  height: 580px;
 }
 
 .dtrader-chart-header {
@@ -1849,8 +1837,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 
 @media (max-width: 768px) {
   .dtrader-chart-panel {
-    min-height: 280px;
-    height: 340px;
+    height: 360px;
   }
   .dtrader-y-axis {
     width: 52px;
@@ -1880,6 +1867,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 }
 
 /* Right Execution Ticket Panel */
+/* Right Execution Ticket Panel — renders full height, page scrolls naturally */
 .dtrader-ticket-panel {
   background: #0a1412;
   border: 1px solid #1a2f2b;
@@ -1888,11 +1876,6 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   display: flex;
   flex-direction: column;
   gap: 14px;
-  /* Fill the grid cell height — let the grid control sizing, not a fixed calc */
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
 }
 
 .dtrader-ticket-top {
