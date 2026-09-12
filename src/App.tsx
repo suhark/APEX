@@ -812,7 +812,14 @@ function App() {
       }
 
       botsData = (botsResult.data as BotRow[]).map((bot) => {
-        const userBotTrades = tradesData.filter(
+        // Always compute bot stats from Deriv trades only — filter by loginid if known.
+        // This ensures stats persist across disconnect/reconnect for the same account.
+        const derivLoginid = ws?.deriv_loginid ?? null;
+        const botContext = derivLoginid ? `deriv_${derivLoginid}` : null;
+        const contextFiltered = botContext
+          ? filterTradesByContext(tradesData, botContext)
+          : tradesData.filter(t => t.execution_context === 'deriv');
+        const userBotTrades = contextFiltered.filter(
           (t) => t.bot_name === bot.name && (t.result === 'won' || t.result === 'lost')
         );
         const botWins = userBotTrades.filter((t) => t.result === 'won').length;
@@ -1148,10 +1155,13 @@ function App() {
 
     const sessionStartBal = sessionStartingBalRef.current ?? (derivConnected && deriv.account ? deriv.account.balance : ws.starting_balance);
     const sessionCurrentBal = derivConnected && deriv.account ? deriv.account.balance : ws.balance;
+    // Use Deriv loginid context for session loss — single source of truth
+    const activeLoginid = derivAccountRef.current?.loginid ?? ws.deriv_loginid ?? null;
+    const tradeContext = activeLoginid ? `deriv_${activeLoginid}` : 'synthetic';
     const sessionLossUsed = computeSessionLoss(
       sessionStartBal,
       sessionCurrentBal,
-      tradesRef.current,
+      filterTradesByContext(tradesRef.current, tradeContext),
       sessionStartAtRef.current,
     );
     if (sessionLossUsed >= ws.loss_limit) {
@@ -1351,87 +1361,13 @@ function App() {
       return;
     }
 
-    // Fallback: Synthetic simulation when Deriv is not connected
-    if (details.stake <= 0 || details.stake > ws.balance) { setNotice('Stake must be greater than zero and within your balance.'); return; }
-    const index = instruments.indexOf(details.instrument);
-    const entry = priceFor(Math.max(index, 0), tick);
-    const win = Math.random() > 0.42;
-    const profit = Number((details.stake * (win ? 0.78 : -1)).toFixed(2));
-    const exit = Number((entry + (win ? (details.direction === 'CALL' ? 1 : -1) : (details.direction === 'CALL' ? -1 : 1)) * (0.3 + Math.random() * 1.5)).toFixed(2));
-    
-    const tradeId = (typeof crypto !== 'undefined' && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : `sim_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-    const trade: Trade = {
-      id: tradeId,
-      user_id: userRef.current?.id ?? null,
-      instrument: details.instrument,
-      direction: details.direction,
-      stake: details.stake,
-      result: win ? 'won' : 'lost',
-      profit,
-      source: details.source,
-      bot_name: details.botName,
-      entry_price: entry,
-      exit_price: exit,
-      created_at: new Date().toISOString(),
-      execution_context: 'synthetic',
-      deriv_loginid: null,
-    };
-
-    // Immediately persist trade to local storage and state
-    persistTrade(trade);
-
-    // Background insert to Supabase
-    void (async () => {
-      try {
-        const { error: insErr } = await supabase.from('trading_trades').insert(trade);
-        if (insErr) {
-          const { user_id: _uid, ...tradeNoUser } = trade;
-          await supabase.from('trading_trades').insert(tradeNoUser);
-        }
-      } catch { /* ignore */ }
-    })();
-
-    await updateWorkspace({ balance: Number((ws.balance + profit).toFixed(2)) });
-    if (details.botName) {
-      updateBotStatsFromTrade(details.botName, profit, win);
-      // STP-V3 consecutive loss tracking (synthetic path)
-      if (details.botName === 'Trend Pullback V3') {
-        if (!win) {
-          stpV3StateRef.current.consecutiveLosses += 1;
-          stpV3StateRef.current.lastLossTime = Date.now();
-        } else {
-          stpV3StateRef.current.consecutiveLosses = 0;
-        }
-      }
-    }
-    const newBalance = Number((ws.balance + profit).toFixed(2));
-    const settledTrades = [trade, ...tradesRef.current.filter((item) => item.id !== trade.id)];
-    const postLoss = computeSessionLoss(
-      sessionStartBal,
-      newBalance,
-      settledTrades,
-      sessionStartAtRef.current,
-    );
-    setTradeAlert({
-      id: Date.now(),
-      status: win ? 'won' : 'lost',
-      direction: details.direction,
-      instrument: details.instrument,
-      profit,
-      stake: details.stake,
-      botName: details.botName,
-      accountType: 'Demo',
-      sessionLossAfter: postLoss,
-    });
-    if (postLoss >= ws.loss_limit) {
-      stopAllBots();
-      setNotice(`Session loss limit (${money(ws.loss_limit)}) reached. All bots stopped. Reset the session baseline in Settings to resume.`);
-    } else {
-      setNotice(`${win ? '🎉' : '📉'} ${details.direction} trade ${win ? 'WON' : 'LOST'} ${win ? '+' : ''}${money(profit)}`);
-    }
+    // ── Deriv is NOT connected — block all trading ─────────────────────────
+    // Synthetic simulation has been removed. Users must connect a Deriv account
+    // to place any trade (demo or real). The chart is still fully functional.
+    const msg = details.source === 'bot' || details.source === 'quick_bot' || details.source === 'bulk'
+      ? 'Connect a Deriv account to run bots. Go to Settings → Connect Deriv.'
+      : 'Connect your Deriv account to place trades. Go to Settings → Connect Deriv.';
+    setNotice(msg);
   };
 
   // Deactivates every running bot — called when the session loss limit is hit
@@ -1484,8 +1420,11 @@ function App() {
       const loopStartBal = sessionStartingBalRef.current ?? ws.starting_balance;
       const loopCurrentBal = derivConnectedRef.current && derivAccountRef.current
         ? derivAccountRef.current.balance
-        : ws.balance;
-      const loopLossUsed = computeSessionLoss(loopStartBal, loopCurrentBal, tradesRef.current, sessionStartAtRef.current);
+        : 0; // no balance without Deriv — bots will be blocked by runTrade guard
+      // Use Deriv loginid context for loop session loss check
+      const loopLoginid = derivAccountRef.current?.loginid ?? ws.deriv_loginid ?? null;
+      const loopContext = loopLoginid ? `deriv_${loopLoginid}` : 'synthetic';
+      const loopLossUsed = computeSessionLoss(loopStartBal, loopCurrentBal, filterTradesByContext(tradesRef.current, loopContext), sessionStartAtRef.current);
       if (loopLossUsed >= ws.loss_limit) {
         stopAllBots();
         return;
@@ -1595,7 +1534,7 @@ function App() {
           direction  = signal.direction;
           const stpBal = derivConnectedRef.current && derivAccountRef.current
             ? derivAccountRef.current.balance
-            : (workspaceRef.current?.balance ?? 1000);
+            : 1000; // fallback — runTrade will block this if Deriv isn't connected
           if (cfg.stakeMode === 'percent') {
             stake = Math.min(cfg.stakeMax, Math.max(cfg.stakeMin, Number((stpBal * cfg.stakeValue / 100).toFixed(2))));
           } else {
@@ -1621,17 +1560,18 @@ function App() {
   const activeBalance = derivConnected && deriv.account ? deriv.account.balance : (workspace?.balance ?? 0);
   const sessionStartBalance = sessionStartingBalance ?? activeBalance;
 
-  // ── Stable context key ─────────────────────────────────────────────────────
-  // Falls back to the last known Deriv loginid (from workspace) while reconnecting
-  // so trades and stats stay visible during the 'connecting' → 'connected' transition.
+  // ── Single source of truth for context & session loss ─────────────────────
+  // statsContext is ALWAYS keyed to the Deriv loginid — this ensures trade
+  // history, bot stats, and session loss are consistent across disconnect/reconnect.
+  // Falls back to workspace.deriv_loginid during reconnect so the UI never flickers.
   const activeDerivLoginid = deriv.account?.loginid ?? workspace?.deriv_loginid ?? null;
-  const isDerivContext = derivConnected || (workspace?.deriv_connected && activeDerivLoginid);
-  const statsContext = isDerivContext && activeDerivLoginid
+  const statsContext = activeDerivLoginid
     ? `deriv_${activeDerivLoginid}`
-    : getStatsContext(derivConnected, deriv.account);
+    : 'synthetic'; // only if the user has literally never connected Deriv
 
-  // Use  context-filtered trades so the session loss guardrail only counts
-  // trades from the currently active account (synthetic or specific Deriv loginid)
+  // Session loss: purely Deriv-balance-based when connected.
+  // When disconnected, use last-known sessionStartBalance vs current balance.
+  // Never mix synthetic workspace.balance into Deriv session loss.
   const sessionContextTrades = useMemo(
     () => filterTradesByContext(trades, statsContext),
     [trades, statsContext],
