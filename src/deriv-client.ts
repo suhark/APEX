@@ -657,7 +657,7 @@ export function subscribeContract(contractId: number, cb: (result: DerivTradeRes
 
 export async function executeTrade(params: {
   symbol: DerivSymbol;
-  contract_type: 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF' | 'ACCU';
+  contract_type: 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF' | 'ACCU' | 'ASIANU' | 'ASIAND';
   stake: number;
   duration: number;
   barrier?: number;

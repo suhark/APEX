@@ -18,7 +18,7 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY ?? '',
 );
 
-type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings';
+type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift';
 type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 
@@ -43,7 +43,28 @@ interface StpConfig {
 interface DefaultBotConfig {
   stake: number;                  // fixed stake, default 10
 }
-type BotConfig = PhantomConfig | StpConfig | DefaultBotConfig;
+// ── Digit Surge config ────────────────────────────────────────────────────────
+interface DigitSurgeConfig {
+  stake: number;                  // fixed stake, default 5
+  lookback: number;               // ticks to analyse parity pattern, default 8
+  biasThreshold: number;          // parity imbalance needed to fire, 0–1, default 0.75
+  maxConsecLosses: number;        // consecutive losses before pause, default 3
+}
+// ── Boom/Crash Rider config ───────────────────────────────────────────────────
+interface BoomCrashConfig {
+  stake: number;                  // fixed stake, default 8
+  spikeThreshold: number;         // % move in last tick to confirm spike, default 0.30
+  trendTicks: number;             // ticks used for pre-spike trend, default 10
+  cooldownMs: number;             // ms cooldown after a spike trade, default 20000
+}
+// ── Asian Drift config ────────────────────────────────────────────────────────
+interface AsianDriftConfig {
+  stake: number;                  // fixed stake, default 6
+  maPeriod: number;               // moving-average period for drift, default 12
+  driftThreshold: number;         // min |close-MA|/MA ratio to fire, default 0.0012
+  durationTicks: number;          // contract duration ticks, default 10
+}
+type BotConfig = PhantomConfig | StpConfig | DefaultBotConfig | DigitSurgeConfig | BoomCrashConfig | AsianDriftConfig;
 
 function getBotConfigKey(userId: string, botName: string) {
   return `apex_bot_cfg_${userId}_${botName.replace(/\s+/g, '_')}`;
@@ -70,6 +91,9 @@ const STP_DEFAULTS: StpConfig = {
   scoreThreshold: 75, adxMin: 22, cooldownMinutes: 15,
 };
 const DEFAULT_BOT_DEFAULTS: DefaultBotConfig = { stake: 10 };
+const DIGIT_SURGE_DEFAULTS: DigitSurgeConfig   = { stake: 5, lookback: 8, biasThreshold: 0.75, maxConsecLosses: 3 };
+const BOOM_CRASH_DEFAULTS: BoomCrashConfig      = { stake: 8, spikeThreshold: 0.30, trendTicks: 10, cooldownMs: 20000 };
+const ASIAN_DRIFT_DEFAULTS: AsianDriftConfig    = { stake: 6, maPeriod: 12, driftThreshold: 0.0012, durationTicks: 10 };
 type Workspace = { id: string; user_id?: string | null; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null; active_bots?: string[] | null };
 
 type TradeAlert = {
@@ -92,6 +116,9 @@ const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'quick', label: 'Quick Bot', icon: Zap }, { key: 'apex', label: 'Apex Bot', icon: Rocket },
   { key: 'phantom', label: 'Phantom Scalper', icon: Ghost },
   { key: 'stpv3', label: 'Trend Pullback V3', icon: CandlestickChart },
+  { key: 'digitsurge', label: 'Digit Surge', icon: Hash },
+  { key: 'boomcrash', label: 'Boom/Crash Rider', icon: Zap },
+  { key: 'asiandrift', label: 'Asian Drift', icon: Globe },
   { key: 'digits', label: 'Digits Analyser', icon: Hash },
   { key: 'record', label: 'Track Record', icon: LineChart }, { key: 'settings', label: 'Settings', icon: Settings2 },
 ];
@@ -473,7 +500,7 @@ function App() {
   const [authChecking, setAuthChecking] = useState(true);
   const [page, setPageState] = useState<Page>(() => {
     const saved = sessionStorage.getItem('apex_page');
-    const valid: Page[] = ['dashboard','bots','manual','builder','signals','bulk','quick','apex','phantom','stpv3','digits','record','settings'];
+    const valid: Page[] = ['dashboard','bots','manual','builder','signals','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
     return (saved && valid.includes(saved as Page)) ? saved as Page : 'dashboard';
   });
   const setPage = (p: Page) => { sessionStorage.setItem('apex_page', p); setPageState(p); };
@@ -523,6 +550,8 @@ function App() {
     consecutiveLosses: 0,
     lastLossTime: 0,
   });
+  // Boom/Crash Rider runtime state — tracks last trade time for cooldown
+  const boomCrashStateRef = useRef<{ lastTradeTime: number }>({ lastTradeTime: 0 });
   // Per-bot live-readable config (read in the setInterval closure)
   const botConfigRef = useRef<Record<string, BotConfig>>({});
   // Live signal status per bot — shown on the dedicated pages
@@ -862,8 +891,11 @@ function App() {
     );
     botConfigRef.current = {
       ...defaultCfgs,
-      'Phantom Scalper': loadBotConfig(currentUser.id, 'Phantom Scalper', PHANTOM_DEFAULTS),
+      'Phantom Scalper':  loadBotConfig(currentUser.id, 'Phantom Scalper',  PHANTOM_DEFAULTS),
       'Trend Pullback V3': loadBotConfig(currentUser.id, 'Trend Pullback V3', STP_DEFAULTS),
+      'Digit Surge':      loadBotConfig(currentUser.id, 'Digit Surge',      DIGIT_SURGE_DEFAULTS),
+      'Boom/Crash Rider': loadBotConfig(currentUser.id, 'Boom/Crash Rider', BOOM_CRASH_DEFAULTS),
+      'Asian Drift':      loadBotConfig(currentUser.id, 'Asian Drift',      ASIAN_DRIFT_DEFAULTS),
     };
     setLoading(false);
 
@@ -1440,8 +1472,9 @@ function App() {
         if (botPendingTradesRef.current.has(bot.name)) return;
 
         let instrument: string;
-        let direction: 'CALL' | 'PUT';
+        let direction: 'CALL' | 'PUT' | string;
         let stake: number;
+        let botDuration: number | undefined = undefined;
 
         if (bot.name === 'Phantom Scalper') {
           // ── Phantom Scalper: multi-signal strategy ──────────────────────────
@@ -1545,6 +1578,116 @@ function App() {
           } else {
             stake = Math.max(1, cfg.stakeValue);
           }
+        } else if (bot.name === 'Digit Surge') {
+          // ── Digit Surge: Even/Odd parity bias on fast 1s indices ─────────
+          // Strategy: track last N ticks on V10 (1s). If the last digit shows a
+          // strong parity imbalance (≥biasThreshold), trade the dominant side.
+          // After maxConsecLosses pause one cycle. Uses DIGITEVEN / DIGITODD.
+          const cfg = (botConfigRef.current['Digit Surge'] ?? DIGIT_SURGE_DEFAULTS) as DigitSurgeConfig;
+
+          // Consecutive loss guard
+          const dsRecent = tradesRef.current
+            .filter(t => t.bot_name === 'Digit Surge' && (t.result === 'won' || t.result === 'lost'))
+            .slice(0, cfg.maxConsecLosses);
+          const dsConsecLosses = dsRecent.length > 0 && dsRecent.every(t => t.result === 'lost')
+            ? dsRecent.length : 0;
+          if (dsConsecLosses >= cfg.maxConsecLosses) {
+            setBotStatus(s => ({ ...s, 'Digit Surge': `⏸ Paused — ${dsConsecLosses} consecutive losses` }));
+            return;
+          }
+
+          // Parity bias from synthetic tick sequence on instrument index 0 (V10)
+          let evenCount = 0; let oddCount = 0;
+          for (let t = 0; t < cfg.lookback; t++) {
+            const p = priceFor(0, currentTick - t);
+            const lastDigit = Math.round(p * 100) % 10;
+            if (lastDigit % 2 === 0) evenCount++; else oddCount++;
+          }
+          const total = evenCount + oddCount;
+          const evenBias = evenCount / total;
+          const oddBias  = oddCount / total;
+
+          if (Math.max(evenBias, oddBias) < cfg.biasThreshold) {
+            setBotStatus(s => ({ ...s, 'Digit Surge': `🔍 Scanning — bias ${(Math.max(evenBias, oddBias) * 100).toFixed(0)}% < ${(cfg.biasThreshold * 100).toFixed(0)}%` }));
+            return;
+          }
+
+          const digitDir = evenBias >= oddBias ? 'DIGITEVEN' : 'DIGITODD';
+          setBotStatus(s => ({ ...s, 'Digit Surge': `✅ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias, oddBias) * 100).toFixed(0)}%` }));
+          instrument = 'Volatility 10 (1s) Index';
+          direction  = digitDir;
+          stake      = Math.max(0.35, cfg.stake);
+
+        } else if (bot.name === 'Boom/Crash Rider') {
+          // ── Boom/Crash Rider: pre-spike setup on Boom/Crash indices ──────
+          // Boom 1000: periodic sharp upward spikes preceded by a quiet drift
+          // downward. We wait for ≥70% falling ticks + price compression
+          // (last move < threshold × avg move), then buy CALL on Boom 1000.
+          // Mirror logic for Crash 1000 with rising ticks → PUT.
+          const cfg = (botConfigRef.current['Boom/Crash Rider'] ?? BOOM_CRASH_DEFAULTS) as BoomCrashConfig;
+
+          const bcState = boomCrashStateRef.current;
+          if (Date.now() - bcState.lastTradeTime < cfg.cooldownMs) {
+            const remain = Math.ceil((cfg.cooldownMs - (Date.now() - bcState.lastTradeTime)) / 1000);
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `⏸ Cooldown — ${remain}s` }));
+            return;
+          }
+
+          let fallingTicks = 0; let risingTicks = 0;
+          for (let t = 1; t <= cfg.trendTicks; t++) {
+            const prev = priceFor(2, currentTick - t);
+            const cur  = priceFor(2, currentTick - t + 1);
+            if (cur < prev) fallingTicks++; else if (cur > prev) risingTicks++;
+          }
+
+          const lastMove = Math.abs(priceFor(2, currentTick) - priceFor(2, currentTick - 1));
+          const avgMove  = Math.abs(priceFor(2, currentTick) - priceFor(2, currentTick - cfg.trendTicks)) / cfg.trendTicks || 0.001;
+          const compressed = lastMove < avgMove * cfg.spikeThreshold;
+          const strongFall = fallingTicks >= Math.ceil(cfg.trendTicks * 0.70);
+          const strongRise = risingTicks  >= Math.ceil(cfg.trendTicks * 0.70);
+
+          if (strongFall && compressed) {
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ BOOM setup — ${fallingTicks}/${cfg.trendTicks} fall + compression` }));
+            instrument = 'Boom 1000 Index';
+            direction  = 'CALL';
+          } else if (strongRise && compressed) {
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ CRASH setup — ${risingTicks}/${cfg.trendTicks} rise + compression` }));
+            instrument = 'Crash 1000 Index';
+            direction  = 'PUT';
+          } else {
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔍 Scanning — fall:${fallingTicks} rise:${risingTicks}` }));
+            return;
+          }
+
+          stake = Math.max(0.35, cfg.stake);
+          boomCrashStateRef.current.lastTradeTime = Date.now();
+
+        } else if (bot.name === 'Asian Drift') {
+          // ── Asian Drift: MA drift → Asian Up/Down on V50 ─────────────────
+          // Asian options settle on the average price of all ticks during the
+          // contract. ASIANU wins if the final spot > average; ASIAND if below.
+          // Signal: if current price is significantly above the MA the average
+          // will lag behind the close → back ASIANU. Below MA → ASIAND.
+          const cfg = (botConfigRef.current['Asian Drift'] ?? ASIAN_DRIFT_DEFAULTS) as AsianDriftConfig;
+
+          let maSum = 0;
+          for (let t = 0; t < cfg.maPeriod; t++) maSum += priceFor(2, currentTick - t);
+          const ma    = maSum / cfg.maPeriod;
+          const close = priceFor(2, currentTick);
+          const drift = (close - ma) / (ma || 1);
+
+          if (Math.abs(drift) < cfg.driftThreshold) {
+            setBotStatus(s => ({ ...s, 'Asian Drift': `🔍 Scanning — drift ${(drift * 100).toFixed(3)}%` }));
+            return;
+          }
+
+          const asianDir = drift > 0 ? 'ASIANU' : 'ASIAND';
+          setBotStatus(s => ({ ...s, 'Asian Drift': `✅ ASIAN ${drift > 0 ? 'UP' : 'DOWN'} drift ${(Math.abs(drift) * 100).toFixed(3)}%` }));
+          instrument = 'Volatility 50 Index';
+          direction  = asianDir;
+          stake      = Math.max(0.35, cfg.stake);
+          botDuration = cfg.durationTicks;
+
         } else {
           // Default strategy for all other bots — stake from config
           const cfg = (botConfigRef.current[bot.name] ?? DEFAULT_BOT_DEFAULTS) as DefaultBotConfig;
@@ -1553,7 +1696,7 @@ function App() {
           stake      = Math.max(1, cfg.stake);
         }
 
-        void runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name });
+        void runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name, duration: botDuration });
       });
     }, 5000);
     return () => window.clearInterval(interval);
@@ -2048,6 +2191,9 @@ function PageView({
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
   if (page === 'phantom') return <PhantomScalper bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Phantom Scalper', cfg)} initialConfig={botConfig?.['Phantom Scalper'] as PhantomConfig | undefined} />;
   if (page === 'stpv3') return <TrendPullbackV3 bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Trend Pullback V3', cfg)} initialConfig={botConfig?.['Trend Pullback V3'] as StpConfig | undefined} />;
+  if (page === 'digitsurge') return <DigitSurge bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Digit Surge', cfg)} initialConfig={botConfig?.['Digit Surge'] as DigitSurgeConfig | undefined} />;
+  if (page === 'boomcrash') return <BoomCrashRider bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Boom/Crash Rider', cfg)} initialConfig={botConfig?.['Boom/Crash Rider'] as BoomCrashConfig | undefined} />;
+  if (page === 'asiandrift') return <AsianDrift bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Asian Drift', cfg)} initialConfig={botConfig?.['Asian Drift'] as AsianDriftConfig | undefined} />;
   if (page === 'digits') return <DigitsAnalyser derivConnected={derivConnected} tick={tick} runTrade={runTrade} derivAccount={deriv.account} workspaceBalance={workspace?.balance ?? 0} />;
   if (page === 'record') return <Record trades={trades} />;
   return (
@@ -3481,6 +3627,339 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
       </section>
     </>
   );
+}
+
+// ── Digit Surge page ──────────────────────────────────────────────────────────
+function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
+  bots: BotRow[];
+  toggleBot: (bot: BotRow) => Promise<void>;
+  trades: Trade[];
+  botStatus: Record<string, string>;
+  onSaveConfig: (cfg: BotConfig) => void;
+  initialConfig?: DigitSurgeConfig;
+}) {
+  const bot = bots.find(b => b.name === 'Digit Surge');
+  const botTrades = trades.filter(t => t.bot_name === 'Digit Surge');
+  const closed = botTrades.filter(t => t.result === 'won' || t.result === 'lost');
+  const hasUserTrades = closed.length > 0;
+  const displayWinRate = hasUserTrades
+    ? `${Math.round((closed.filter(t => t.result === 'won').length / closed.length) * 100)}%`
+    : '—';
+
+  const [cfg, setCfg] = useState<DigitSurgeConfig>(initialConfig ?? DIGIT_SURGE_DEFAULTS);
+  const save = (c: DigitSurgeConfig) => { setCfg(c); onSaveConfig(c); };
+
+  if (!bot) return (
+    <section className="panel">
+      <span className="eyebrow">Bot not found</span>
+      <h2>Digit Surge not in database</h2>
+      <p className="muted">Run the SQL below in your Supabase SQL Editor:</p>
+      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Digit Surge','Parity bias engine on Volatility 10 (1s) Index. Scans the last 8 ticks for even/odd imbalance — enters DIGITEVEN or DIGITODD when bias exceeds 75%. Pauses after 3 consecutive losses.','Low',true,68,420)\nON CONFLICT (name) DO NOTHING;`}</pre>
+    </section>
+  );
+
+  return <>
+    <PageHeader eyebrow="Digit strategy" title="Digit Surge"
+      description="Trades Even/Odd digits on Volatility 10 (1s) Index. Uses parity bias — when the last 8 ticks show 75%+ even or odd endings, enters the dominant side."
+      action={<button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
+        {bot.active ? <><Pause size={16} /> Pause</> : <><Hash size={16} /> Start</>}
+      </button>} />
+
+    <div className="apex-banner">
+      <div>
+        <span className="pro-tag">DIGIT BOT</span>
+        <h2>Parity bias. Precise entry.</h2>
+        <p>Every 5 seconds the bot scans the last 8 ticks on V10 (1s). If 75% or more land on even or odd, it enters that side. Pauses automatically after 3 consecutive losses.</p>
+      </div>
+      <div className="apex-score">
+        <strong>{displayWinRate}</strong>
+        <span>{hasUserTrades ? 'Your win rate' : '0 trades · Not run yet'}</span>
+      </div>
+    </div>
+
+    <div className="bot-stats wide">
+      {bot && <BotStats bot={bot} userTrades={botTrades} />}
+    </div>
+
+    <section className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
+      <div>
+        <span className="eyebrow">Bot control</span>
+        <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Digit Surge is running' : 'Digit Surge is paused'}</h2>
+        <p className="muted">{botStatus['Digit Surge'] || (bot.active ? 'Scanning parity…' : 'Start the bot to begin scanning.')}</p>
+      </div>
+      <button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
+        {bot.active ? <><Pause size={16} /> Pause Digit Surge</> : <><Hash size={16} /> Start Digit Surge</>}
+      </button>
+    </section>
+
+    <div className="settings-grid">
+      <section className="panel">
+        <div className="panel-title"><div><span className="eyebrow">Strategy</span><h2>How it works</h2></div></div>
+        {[
+          { s: '01', l: 'Scan parity', d: `Last ${cfg.lookback} ticks on V10 (1s) — count even/odd last digits.` },
+          { s: '02', l: 'Bias gate',   d: `Only enter if dominant side ≥ ${(cfg.biasThreshold*100).toFixed(0)}%. Below threshold = wait.` },
+          { s: '03', l: 'Enter digit', d: 'Buy DIGITEVEN or DIGITODD matching the dominant parity.' },
+          { s: '04', l: 'Loss guard',  d: `Pause for one cycle after ${cfg.maxConsecLosses} consecutive losses.` },
+        ].map(({ s, l, d }) => (
+          <div className="step" key={s}><span>{s}</span><b>{l}</b><p className="muted" style={{ margin: 0, fontSize: '10px' }}>{d}</p></div>
+        ))}
+      </section>
+      <section className="panel">
+        <div className="panel-title"><div><span className="eyebrow">Configuration</span><h2>Parameters</h2></div></div>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <span className="eyebrow">Stake ($)</span>
+          <input type="number" min={0.35} step={0.5} value={cfg.stake}
+            onChange={e => save({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <span className="eyebrow">Lookback ticks</span>
+          <input type="number" min={4} max={20} step={1} value={cfg.lookback}
+            onChange={e => save({ ...cfg, lookback: Math.max(4, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <span className="eyebrow">Bias threshold (0–1)</span>
+          <input type="number" min={0.5} max={1} step={0.05} value={cfg.biasThreshold}
+            onChange={e => save({ ...cfg, biasThreshold: Math.min(1, Math.max(0.5, Number(e.target.value))) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+        <label style={{ display: 'block' }}>
+          <span className="eyebrow">Max consecutive losses before pause</span>
+          <input type="number" min={1} max={10} step={1} value={cfg.maxConsecLosses}
+            onChange={e => save({ ...cfg, maxConsecLosses: Math.max(1, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+      </section>
+    </div>
+
+    <section className="panel">
+      <div className="panel-title"><h2>Digit Surge trade log</h2></div>
+      <TradeTable trades={botTrades} />
+    </section>
+  </>;
+}
+
+// ── Boom/Crash Rider page ─────────────────────────────────────────────────────
+function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
+  bots: BotRow[];
+  toggleBot: (bot: BotRow) => Promise<void>;
+  trades: Trade[];
+  botStatus: Record<string, string>;
+  onSaveConfig: (cfg: BotConfig) => void;
+  initialConfig?: BoomCrashConfig;
+}) {
+  const bot = bots.find(b => b.name === 'Boom/Crash Rider');
+  const botTrades = trades.filter(t => t.bot_name === 'Boom/Crash Rider');
+  const closed = botTrades.filter(t => t.result === 'won' || t.result === 'lost');
+  const hasUserTrades = closed.length > 0;
+  const displayWinRate = hasUserTrades
+    ? `${Math.round((closed.filter(t => t.result === 'won').length / closed.length) * 100)}%`
+    : '—';
+
+  const [cfg, setCfg] = useState<BoomCrashConfig>(initialConfig ?? BOOM_CRASH_DEFAULTS);
+  const save = (c: BoomCrashConfig) => { setCfg(c); onSaveConfig(c); };
+
+  if (!bot) return (
+    <section className="panel">
+      <span className="eyebrow">Bot not found</span>
+      <h2>Boom/Crash Rider not in database</h2>
+      <p className="muted">Run the SQL below in your Supabase SQL Editor:</p>
+      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Boom/Crash Rider','Spike anticipation engine for Boom 1000 and Crash 1000 indices. Waits for 70% directional compression then enters CALL on Boom or PUT on Crash. 20-second cooldown between trades.','Moderate',true,62,215)\nON CONFLICT (name) DO NOTHING;`}</pre>
+    </section>
+  );
+
+  return <>
+    <PageHeader eyebrow="Spike strategy" title="Boom/Crash Rider"
+      description="Anticipates periodic spikes on Boom 1000 and Crash 1000 indices. Enters before the spike, not after it."
+      action={<button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
+        {bot.active ? <><Pause size={16} /> Pause</> : <><Zap size={16} /> Start</>}
+      </button>} />
+
+    <div className="apex-banner" style={{ borderColor: '#614a26' }}>
+      <div>
+        <span className="pro-tag">SPIKE BOT</span>
+        <h2>Ride the spike. Not the noise.</h2>
+        <p>Boom 1000 spikes upward roughly every 1000 ticks. Before each spike, price compresses into a quiet drift. This bot detects that drift + compression pattern and enters CALL on Boom or PUT on Crash with a built-in cooldown to prevent overtrading.</p>
+      </div>
+      <div className="apex-score">
+        <strong>{displayWinRate}</strong>
+        <span>{hasUserTrades ? 'Your win rate' : '0 trades · Not run yet'}</span>
+      </div>
+    </div>
+
+    <div className="bot-stats wide">
+      {bot && <BotStats bot={bot} userTrades={botTrades} />}
+    </div>
+
+    <section className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
+      <div>
+        <span className="eyebrow">Bot control</span>
+        <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Boom/Crash Rider is running' : 'Boom/Crash Rider is paused'}</h2>
+        <p className="muted">{botStatus['Boom/Crash Rider'] || (bot.active ? 'Watching for setup…' : 'Start the bot to begin watching.')}</p>
+      </div>
+      <button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
+        {bot.active ? <><Pause size={16} /> Pause Rider</> : <><Zap size={16} /> Start Rider</>}
+      </button>
+    </section>
+
+    <div className="settings-grid">
+      <section className="panel">
+        <div className="panel-title"><div><span className="eyebrow">Strategy</span><h2>How it works</h2></div></div>
+        {[
+          { s: '01', l: 'Trend scan',      d: `Analyse last ${cfg.trendTicks} ticks — count falling vs rising.` },
+          { s: '02', l: 'Direction gate',  d: `≥70% falling → Boom CALL. ≥70% rising → Crash PUT.` },
+          { s: '03', l: 'Compression check', d: `Last tick move must be < ${(cfg.spikeThreshold*100).toFixed(0)}% of average move — confirms quiet accumulation.` },
+          { s: '04', l: 'Cooldown',        d: `${cfg.cooldownMs / 1000}s minimum between trades to avoid overlapping contracts.` },
+        ].map(({ s, l, d }) => (
+          <div className="step" key={s}><span>{s}</span><b>{l}</b><p className="muted" style={{ margin: 0, fontSize: '10px' }}>{d}</p></div>
+        ))}
+      </section>
+      <section className="panel">
+        <div className="panel-title"><div><span className="eyebrow">Configuration</span><h2>Parameters</h2></div></div>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <span className="eyebrow">Stake ($)</span>
+          <input type="number" min={0.35} step={0.5} value={cfg.stake}
+            onChange={e => save({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <span className="eyebrow">Trend ticks (lookback)</span>
+          <input type="number" min={5} max={30} step={1} value={cfg.trendTicks}
+            onChange={e => save({ ...cfg, trendTicks: Math.max(5, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <span className="eyebrow">Spike threshold (0–1, lower = tighter)</span>
+          <input type="number" min={0.1} max={0.9} step={0.05} value={cfg.spikeThreshold}
+            onChange={e => save({ ...cfg, spikeThreshold: Math.min(0.9, Math.max(0.1, Number(e.target.value))) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+        <label style={{ display: 'block' }}>
+          <span className="eyebrow">Cooldown (ms)</span>
+          <input type="number" min={5000} max={120000} step={5000} value={cfg.cooldownMs}
+            onChange={e => save({ ...cfg, cooldownMs: Math.max(5000, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+      </section>
+    </div>
+
+    <section className="panel">
+      <div className="panel-title"><h2>Boom/Crash Rider trade log</h2></div>
+      <TradeTable trades={botTrades} />
+    </section>
+  </>;
+}
+
+// ── Asian Drift page ──────────────────────────────────────────────────────────
+function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
+  bots: BotRow[];
+  toggleBot: (bot: BotRow) => Promise<void>;
+  trades: Trade[];
+  botStatus: Record<string, string>;
+  onSaveConfig: (cfg: BotConfig) => void;
+  initialConfig?: AsianDriftConfig;
+}) {
+  const bot = bots.find(b => b.name === 'Asian Drift');
+  const botTrades = trades.filter(t => t.bot_name === 'Asian Drift');
+  const closed = botTrades.filter(t => t.result === 'won' || t.result === 'lost');
+  const hasUserTrades = closed.length > 0;
+  const displayWinRate = hasUserTrades
+    ? `${Math.round((closed.filter(t => t.result === 'won').length / closed.length) * 100)}%`
+    : '—';
+
+  const [cfg, setCfg] = useState<AsianDriftConfig>(initialConfig ?? ASIAN_DRIFT_DEFAULTS);
+  const save = (c: AsianDriftConfig) => { setCfg(c); onSaveConfig(c); };
+
+  if (!bot) return (
+    <section className="panel">
+      <span className="eyebrow">Bot not found</span>
+      <h2>Asian Drift not in database</h2>
+      <p className="muted">Run the SQL below in your Supabase SQL Editor:</p>
+      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Asian Drift','Moving-average drift engine on Volatility 50 Index. When the current price drifts significantly above or below the 12-tick MA, it enters ASIANU or ASIAND — profiting from the gap between spot price and contract average.','Low',true,65,318)\nON CONFLICT (name) DO NOTHING;`}</pre>
+    </section>
+  );
+
+  return <>
+    <PageHeader eyebrow="Asian strategy" title="Asian Drift"
+      description="Trades Asian Up/Down contracts on Volatility 50 Index using a moving-average drift signal. Enters when spot is significantly displaced from the 12-tick MA."
+      action={<button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
+        {bot.active ? <><Pause size={16} /> Pause</> : <><Globe size={16} /> Start</>}
+      </button>} />
+
+    <div className="apex-banner">
+      <div>
+        <span className="pro-tag">ASIAN BOT</span>
+        <h2>Average price. Edge in drift.</h2>
+        <p>Asian contracts pay out based on the average tick price, not the final spot. When price drifts above the moving average, the contract average lags — ASIANU wins. Drift below MA → ASIAND wins. The further the drift the higher the edge.</p>
+      </div>
+      <div className="apex-score">
+        <strong>{displayWinRate}</strong>
+        <span>{hasUserTrades ? 'Your win rate' : '0 trades · Not run yet'}</span>
+      </div>
+    </div>
+
+    <div className="bot-stats wide">
+      {bot && <BotStats bot={bot} userTrades={botTrades} />}
+    </div>
+
+    <section className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
+      <div>
+        <span className="eyebrow">Bot control</span>
+        <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Asian Drift is running' : 'Asian Drift is paused'}</h2>
+        <p className="muted">{botStatus['Asian Drift'] || (bot.active ? 'Measuring drift…' : 'Start the bot to begin measuring.')}</p>
+      </div>
+      <button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
+        {bot.active ? <><Pause size={16} /> Pause Asian Drift</> : <><Globe size={16} /> Start Asian Drift</>}
+      </button>
+    </section>
+
+    <div className="settings-grid">
+      <section className="panel">
+        <div className="panel-title"><div><span className="eyebrow">Strategy</span><h2>How it works</h2></div></div>
+        {[
+          { s: '01', l: 'Compute MA',     d: `Average of last ${cfg.maPeriod} ticks on V50.` },
+          { s: '02', l: 'Measure drift',  d: `drift = (close − MA) / MA. Must exceed ±${(cfg.driftThreshold*100).toFixed(2)}%.` },
+          { s: '03', l: 'Choose direction', d: 'Drift > 0 → ASIANU. Drift < 0 → ASIAND.' },
+          { s: '04', l: 'Contract',       d: `${cfg.durationTicks}-tick Asian contract. Settles on average price of all ticks.` },
+        ].map(({ s, l, d }) => (
+          <div className="step" key={s}><span>{s}</span><b>{l}</b><p className="muted" style={{ margin: 0, fontSize: '10px' }}>{d}</p></div>
+        ))}
+      </section>
+      <section className="panel">
+        <div className="panel-title"><div><span className="eyebrow">Configuration</span><h2>Parameters</h2></div></div>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <span className="eyebrow">Stake ($)</span>
+          <input type="number" min={0.35} step={0.5} value={cfg.stake}
+            onChange={e => save({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <span className="eyebrow">MA period (ticks)</span>
+          <input type="number" min={5} max={30} step={1} value={cfg.maPeriod}
+            onChange={e => save({ ...cfg, maPeriod: Math.max(5, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <span className="eyebrow">Drift threshold (min |drift| ratio)</span>
+          <input type="number" min={0.0005} max={0.01} step={0.0001} value={cfg.driftThreshold}
+            onChange={e => save({ ...cfg, driftThreshold: Math.max(0.0001, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+        <label style={{ display: 'block' }}>
+          <span className="eyebrow">Contract duration (ticks)</span>
+          <input type="number" min={5} max={20} step={1} value={cfg.durationTicks}
+            onChange={e => save({ ...cfg, durationTicks: Math.max(5, Number(e.target.value)) })}
+            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
+        </label>
+      </section>
+    </div>
+
+    <section className="panel">
+      <div className="panel-title"><h2>Asian Drift trade log</h2></div>
+      <TradeTable trades={botTrades} />
+    </section>
+  </>;
 }
 
 function Record({ trades }: { trades: Trade[] }) { const [filter, setFilter] = useState('all'); const filtered = filter === 'all' ? trades : trades.filter((trade) => trade.result === filter); const total = trades.reduce((sum, trade) => sum + Number(trade.profit), 0); const exportCsv = () => { const csv = ['Instrument,Direction,Stake,Result,P/L,Source,Time', ...trades.map((trade) => [trade.instrument, trade.direction, trade.stake, trade.result, trade.profit, trade.source, trade.created_at].join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'apex-track-record.csv'; link.click(); URL.revokeObjectURL(url); }; return <><PageHeader eyebrow="Public performance ledger" title="Track record" description="Every synthetic trade is timestamped and visible. Results cannot be edited after they close." action={<button className="secondary" onClick={exportCsv}><ArrowDownRight size={16} /> Export CSV</button>} /><div className="record-summary"><Stat label="Total trades" value={String(trades.length)} detail="All strategies" icon={BarChart3} /><Stat label="Win rate" value={trades.length ? `${Math.round(trades.filter((trade) => trade.result === 'won').length / trades.length * 100)}%` : '—'} detail="Closed trades" tone="success" icon={Target} /><Stat label="Cumulative P/L" value={money(total)} detail="Across this workspace" tone={total >= 0 ? 'success' : 'danger'} icon={total >= 0 ? TrendingUp : TrendingDown} /></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Cumulative equity curve</h2></div></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><h2>All trades</h2><div className="filter-tabs">{['all', 'won', 'lost'].map((item) => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div></div><TradeTable trades={filtered} /></section></>; }
