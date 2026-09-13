@@ -16,7 +16,9 @@
 }
 
 html, body {
-  overflow: hidden;               /* prevent root-level scrollbars entirely */
+  /* overflow is managed per-context:
+     .app-shell locks the viewport for the trading workspace;
+     the landing page uses normal document scroll */
 }
 
 body { margin: 0; min-width: 320px; background: #08100f; }
