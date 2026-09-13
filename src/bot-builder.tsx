@@ -660,14 +660,120 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
   const importJson = () => {
     setImportError('');
     try {
-      const parsed = JSON.parse(importText) as BotConfig;
-      if (!parsed.name || !parsed.market) throw new Error('Invalid bot config: missing required fields.');
-      dispatch({ type: 'RESET', payload: { ...DEFAULT_CONFIG, ...parsed } });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw: any = JSON.parse(importText);
+      if (!raw || typeof raw !== 'object') throw new Error('Not a valid JSON object.');
+
+      // ── Normalise purchaseConditions ──────────────────────────────────────
+      // Accept: array (our format), object { rise, fall } (advanced format),
+      // or completely missing — all gracefully mapped to ConditionNode[].
+      let purchaseConditions: ConditionNode[] = [];
+      if (Array.isArray(raw.purchaseConditions)) {
+        // Our native format — filter to only nodes that have a known indicator
+        purchaseConditions = (raw.purchaseConditions as ConditionNode[]).filter(
+          (c) => c && typeof c.indicator === 'string' && typeof c.operator === 'string'
+        );
+      } else if (raw.purchaseConditions && typeof raw.purchaseConditions === 'object') {
+        // Advanced { rise: [...], fall: [...] } format — flatten and deduplicate
+        const all: ConditionNode[] = [
+          ...(Array.isArray(raw.purchaseConditions.rise)  ? raw.purchaseConditions.rise  : []),
+          ...(Array.isArray(raw.purchaseConditions.fall)  ? raw.purchaseConditions.fall  : []),
+        ];
+        // Map foreign indicator names to our known indicators
+        const indicatorMap: Record<string, Indicator> = {
+          BB_UPPER: 'BB', BB_LOWER: 'BB', CANDLE_BODY: 'ATR',
+          EMA: 'EMA', RSI: 'RSI', ADX: 'ADX', ATR: 'ATR',
+          MACD: 'MACD', BB: 'BB', STOCH: 'STOCH', CCI: 'CCI', WPR: 'WPR', PRICE: 'PRICE',
+        };
+        const operatorMap: Record<string, ConditionNode['operator']> = {
+          price_crosses_above: 'crosses_above',
+          price_crosses_below: 'crosses_below',
+          '>': '>', '<': '<', '>=': '>=', '<=': '<=',
+        };
+        const seen = new Set<string>();
+        for (const c of all) {
+          const ind = indicatorMap[(c.indicator as string)?.toUpperCase()] ?? 'ATR';
+          const op  = operatorMap[c.operator as string] ?? '>';
+          const key = `${ind}-${op}-${c.value ?? 0}`;
+          if (seen.has(key)) continue; // skip duplicates
+          seen.add(key);
+          purchaseConditions.push({
+            id: c.id ?? uid(),
+            indicator: ind,
+            period: Number(c.period) || 14,
+            operator: op,
+            value: Number(c.value ?? (c as any).valueMultipleOfATR ?? 0),
+            logic: (c.logic === 'OR' ? 'OR' : 'AND') as 'AND' | 'OR',
+          });
+        }
+      }
+
+      // ── Normalise stakeMode ───────────────────────────────────────────────
+      const VALID_STAKE_MODES: StakeMode[] = ['fixed', 'percent', 'martingale'];
+      const stakeMode: StakeMode = VALID_STAKE_MODES.includes(raw.stakeMode)
+        ? raw.stakeMode as StakeMode
+        : 'fixed'; // anything exotic (score_scaled, linear_by_score, etc.) → fixed
+
+      // ── Normalise riskManagement fields ──────────────────────────────────
+      const rm = raw.riskManagement ?? {};
+      const maxConsecLosses = raw.maxConsecLosses
+        ?? rm.drawdownGovernor?.afterConsecutiveLosses3 ? 3
+        : DEFAULT_CONFIG.maxConsecLosses;
+      const enableDailyLoss  = raw.enableDailyLoss
+        ?? (rm.dailyLossLimitPercent != null);
+      const dailyLossLimit   = raw.dailyLossLimit
+        ?? (rm.dailyLossLimitPercent ? rm.dailyLossLimitPercent * 10 : DEFAULT_CONFIG.dailyLossLimit);
+      const cooldownMinutes  = raw.cooldownMinutes
+        ?? rm.drawdownGovernor?.afterConsecutiveLosses3?.cooldownMinutes
+        ?? DEFAULT_CONFIG.cooldownMinutes;
+
+      // ── Stake values ──────────────────────────────────────────────────────
+      const stake = raw.stake ?? raw.minStake ?? raw.baseStake ?? DEFAULT_CONFIG.stake;
+
+      // ── Sell conditions ───────────────────────────────────────────────────
+      const sellConditions: ConditionNode[] = Array.isArray(raw.sellConditions) ? raw.sellConditions : [];
+
+      // ── Build normalised config ───────────────────────────────────────────
+      const normalised: BotConfig = {
+        ...DEFAULT_CONFIG,
+        name:              raw.name        || 'Imported Bot',
+        market:            raw.market      || DEFAULT_CONFIG.market,
+        tradeType:         raw.tradeType   || DEFAULT_CONFIG.tradeType,
+        direction:         raw.direction   || DEFAULT_CONFIG.direction,
+        durationUnit:      raw.durationUnit || DEFAULT_CONFIG.durationUnit,
+        duration:          Number(raw.duration)  || DEFAULT_CONFIG.duration,
+        stake,
+        stakeMode,
+        stakePercent:      Number(raw.stakePercent)       || DEFAULT_CONFIG.stakePercent,
+        martingaleMultiplier: Number(raw.martingaleMultiplier) || DEFAULT_CONFIG.martingaleMultiplier,
+        restartOnError:    raw.restartOnError  ?? DEFAULT_CONFIG.restartOnError,
+        runOnceAtStart:    raw.runOnceAtStart  ?? DEFAULT_CONFIG.runOnceAtStart,
+        fastTrades:        raw.fastTrades      ?? DEFAULT_CONFIG.fastTrades,
+        changeMarketEachRun: raw.changeMarketEachRun ?? DEFAULT_CONFIG.changeMarketEachRun,
+        purchaseConditions,
+        sellConditions,
+        bulkTrades:        raw.bulkTrades      ?? DEFAULT_CONFIG.bulkTrades,
+        contractCount:     Number(raw.contractCount) || DEFAULT_CONFIG.contractCount,
+        maxConsecLosses:   Number(maxConsecLosses)   || DEFAULT_CONFIG.maxConsecLosses,
+        dailyLossLimit:    Number(dailyLossLimit)     || DEFAULT_CONFIG.dailyLossLimit,
+        cooldownMinutes:   Number(cooldownMinutes)    || 0,
+        takeProfitAmount:  Number(raw.takeProfitAmount) || DEFAULT_CONFIG.takeProfitAmount,
+        enableTakeProfit:  raw.enableTakeProfit ?? DEFAULT_CONFIG.enableTakeProfit,
+        enableDailyLoss:   Boolean(enableDailyLoss),
+        maxTradesPerDay:   Number(raw.maxTradesPerDay) || DEFAULT_CONFIG.maxTradesPerDay,
+      };
+
+      dispatch({ type: 'RESET', payload: normalised });
       setShowImport(false);
       setImportText('');
-      setNotice(`Imported bot: ${parsed.name}`);
+
+      const remapped: string[] = [];
+      if (!VALID_STAKE_MODES.includes(raw.stakeMode)) remapped.push(`stake mode "${raw.stakeMode}" → fixed`);
+      if (!Array.isArray(raw.purchaseConditions)) remapped.push(`purchaseConditions object → ${purchaseConditions.length} condition nodes`);
+      const remapNote = remapped.length ? ` (remapped: ${remapped.join(', ')})` : '';
+      setNotice(`✓ Imported "${normalised.name}" — ${purchaseConditions.length} conditions loaded${remapNote}.`);
     } catch (e) {
-      setImportError((e as Error).message);
+      setImportError(`Parse error: ${(e as Error).message}. Check your JSON is valid.`);
     }
   };
 
@@ -809,6 +915,9 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
           <textarea className="bb-import-textarea" value={importText}
             onChange={e => setImportText(e.target.value)}
             placeholder='Paste bot JSON here or click "Browse file"…' />
+          <p style={{ fontSize: 9, color: '#3d5a54', margin: '4px 0 0', lineHeight: 1.5 }}>
+            Accepts APEX native format or advanced schemas (e.g. object purchaseConditions, custom stakeMode, riskManagement blocks). Unknown fields are safely ignored; incompatible values are remapped to sensible defaults.
+          </p>
           {importError && <p className="bb-import-error"><AlertTriangle size={12} /> {importError}</p>}
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
             <button type="button" className="secondary" style={{ fontSize: 11 }}
