@@ -110,6 +110,7 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   // Pending signup user — kept so we can sign them in after OTP verify
   const pendingUserRef = useRef<User | null>(null);
+  const pendingPasswordRef = useRef<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
   const cooldownRef = useRef<number | null>(null);
 
@@ -186,45 +187,28 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
     }
   };
 
-  // ── Sign up → send OTP ───────────────────────────────────────────────────
+  // ── Sign up → send OTP FIRST, create account after verification ─────────
   const handleSignUp = async (cleanEmail: string) => {
     setLoading(true);
     try {
-      // Create the Supabase account.
-      // IMPORTANT: Go to Supabase → Authentication → Settings and
-      // turn OFF "Enable email confirmations" — our OTP handles verification.
-      // The emailRedirectTo below points to a no-op path as a safety net.
-      const { data, error: signUpErr } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/confirmed`,
-        },
-      });
-
-      if (signUpErr) throw signUpErr;
-
-      // Store the created user for after OTP verification
-      pendingUserRef.current = data.user ?? null;
-
-      // Send our own OTP via Resend
+      // Don't call supabase.auth.signUp() yet — that sends a Supabase email.
+      // Just send our OTP. We create the account AFTER the code is verified.
       const sent = await requestOtp(cleanEmail);
       if (!sent) return; // error already set in requestOtp
+
+      // Store password for use after OTP verify
+      pendingPasswordRef.current = password;
 
       setSuccessNotice(`We sent a 6-digit code to ${cleanEmail}. Enter it below to activate your account.`);
       switchMode('otp');
     } catch (err: unknown) {
-      const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Registration failed';
-      const isRateLimit = /rate.?limit|too.?many|over_email_send_rate/i.test(raw);
-      setError(isRateLimit
-        ? 'Account creation is temporarily limited. Please try again in a few minutes.'
-        : raw);
+      setError(err instanceof Error ? err.message : 'Could not send verification code. Try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Verify OTP ───────────────────────────────────────────────────────────
+  // ── Verify OTP → then create Supabase account ───────────────────────────
   const handleVerifyOtp = async () => {
     if (otpCode.length !== 6) {
       setError('Enter the full 6-digit code.');
@@ -233,28 +217,49 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
     setLoading(true);
     setError(null);
     try {
+      // 1. Verify the OTP code first
       const result = await verifyOtp(email.trim().toLowerCase(), otpCode, 'verify_email');
       if (!result.ok) {
         setError(result.error ?? 'Incorrect code. Please try again.');
         return;
       }
-      // OTP verified — the Supabase session should already exist from signUp
-      // If we have the pending user object, use it directly
+
+      // 2. OTP verified — now create the Supabase account (no email sent by Supabase)
+      const cleanEmail = email.trim().toLowerCase();
+      const pwd = pendingPasswordRef.current ?? password;
+
       if (pendingUserRef.current) {
+        // Account was already created (shouldn't happen in new flow, but safe fallback)
         onAuthSuccess(pendingUserRef.current);
         return;
       }
-      // Fallback: try to get the current session
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (sessionData.session?.user) {
-        onAuthSuccess(sessionData.session.user);
-        return;
+
+      const { data, error: signUpErr } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: pwd,
+        options: {
+          // emailRedirectTo to a dead path — email confirmations should be OFF
+          // in Supabase dashboard (Auth → Settings → Enable email confirmations → OFF)
+          emailRedirectTo: `${window.location.origin}/auth/noop`,
+        },
+      });
+
+      if (signUpErr) throw signUpErr;
+
+      if (data.session) {
+        // Confirmation disabled — signed in immediately
+        onAuthSuccess(data.user!);
+      } else if (data.user) {
+        // Confirmation still enabled in dashboard — sign them in with password
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: pwd,
+        });
+        if (signInErr) throw signInErr;
+        if (signInData.user) onAuthSuccess(signInData.user);
       }
-      // Session expired — ask user to sign in
-      setSuccessNotice('Email verified! Sign in with your password to continue.');
-      switchMode('signin');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Verification failed');
+      setError(err instanceof Error ? err.message : 'Account creation failed. Please try again.');
     } finally {
       setLoading(false);
     }
