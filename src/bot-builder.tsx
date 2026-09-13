@@ -520,6 +520,11 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
   const [importError, setImportError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const warnings = validate(cfg);
+  const summary = buildSummary(cfg);
+  const warningsRef = useRef(warnings);
+  warningsRef.current = warnings;
+
   // ── Bot running state ─────────────────────────────────────────────────────
   const [isRunning, setIsRunning] = useState(false);
   const [tradeCount, setTradeCount] = useState(0);
@@ -535,7 +540,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
 
   const startBot = useCallback(() => {
     if (!derivConnected) { setNotice('Connect a Deriv account before running your bot.'); return; }
-    if (warnings.length > 0) { setNotice(`Fix ${warnings.length} validation issue(s) before starting.`); return; }
+    if (warningsRef.current.length > 0) { setNotice(`Fix ${warningsRef.current.length} validation issue(s) before starting.`); return; }
     setTradeCount(0);
     setConsecLosses(0);
     setIsRunning(true);
@@ -543,16 +548,13 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
 
     intervalRef.current = window.setInterval(async () => {
       const c = cfgRef.current;
-      // Determine direction for this cycle
       let dir: string;
       if (c.direction === 'both') {
-        // Alternate CALL/PUT each cycle
         dir = resolveDirection(c, tradeCount % 2 === 0 ? 'CALL' : 'PUT');
       } else {
         dir = resolveDirection(c, c.direction as 'CALL' | 'PUT');
       }
 
-      // Stake with martingale
       let stake = c.stake;
       if (c.stakeMode === 'martingale' && consecLosses > 0) {
         stake = Math.min(c.stake * Math.pow(c.martingaleMultiplier, consecLosses), 500);
@@ -573,7 +575,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
       }
     }, 5000);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [derivConnected, runTrade, warnings.length]);
+  }, [derivConnected, runTrade]);
 
   // Stop bot when component unmounts or Deriv disconnects
   useEffect(() => {
@@ -584,9 +586,6 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
   }, [derivConnected, isRunning, stopBot, setNotice]);
 
   useEffect(() => () => stopBot(), [stopBot]);
-
-  const warnings = validate(cfg);
-  const summary = buildSummary(cfg);
 
   const runBt = () => {
     setBacktesting(true);
