@@ -3082,11 +3082,16 @@ function PhantomScalper({ bots, toggleBot, trades, botStatus, onSaveConfig, init
 
   const [cfg, setCfg] = useState<PhantomConfig>(initialConfig ?? PHANTOM_DEFAULTS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cfgSaved, setCfgSaved] = useState(false);
 
   const updateCfg = <K extends keyof PhantomConfig>(key: K, value: PhantomConfig[K]) => {
-    const next = { ...cfg, [key]: value };
-    setCfg(next);
-    onSaveConfig(next);
+    setCfg(prev => ({ ...prev, [key]: value }));
+  };
+
+  const savePhantomCfg = () => {
+    onSaveConfig(cfg);
+    setCfgSaved(true);
+    setTimeout(() => setCfgSaved(false), 2500);
   };
 
   const currentStatus = botStatus?.['Phantom Scalper'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
@@ -3268,10 +3273,14 @@ VALUES (
                 ))}
               </div>
             </label>
-            {/* Reset to defaults */}
-            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            {/* Save + Reset */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+              <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ fontSize: '11px', padding: '7px 18px', minWidth: 130 }}
+                onClick={savePhantomCfg}>
+                {cfgSaved ? <><Check size={13} /> Saved!</> : 'Save configuration'}
+              </button>
               <button type="button" className="secondary" style={{ fontSize: '11px', padding: '7px 14px' }}
-                onClick={() => { setCfg(PHANTOM_DEFAULTS); onSaveConfig(PHANTOM_DEFAULTS); }}>
+                onClick={() => { setCfg(PHANTOM_DEFAULTS); onSaveConfig(PHANTOM_DEFAULTS); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); }}>
                 Reset to defaults
               </button>
             </div>
@@ -3377,11 +3386,16 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
 
   const [cfg, setCfg] = useState<StpConfig>(initialConfig ?? STP_DEFAULTS);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cfgSaved, setCfgSaved] = useState(false);
 
   const updateCfg = <K extends keyof StpConfig>(key: K, value: StpConfig[K]) => {
-    const next = { ...cfg, [key]: value };
-    setCfg(next);
-    onSaveConfig(next);
+    setCfg(prev => ({ ...prev, [key]: value }));
+  };
+
+  const saveStpCfg = () => {
+    onSaveConfig(cfg);
+    setCfgSaved(true);
+    setTimeout(() => setCfgSaved(false), 2500);
   };
 
   const currentStatus = botStatus?.['Trend Pullback V3'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
@@ -3564,10 +3578,14 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
                 ))}
               </div>
             </label>
-            {/* Reset */}
-            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+            {/* Save + Reset */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+              <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ fontSize: '11px', padding: '7px 18px', minWidth: 130 }}
+                onClick={saveStpCfg}>
+                {cfgSaved ? <><Check size={13} /> Saved!</> : 'Save configuration'}
+              </button>
               <button type="button" className="secondary" style={{ fontSize: '11px', padding: '7px 14px' }}
-                onClick={() => { setCfg(STP_DEFAULTS); onSaveConfig(STP_DEFAULTS); }}>
+                onClick={() => { setCfg(STP_DEFAULTS); onSaveConfig(STP_DEFAULTS); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); }}>
                 Reset to defaults
               </button>
             </div>
@@ -3673,7 +3691,8 @@ function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
     : '—';
 
   const [cfg, setCfg] = useState<DigitSurgeConfig>(initialConfig ?? DIGIT_SURGE_DEFAULTS);
-  const save = (c: DigitSurgeConfig) => { setCfg(c); onSaveConfig(c); };
+  const [cfgSaved, setCfgSaved] = useState(false);
+  const persistCfg = (c: DigitSurgeConfig) => { onSaveConfig(c); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); };
 
   if (!bot) return (
     <section className="panel">
@@ -3735,27 +3754,30 @@ function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
         <label style={{ display: 'block', marginBottom: 12 }}>
           <span className="eyebrow">Stake ($)</span>
           <input type="number" min={0.35} step={0.5} value={cfg.stake}
-            onChange={e => save({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block', marginBottom: 12 }}>
           <span className="eyebrow">Lookback ticks</span>
           <input type="number" min={4} max={20} step={1} value={cfg.lookback}
-            onChange={e => save({ ...cfg, lookback: Math.max(4, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, lookback: Math.max(4, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block', marginBottom: 12 }}>
           <span className="eyebrow">Bias threshold (0–1)</span>
           <input type="number" min={0.5} max={1} step={0.05} value={cfg.biasThreshold}
-            onChange={e => save({ ...cfg, biasThreshold: Math.min(1, Math.max(0.5, Number(e.target.value))) })}
+            onChange={e => setCfg({ ...cfg, biasThreshold: Math.min(1, Math.max(0.5, Number(e.target.value))) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block' }}>
           <span className="eyebrow">Max consecutive losses before pause</span>
           <input type="number" min={1} max={10} step={1} value={cfg.maxConsecLosses}
-            onChange={e => save({ ...cfg, maxConsecLosses: Math.max(1, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, maxConsecLosses: Math.max(1, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
+        <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ marginTop: 16, width: '100%' }} onClick={() => persistCfg(cfg)}>
+          {cfgSaved ? <><Check size={14} /> Saved!</> : 'Save configuration'}
+        </button>
       </section>
     </div>
 
@@ -3784,7 +3806,8 @@ function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, init
     : '—';
 
   const [cfg, setCfg] = useState<BoomCrashConfig>(initialConfig ?? BOOM_CRASH_DEFAULTS);
-  const save = (c: BoomCrashConfig) => { setCfg(c); onSaveConfig(c); };
+  const [cfgSaved, setCfgSaved] = useState(false);
+  const persistCfg = (c: BoomCrashConfig) => { onSaveConfig(c); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); };
 
   if (!bot) return (
     <section className="panel">
@@ -3846,27 +3869,30 @@ function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, init
         <label style={{ display: 'block', marginBottom: 12 }}>
           <span className="eyebrow">Stake ($)</span>
           <input type="number" min={0.35} step={0.5} value={cfg.stake}
-            onChange={e => save({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block', marginBottom: 12 }}>
           <span className="eyebrow">Trend ticks (lookback)</span>
           <input type="number" min={5} max={30} step={1} value={cfg.trendTicks}
-            onChange={e => save({ ...cfg, trendTicks: Math.max(5, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, trendTicks: Math.max(5, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block', marginBottom: 12 }}>
           <span className="eyebrow">Spike threshold (0–1, lower = tighter)</span>
           <input type="number" min={0.1} max={0.9} step={0.05} value={cfg.spikeThreshold}
-            onChange={e => save({ ...cfg, spikeThreshold: Math.min(0.9, Math.max(0.1, Number(e.target.value))) })}
+            onChange={e => setCfg({ ...cfg, spikeThreshold: Math.min(0.9, Math.max(0.1, Number(e.target.value))) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block' }}>
           <span className="eyebrow">Cooldown (ms)</span>
           <input type="number" min={5000} max={120000} step={5000} value={cfg.cooldownMs}
-            onChange={e => save({ ...cfg, cooldownMs: Math.max(5000, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, cooldownMs: Math.max(5000, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
+        <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ marginTop: 16, width: '100%' }} onClick={() => persistCfg(cfg)}>
+          {cfgSaved ? <><Check size={14} /> Saved!</> : 'Save configuration'}
+        </button>
       </section>
     </div>
 
@@ -3895,7 +3921,8 @@ function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
     : '—';
 
   const [cfg, setCfg] = useState<AsianDriftConfig>(initialConfig ?? ASIAN_DRIFT_DEFAULTS);
-  const save = (c: AsianDriftConfig) => { setCfg(c); onSaveConfig(c); };
+  const [cfgSaved, setCfgSaved] = useState(false);
+  const persistCfg = (c: AsianDriftConfig) => { onSaveConfig(c); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); };
 
   if (!bot) return (
     <section className="panel">
@@ -3957,27 +3984,30 @@ function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
         <label style={{ display: 'block', marginBottom: 12 }}>
           <span className="eyebrow">Stake ($)</span>
           <input type="number" min={0.35} step={0.5} value={cfg.stake}
-            onChange={e => save({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block', marginBottom: 12 }}>
           <span className="eyebrow">MA period (ticks)</span>
           <input type="number" min={5} max={30} step={1} value={cfg.maPeriod}
-            onChange={e => save({ ...cfg, maPeriod: Math.max(5, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, maPeriod: Math.max(5, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block', marginBottom: 12 }}>
           <span className="eyebrow">Drift threshold (min |drift| ratio)</span>
           <input type="number" min={0.0005} max={0.01} step={0.0001} value={cfg.driftThreshold}
-            onChange={e => save({ ...cfg, driftThreshold: Math.max(0.0001, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, driftThreshold: Math.max(0.0001, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block' }}>
           <span className="eyebrow">Contract duration (ticks)</span>
           <input type="number" min={5} max={20} step={1} value={cfg.durationTicks}
-            onChange={e => save({ ...cfg, durationTicks: Math.max(5, Number(e.target.value)) })}
+            onChange={e => setCfg({ ...cfg, durationTicks: Math.max(5, Number(e.target.value)) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
+        <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ marginTop: 16, width: '100%' }} onClick={() => persistCfg(cfg)}>
+          {cfgSaved ? <><Check size={14} /> Saved!</> : 'Save configuration'}
+        </button>
       </section>
     </div>
 
@@ -4142,6 +4172,7 @@ function Settings({
   onRequestBotLiveConfirm: (onConfirm: () => void) => void;
 }) {
   const [limitInput, setLimitInput] = useState(String(Math.max(1, Number(workspace.loss_limit ?? 50))));
+  const [limitSaved, setLimitSaved] = useState(false);
   const activeBalance = derivConnected && deriv.account ? deriv.account.balance : null;
   const parsedLimit = Math.max(1, Math.min(100000, Number(limitInput) || lossLimit));
 
@@ -4153,7 +4184,8 @@ function Settings({
     const validated = Math.max(1, Math.min(100000, value));
     setLimitInput(String(validated));
     void updateWorkspace({ loss_limit: validated });
-    setNotice(`Session loss limit saved: ${money(validated)}`);
+    setLimitSaved(true);
+    setTimeout(() => setLimitSaved(false), 2500);
   };
 
   return (
@@ -4349,10 +4381,11 @@ function Settings({
             <div className="loss-limit-actions">
               <button
                 type="button"
-                className="primary"
+                className={limitSaved ? 'secondary' : 'primary'}
                 onClick={() => saveLossLimit(parsedLimit)}
+                style={{ minWidth: 130 }}
               >
-                Save loss limit
+                {limitSaved ? <><Check size={14} /> Saved!</> : 'Save loss limit'}
               </button>
               <button type="button" className="secondary" onClick={resetSessionBaseline}>
                 <RefreshCw size={16} /> Reset session baseline
