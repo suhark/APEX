@@ -14,8 +14,90 @@ interface AuthModalProps {
 
 type Mode = 'signin' | 'signup' | 'reset' | 'otp';
 
-// How long in seconds the user must wait before requesting a new code
 const OTP_RESEND_COOLDOWN = 60;
+const OTP_LENGTH = 6;
+
+// ── Individual-digit OTP input component ──────────────────────────────────────
+function OtpBoxes({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+}) {
+  const refs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const focus = (idx: number) => {
+    refs.current[Math.max(0, Math.min(OTP_LENGTH - 1, idx))]?.focus();
+  };
+
+  const handleKey = (idx: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace') {
+      e.preventDefault();
+      if (value[idx]) {
+        // clear current
+        const next = value.split('');
+        next[idx] = '';
+        onChange(next.join(''));
+      } else if (idx > 0) {
+        // move back and clear previous
+        const next = value.split('');
+        next[idx - 1] = '';
+        onChange(next.join(''));
+        focus(idx - 1);
+      }
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault(); focus(idx - 1);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault(); focus(idx + 1);
+    }
+  };
+
+  const handleChange = (idx: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value.replace(/\D/g, '');
+    if (!raw) return;
+    // handle paste — fill all boxes from idx
+    const digits = raw.slice(0, OTP_LENGTH - idx);
+    const next = value.padEnd(OTP_LENGTH, '').split('');
+    for (let i = 0; i < digits.length; i++) next[idx + i] = digits[i];
+    const joined = next.join('').slice(0, OTP_LENGTH);
+    onChange(joined);
+    // move focus to the next empty box or last filled
+    const nextFocus = Math.min(idx + digits.length, OTP_LENGTH - 1);
+    focus(nextFocus);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, OTP_LENGTH);
+    onChange(pasted.padEnd(OTP_LENGTH, '').slice(0, OTP_LENGTH));
+    focus(Math.min(pasted.length, OTP_LENGTH - 1));
+  };
+
+  return (
+    <div className="otp-boxes" onPaste={handlePaste}>
+      {Array.from({ length: OTP_LENGTH }).map((_, idx) => (
+        <input
+          key={idx}
+          ref={el => { refs.current[idx] = el; }}
+          type="text"
+          inputMode="numeric"
+          maxLength={1}
+          value={value[idx] ?? ''}
+          className={`otp-box${value[idx] ? ' filled' : ''}`}
+          disabled={disabled}
+          autoComplete="one-time-code"
+          onChange={e => handleChange(idx, e)}
+          onKeyDown={e => handleKey(idx, e)}
+          onFocus={e => e.target.select()}
+          aria-label={`Digit ${idx + 1}`}
+        />
+      ))}
+    </div>
+  );
+}
 
 export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) {
   const [mode, setMode]               = useState<Mode>('signin');
@@ -28,11 +110,8 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   // Pending signup user — kept so we can sign them in after OTP verify
   const pendingUserRef = useRef<User | null>(null);
-  // Resend cooldown
   const [resendCooldown, setResendCooldown] = useState(0);
   const cooldownRef = useRef<number | null>(null);
-  // OTP input refs for auto-focus
-  const otpRef = useRef<HTMLInputElement>(null);
 
   const switchMode = (next: Mode) => {
     setMode(next);
@@ -53,10 +132,13 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
     return () => { if (cooldownRef.current) window.clearInterval(cooldownRef.current); };
   }, [resendCooldown]);
 
-  // Auto-focus OTP input when mode switches to otp
+  // Auto-focus first OTP box when mode switches to otp
   useEffect(() => {
     if (mode === 'otp') {
-      setTimeout(() => otpRef.current?.focus(), 100);
+      setTimeout(() => {
+        const first = document.querySelector<HTMLInputElement>('.otp-box');
+        first?.focus();
+      }, 100);
     }
   }, [mode]);
 
@@ -108,13 +190,16 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
   const handleSignUp = async (cleanEmail: string) => {
     setLoading(true);
     try {
-      // Create the Supabase account. Email confirmation is disabled in the
-      // Supabase dashboard (Authentication → Settings → "Enable email confirmations"
-      // turned OFF) so the account is immediately active but unverified.
+      // Create the Supabase account.
+      // IMPORTANT: Go to Supabase → Authentication → Settings and
+      // turn OFF "Enable email confirmations" — our OTP handles verification.
+      // The emailRedirectTo below points to a no-op path as a safety net.
       const { data, error: signUpErr } = await supabase.auth.signUp({
         email: cleanEmail,
         password,
-        options: { emailRedirectTo: undefined }, // suppress Supabase's own email
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/confirmed`,
+        },
       });
 
       if (signUpErr) throw signUpErr;
@@ -190,13 +275,6 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
     await handleSignUp(cleanEmail);
   };
 
-  // ── OTP digit auto-format ────────────────────────────────────────────────
-  const handleOtpChange = (val: string) => {
-    const digits = val.replace(/\D/g, '').slice(0, 6);
-    setOtpCode(digits);
-    setError(null);
-  };
-
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="auth-overlay" onClick={onClose}>
@@ -256,18 +334,10 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
           {/* OTP mode — just the code input */}
           {mode === 'otp' ? (
             <div className="auth-otp-field">
-              <input
-                ref={otpRef}
-                type="text"
-                inputMode="numeric"
-                pattern="\d{6}"
-                maxLength={6}
-                placeholder="000000"
+              <OtpBoxes
                 value={otpCode}
-                onChange={e => handleOtpChange(e.target.value)}
-                className="auth-otp-input"
+                onChange={(v) => { setOtpCode(v); setError(null); }}
                 disabled={loading}
-                autoComplete="one-time-code"
               />
               <p className="auth-otp-hint">
                 Code expires in 10 minutes.{' '}
