@@ -39,8 +39,36 @@ interface ConditionNode {
 }
 
 type TradeType = 'rise_fall' | 'higher_lower' | 'touch_no_touch' | 'in_out' | 'asians' | 'digits_even' | 'digits_odd' | 'digits_over' | 'digits_under';
-type StakeMode = 'fixed' | 'percent' | 'martingale';
+type StakeMode = 'fixed' | 'percent' | 'martingale' | 'score_scaled';
 type DurationUnit = 'ticks' | 'seconds' | 'minutes' | 'hours';
+
+interface DrawdownGovernor {
+  afterLosses2StakeOverlay: number;   // stake multiplier after 2 consec losses (e.g. 0.5 = half stake)
+  afterLosses2Cooldown: number;       // minutes cooldown after 2 losses
+  afterLosses3Action: 'pause' | 'reduce'; // pause or just reduce after 3
+  afterLosses3Cooldown: number;       // minutes cooldown after 3 losses
+  afterWins3StakeOverlay: number;     // stake multiplier after 3 consec wins (bankroll protection)
+  reverseOnLoss: boolean;             // flip direction after a loss
+  noMartingale: boolean;              // hard block martingale stake escalation
+}
+
+interface RegimeFilter {
+  enabled: boolean;
+  atrPeriod: number;
+  atrSmaPeriod: number;
+  activeRangeMin: number;   // ATR/SMA ratio min (e.g. 0.8 = not too quiet)
+  activeRangeMax: number;   // ATR/SMA ratio max (e.g. 1.3 = not too wild)
+}
+
+interface EntryScoring {
+  enabled: boolean;
+  threshold: number;        // 0–100, min score to fire trade
+  breakoutStrengthWeight: number;
+  bandExpansionWeight: number;
+  confirmationCandleWeight: number;
+  adxStrengthWeight: number;
+  atrRegimeWeight: number;
+}
 
 interface BotConfig {
   name: string;
@@ -53,6 +81,8 @@ interface BotConfig {
   stake: number;
   stakeMode: StakeMode;
   stakePercent: number;          // % of balance when stakeMode=percent
+  minStake: number;              // score_scaled / martingale floor
+  maxStake: number;              // score_scaled / martingale ceiling
   martingaleMultiplier: number;  // multiplier when stakeMode=martingale
   restartOnError: boolean;
   runOnceAtStart: boolean;
@@ -67,11 +97,18 @@ interface BotConfig {
   // Block 4 — Risk Management
   maxConsecLosses: number;
   dailyLossLimit: number;
+  dailyLossLimitPercent: number;   // % of balance (used when enableDailyLossPercent=true)
+  enableDailyLossPercent: boolean; // use % instead of fixed $
   cooldownMinutes: number;
   takeProfitAmount: number;
   enableTakeProfit: boolean;
   enableDailyLoss: boolean;
   maxTradesPerDay: number;
+  nonOverlappingExecution: boolean;
+  // Advanced
+  drawdownGovernor: DrawdownGovernor;
+  regimeFilter: RegimeFilter;
+  entryScoring: EntryScoring;
 }
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -84,6 +121,8 @@ const DEFAULT_CONFIG: BotConfig = {
   stake: 2,
   stakeMode: 'fixed',
   stakePercent: 1,
+  minStake: 2,
+  maxStake: 20,
   martingaleMultiplier: 2,
   restartOnError: true,
   runOnceAtStart: false,
@@ -95,11 +134,39 @@ const DEFAULT_CONFIG: BotConfig = {
   sellConditions: [],
   maxConsecLosses: 3,
   dailyLossLimit: 50,
+  dailyLossLimitPercent: 3,
+  enableDailyLossPercent: false,
   cooldownMinutes: 15,
   takeProfitAmount: 100,
   enableTakeProfit: false,
   enableDailyLoss: true,
   maxTradesPerDay: 50,
+  nonOverlappingExecution: true,
+  drawdownGovernor: {
+    afterLosses2StakeOverlay: 0.5,
+    afterLosses2Cooldown: 15,
+    afterLosses3Action: 'pause',
+    afterLosses3Cooldown: 60,
+    afterWins3StakeOverlay: 0.8,
+    reverseOnLoss: false,
+    noMartingale: false,
+  },
+  regimeFilter: {
+    enabled: false,
+    atrPeriod: 14,
+    atrSmaPeriod: 50,
+    activeRangeMin: 0.8,
+    activeRangeMax: 1.3,
+  },
+  entryScoring: {
+    enabled: false,
+    threshold: 75,
+    breakoutStrengthWeight: 30,
+    bandExpansionWeight: 20,
+    confirmationCandleWeight: 20,
+    adxStrengthWeight: 15,
+    atrRegimeWeight: 15,
+  },
 };
 
 // ─── Templates ────────────────────────────────────────────────────────────────
@@ -309,9 +376,10 @@ function buildSummary(cfg: BotConfig): string {
   const dur = `${cfg.duration} ${cfg.durationUnit}`;
 
   let stakeStr = '';
-  if (cfg.stakeMode === 'fixed')       stakeStr = `$${cfg.stake} fixed stake`;
+  if (cfg.stakeMode === 'fixed')        stakeStr = `$${cfg.stake} fixed stake`;
   else if (cfg.stakeMode === 'percent') stakeStr = `${cfg.stakePercent}% of balance`;
-  else                                  stakeStr = `$${cfg.stake} with ×${cfg.martingaleMultiplier} martingale`;
+  else if (cfg.stakeMode === 'score_scaled') stakeStr = `$${cfg.minStake}–$${cfg.maxStake} score-scaled`;
+  else                                  stakeStr = `$${cfg.minStake}–$${cfg.maxStake} martingale ×${cfg.martingaleMultiplier}`;
 
   const buyConds = cfg.purchaseConditions.length === 0
     ? 'always (no conditions set)'
@@ -321,9 +389,11 @@ function buildSummary(cfg: BotConfig): string {
 
   const riskParts: string[] = [];
   riskParts.push(`pausing after ${cfg.maxConsecLosses} consecutive losses`);
-  if (cfg.enableDailyLoss)    riskParts.push(`daily loss cap $${cfg.dailyLossLimit}`);
+  if (cfg.enableDailyLoss)    riskParts.push(cfg.enableDailyLossPercent ? `daily loss cap ${cfg.dailyLossLimitPercent}% of balance` : `daily loss cap $${cfg.dailyLossLimit}`);
   if (cfg.enableTakeProfit)   riskParts.push(`take profit at $${cfg.takeProfitAmount}`);
   if (cfg.cooldownMinutes > 0) riskParts.push(`${cfg.cooldownMinutes}min cooldown`);
+  if (cfg.regimeFilter.enabled) riskParts.push(`ATR regime filter (${cfg.regimeFilter.activeRangeMin}–${cfg.regimeFilter.activeRangeMax}×SMA)`);
+  if (cfg.entryScoring.enabled) riskParts.push(`entry scoring ≥${cfg.entryScoring.threshold}/100`);
 
   return `This bot trades ${tt} (${dir}) on ${cfg.market} for ${dur} contracts with ${stakeStr}. ` +
     `Entry fires when ${buyConds}. ` +
@@ -352,10 +422,35 @@ function runBacktest(cfg: BotConfig): { trades: number; wins: number; losses: nu
       : cfg.purchaseConditions.length === 1 ? 0.54
       : cfg.purchaseConditions.length >= 2 ? 0.58 : 0.50;
 
-    // Stake
+    // Regime filter — skip if not in active range (simulated as ~25% skip rate)
+    if (cfg.regimeFilter.enabled && Math.random() < 0.25) continue;
+
+    // Score-based entry gate
+    let score = 60 + Math.random() * 40;
+    if (cfg.entryScoring.enabled && score < cfg.entryScoring.threshold) continue;
+
+    // Drawdown governor — pause cycle after too many losses
+    if (consecLosses >= cfg.maxConsecLosses) { consecLosses = 0; continue; }
+
+    // Stake computation
     let stake = cfg.stake;
-    if (cfg.stakeMode === 'percent') stake = Math.max(0.35, (balance * cfg.stakePercent) / 100);
-    if (cfg.stakeMode === 'martingale' && consecLosses > 0) stake = cfg.stake * Math.pow(cfg.martingaleMultiplier, consecLosses);
+    if (cfg.stakeMode === 'percent') {
+      stake = Math.max(0.35, (balance * cfg.stakePercent) / 100);
+    } else if (cfg.stakeMode === 'score_scaled') {
+      const t = cfg.entryScoring.enabled
+        ? Math.max(0, (score - cfg.entryScoring.threshold) / (100 - cfg.entryScoring.threshold))
+        : 0.5;
+      stake = Math.max(cfg.minStake, Math.min(cfg.maxStake, cfg.minStake + (cfg.maxStake - cfg.minStake) * t));
+    } else if (cfg.stakeMode === 'martingale' && !cfg.drawdownGovernor.noMartingale && consecLosses > 0) {
+      stake = Math.min(cfg.maxStake, cfg.stake * Math.pow(cfg.martingaleMultiplier, consecLosses));
+    }
+    // Drawdown governor stake overlays
+    if (consecLosses >= 2) stake *= cfg.drawdownGovernor.afterLosses2StakeOverlay;
+    // Win protection: reduce stake after 3 consecutive wins
+    if (wins >= 3 && cfg.drawdownGovernor.afterWins3StakeOverlay < 1) {
+      stake *= cfg.drawdownGovernor.afterWins3StakeOverlay;
+    }
+    stake = Math.max(0.35, Number(stake.toFixed(2)));
 
     const won = Math.random() < baseWinRate;
     const profit = won ? Number((stake * (payoutRate - 1)).toFixed(2)) : -stake;
@@ -368,7 +463,10 @@ function runBacktest(cfg: BotConfig): { trades: number; wins: number; losses: nu
     const dd = peak - balance;
     if (dd > maxDrawdown) maxDrawdown = dd;
 
-    if (cfg.enableDailyLoss && -pnl >= cfg.dailyLossLimit) break;
+    if (cfg.enableDailyLoss) {
+      const limit = cfg.enableDailyLossPercent ? (1000 * cfg.dailyLossLimitPercent / 100) : cfg.dailyLossLimit;
+      if (-pnl >= limit) break;
+    }
   }
 
   const trades = wins + losses;
@@ -381,14 +479,23 @@ interface ValidationWarning { field: string; message: string }
 
 function validate(cfg: BotConfig): ValidationWarning[] {
   const w: ValidationWarning[] = [];
-  if (cfg.stake <= 0) w.push({ field: 'stake', message: 'Stake must be greater than zero.' });
+  if (cfg.stake <= 0 && cfg.stakeMode === 'fixed') w.push({ field: 'stake', message: 'Stake must be greater than zero.' });
   if (cfg.duration <= 0) w.push({ field: 'duration', message: 'Duration must be at least 1.' });
   if (cfg.maxConsecLosses < 1) w.push({ field: 'maxConsecLosses', message: 'Max consecutive losses must be ≥ 1.' });
   if (cfg.stakeMode === 'martingale' && cfg.martingaleMultiplier < 1)
     w.push({ field: 'martingaleMultiplier', message: 'Martingale multiplier must be ≥ 1.' });
   if (cfg.stakeMode === 'percent' && (cfg.stakePercent <= 0 || cfg.stakePercent > 100))
     w.push({ field: 'stakePercent', message: 'Percent stake must be between 0 and 100.' });
-  // Check for duplicate/redundant conditions
+  if (cfg.stakeMode === 'score_scaled' && cfg.minStake >= cfg.maxStake)
+    w.push({ field: 'stake', message: 'Score-scaled: min stake must be less than max stake.' });
+  if (cfg.entryScoring.enabled) {
+    const total = cfg.entryScoring.breakoutStrengthWeight + cfg.entryScoring.bandExpansionWeight +
+      cfg.entryScoring.confirmationCandleWeight + cfg.entryScoring.adxStrengthWeight + cfg.entryScoring.atrRegimeWeight;
+    if (total !== 100) w.push({ field: 'entryScoring', message: `Entry scoring weights sum to ${total}, not 100.` });
+  }
+  if (cfg.regimeFilter.enabled && cfg.regimeFilter.activeRangeMin >= cfg.regimeFilter.activeRangeMax)
+    w.push({ field: 'regimeFilter', message: 'Regime filter: min range must be less than max range.' });
+  // Duplicate conditions check
   const condKeys = cfg.purchaseConditions.map(c => `${c.indicator}-${c.operator}-${c.value}`);
   const dupes = condKeys.filter((k, i) => condKeys.indexOf(k) !== i);
   if (dupes.length) w.push({ field: 'purchaseConditions', message: 'Duplicate condition detected — this is redundant.' });
@@ -526,6 +633,33 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
   const warningsRef = useRef(warnings);
   warningsRef.current = warnings;
 
+  // ── Saved / favourite bots ────────────────────────────────────────────────
+  const [savedBots, setSavedBots] = useState<BotConfig[]>(() => {
+    try { const r = localStorage.getItem('apex_saved_bots'); return r ? JSON.parse(r) : []; } catch { return []; }
+  });
+  const [showSaved, setShowSaved] = useState(false);
+
+  const saveToFavourites = () => {
+    const next = [cfg, ...savedBots.filter(b => b.name !== cfg.name)].slice(0, 20);
+    setSavedBots(next);
+    try { localStorage.setItem('apex_saved_bots', JSON.stringify(next)); } catch { /* ignore */ }
+    setSaved(true);
+    setNotice(`"${cfg.name}" saved to favourites.`);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  const loadSavedBot = (b: BotConfig) => {
+    dispatch({ type: 'RESET', payload: b });
+    setShowSaved(false);
+    setNotice(`Loaded "${b.name}" from favourites.`);
+  };
+
+  const deleteSavedBot = (name: string) => {
+    const next = savedBots.filter(b => b.name !== name);
+    setSavedBots(next);
+    try { localStorage.setItem('apex_saved_bots', JSON.stringify(next)); } catch { /* ignore */ }
+  };
+
   // ── Bot running state ─────────────────────────────────────────────────────
   const [isRunning, setIsRunning] = useState(false);
   const [tradeCount, setTradeCount] = useState(0);
@@ -567,15 +701,20 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
         dir = resolveDirection(c, c.direction as 'CALL' | 'PUT');
       }
 
-      // Martingale stake using ref for fresh consecutive loss count
+      // Stake computation with all modes + drawdown governor overlays
       let stake = c.stake;
-      if (c.stakeMode === 'martingale' && consecLossesRef.current > 0) {
-        stake = Math.min(c.stake * Math.pow(c.martingaleMultiplier, consecLossesRef.current), 500);
-      }
+      const cl = consecLossesRef.current;
       if (c.stakeMode === 'percent') {
-        // stake is set at configure time as stakePercent — use that
-        stake = c.stakePercent; // App.tsx runTrade will compute % of balance
+        stake = c.stakePercent; // App.tsx runTrade computes % of balance
+      } else if (c.stakeMode === 'score_scaled') {
+        // No live score available — use midpoint
+        stake = Math.max(c.minStake, Math.min(c.maxStake, (c.minStake + c.maxStake) / 2));
+      } else if (c.stakeMode === 'martingale' && !c.drawdownGovernor.noMartingale && cl > 0) {
+        stake = Math.min(c.maxStake, c.stake * Math.pow(c.martingaleMultiplier, cl));
       }
+      // Drawdown governor overlays
+      if (cl >= 2) stake *= c.drawdownGovernor.afterLosses2StakeOverlay;
+      stake = Math.max(0.35, Number(stake.toFixed(2)));
 
       // Pause if consecutive loss limit hit
       if (consecLossesRef.current >= c.maxConsecLosses) {
@@ -717,15 +856,51 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
       // ── Normalise riskManagement fields ──────────────────────────────────
       const rm = raw.riskManagement ?? {};
       const maxConsecLosses = raw.maxConsecLosses
-        ?? rm.drawdownGovernor?.afterConsecutiveLosses3 ? 3
-        : DEFAULT_CONFIG.maxConsecLosses;
-      const enableDailyLoss  = raw.enableDailyLoss
-        ?? (rm.dailyLossLimitPercent != null);
+        ?? (rm.drawdownGovernor?.afterConsecutiveLosses3 ? 3 : DEFAULT_CONFIG.maxConsecLosses);
+      const enableDailyLoss  = raw.enableDailyLoss ?? (rm.dailyLossLimitPercent != null);
       const dailyLossLimit   = raw.dailyLossLimit
         ?? (rm.dailyLossLimitPercent ? rm.dailyLossLimitPercent * 10 : DEFAULT_CONFIG.dailyLossLimit);
       const cooldownMinutes  = raw.cooldownMinutes
         ?? rm.drawdownGovernor?.afterConsecutiveLosses3?.cooldownMinutes
         ?? DEFAULT_CONFIG.cooldownMinutes;
+
+      // Drawdown governor
+      const dg = rm.drawdownGovernor ?? {};
+      const drawdownGovernor: DrawdownGovernor = {
+        afterLosses2StakeOverlay: Number(dg.afterConsecutiveLosses2?.stakeOverlay ?? raw.drawdownGovernor?.afterLosses2StakeOverlay ?? DEFAULT_CONFIG.drawdownGovernor.afterLosses2StakeOverlay),
+        afterLosses2Cooldown:     Number(dg.afterConsecutiveLosses2?.cooldownMinutes ?? raw.drawdownGovernor?.afterLosses2Cooldown ?? DEFAULT_CONFIG.drawdownGovernor.afterLosses2Cooldown),
+        afterLosses3Action:       (dg.afterConsecutiveLosses3?.action === 'pause' || raw.drawdownGovernor?.afterLosses3Action === 'pause') ? 'pause' : 'reduce',
+        afterLosses3Cooldown:     Number(dg.afterConsecutiveLosses3?.cooldownMinutes ?? raw.drawdownGovernor?.afterLosses3Cooldown ?? DEFAULT_CONFIG.drawdownGovernor.afterLosses3Cooldown),
+        afterWins3StakeOverlay:   Number(dg.afterConsecutiveWins3?.stakeOverlay ?? raw.drawdownGovernor?.afterWins3StakeOverlay ?? DEFAULT_CONFIG.drawdownGovernor.afterWins3StakeOverlay),
+        reverseOnLoss:            Boolean(dg.afterConsecutiveLosses2?.reverseDirection ?? raw.drawdownGovernor?.reverseOnLoss ?? false),
+        noMartingale:             Boolean(rm.noMartingale ?? raw.drawdownGovernor?.noMartingale ?? false),
+      };
+
+      // Regime filter
+      const rf = raw.regimeFilter ?? {};
+      const regimeFilter: RegimeFilter = {
+        enabled:        Boolean(rf.enabled ?? (rf.atrPeriod != null)),
+        atrPeriod:      Number(rf.atrPeriod ?? DEFAULT_CONFIG.regimeFilter.atrPeriod),
+        atrSmaPeriod:   Number(rf.atrSmaPeriod ?? DEFAULT_CONFIG.regimeFilter.atrSmaPeriod),
+        activeRangeMin: Number(rf.activeRangeMin ?? DEFAULT_CONFIG.regimeFilter.activeRangeMin),
+        activeRangeMax: Number(rf.activeRangeMax ?? DEFAULT_CONFIG.regimeFilter.activeRangeMax),
+      };
+
+      // Entry scoring
+      const es = raw.entryScoring ?? {};
+      const components: Record<string, number> = {};
+      if (Array.isArray(es.components)) {
+        es.components.forEach((c: { name: string; weight: number }) => { components[c.name] = c.weight; });
+      }
+      const entryScoring: EntryScoring = {
+        enabled:                   Boolean(es.threshold != null || raw.entryScoring?.enabled),
+        threshold:                 Number(es.threshold ?? DEFAULT_CONFIG.entryScoring.threshold),
+        breakoutStrengthWeight:    Number(components.breakoutStrength  ?? es.breakoutStrengthWeight  ?? DEFAULT_CONFIG.entryScoring.breakoutStrengthWeight),
+        bandExpansionWeight:       Number(components.bandExpansion     ?? es.bandExpansionWeight     ?? DEFAULT_CONFIG.entryScoring.bandExpansionWeight),
+        confirmationCandleWeight:  Number(components.confirmationCandle ?? es.confirmationCandleWeight ?? DEFAULT_CONFIG.entryScoring.confirmationCandleWeight),
+        adxStrengthWeight:         Number(components.adxStrength       ?? es.adxStrengthWeight       ?? DEFAULT_CONFIG.entryScoring.adxStrengthWeight),
+        atrRegimeWeight:           Number(components.atrRegime         ?? es.atrRegimeWeight         ?? DEFAULT_CONFIG.entryScoring.atrRegimeWeight),
+      };
 
       // ── Stake values ──────────────────────────────────────────────────────
       const stake = raw.stake ?? raw.minStake ?? raw.baseStake ?? DEFAULT_CONFIG.stake;
@@ -745,6 +920,8 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
         stake,
         stakeMode,
         stakePercent:      Number(raw.stakePercent)       || DEFAULT_CONFIG.stakePercent,
+        minStake:          Number(raw.minStake ?? raw.stake ?? DEFAULT_CONFIG.minStake),
+        maxStake:          Number(raw.maxStake ?? DEFAULT_CONFIG.maxStake),
         martingaleMultiplier: Number(raw.martingaleMultiplier) || DEFAULT_CONFIG.martingaleMultiplier,
         restartOnError:    raw.restartOnError  ?? DEFAULT_CONFIG.restartOnError,
         runOnceAtStart:    raw.runOnceAtStart  ?? DEFAULT_CONFIG.runOnceAtStart,
@@ -756,11 +933,17 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
         contractCount:     Number(raw.contractCount) || DEFAULT_CONFIG.contractCount,
         maxConsecLosses:   Number(maxConsecLosses)   || DEFAULT_CONFIG.maxConsecLosses,
         dailyLossLimit:    Number(dailyLossLimit)     || DEFAULT_CONFIG.dailyLossLimit,
+        dailyLossLimitPercent: Number(rm.dailyLossLimitPercent ?? raw.dailyLossLimitPercent ?? DEFAULT_CONFIG.dailyLossLimitPercent),
+        enableDailyLossPercent: Boolean(rm.dailyLossLimitPercent != null && raw.enableDailyLossPercent !== false),
         cooldownMinutes:   Number(cooldownMinutes)    || 0,
         takeProfitAmount:  Number(raw.takeProfitAmount) || DEFAULT_CONFIG.takeProfitAmount,
         enableTakeProfit:  raw.enableTakeProfit ?? DEFAULT_CONFIG.enableTakeProfit,
         enableDailyLoss:   Boolean(enableDailyLoss),
         maxTradesPerDay:   Number(raw.maxTradesPerDay) || DEFAULT_CONFIG.maxTradesPerDay,
+        nonOverlappingExecution: Boolean(rm.nonOverlappingExecution ?? raw.nonOverlappingExecution ?? DEFAULT_CONFIG.nonOverlappingExecution),
+        drawdownGovernor,
+        regimeFilter,
+        entryScoring,
       };
 
       dispatch({ type: 'RESET', payload: normalised });
@@ -784,9 +967,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
   };
 
   const saveBotCfg = () => {
-    setSaved(true);
-    setNotice(`Bot "${cfg.name}" saved to your library.`);
-    setTimeout(() => setSaved(false), 2500);
+    saveToFavourites();
   };
 
   const resetConfig = () => {
@@ -863,6 +1044,22 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
           <button type="button" className="bb-icon-btn bb-reset-btn" title="Reset to defaults" onClick={resetConfig}>
             <RefreshCw size={15} />
           </button>
+          <button type="button" className={`bb-icon-btn ${showSaved ? 'active' : ''}`}
+            title={`Saved bots (${savedBots.length})`}
+            onClick={() => { setShowSaved(v => !v); setShowTemplates(false); setShowImport(false); }}>
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              <BookOpen size={15} />
+              {savedBots.length > 0 && (
+                <span style={{
+                  position: 'absolute', top: -5, right: -6,
+                  background: '#2dd4bf', color: '#071110',
+                  borderRadius: '50%', width: 13, height: 13,
+                  fontSize: 8, fontWeight: 800,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>{savedBots.length}</span>
+              )}
+            </span>
+          </button>
           <button type="button" className={`bb-icon-btn ${showPanel ? 'active' : ''}`} title="Trade journal"
             onClick={() => setShowPanel(v => !v)}>
             <BarChart3 size={15} />
@@ -901,6 +1098,47 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                 <p>{t.description}</p>
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Saved / Favourite Bots panel ── */}
+      {showSaved && (
+        <div className="bb-templates-panel">
+          <div className="bb-templates-header">
+            <span>Saved bots {savedBots.length > 0 && `(${savedBots.length})`}</span>
+            <button type="button" className="bb-icon-btn" onClick={() => setShowSaved(false)}><X size={14} /></button>
+          </div>
+          {savedBots.length === 0 ? (
+            <p style={{ fontSize: 11, color: '#3d5a54', margin: 0, padding: '8px 2px' }}>
+              No saved bots yet. Click <strong>Save bot</strong> to save the current config.
+            </p>
+          ) : (
+            <div className="bb-saved-list">
+              {savedBots.map(b => (
+                <div key={b.name} className="bb-saved-row">
+                  <div className="bb-saved-info">
+                    <strong>{b.name}</strong>
+                    <span>{b.market.replace('Volatility ', 'V').replace(' Index', '')} · {b.tradeType.replace('_','/')} · {b.stakeMode}</span>
+                  </div>
+                  <div className="bb-saved-actions">
+                    <button type="button" className="bb-radio-btn active" style={{ fontSize: 10, padding: '3px 10px' }}
+                      onClick={() => loadSavedBot(b)}>
+                      Load
+                    </button>
+                    <button type="button" className="bb-remove-btn" onClick={() => deleteSavedBot(b.name)} title="Delete">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: 10, borderTop: '1px solid #162925', paddingTop: 10 }}>
+            <button type="button" className="primary" style={{ width: '100%', fontSize: 11, padding: '7px 0' }}
+              onClick={saveToFavourites}>
+              <Check size={12} /> Save current bot to favourites
+            </button>
           </div>
         </div>
       )}
@@ -1026,6 +1264,20 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                   </div>
                 </div>
 
+                {/* Stake mode */}
+                <div className="bb-field">
+                  <label className="bb-label">Stake mode</label>
+                  <div className="bb-radio-group">
+                    {(['fixed','percent','martingale','score_scaled'] as const).map(m => (
+                      <button key={m} type="button"
+                        className={`bb-radio-btn ${cfg.stakeMode === m ? 'active' : ''}`}
+                        onClick={() => update({ stakeMode: m })}>
+                        {m === 'fixed' ? 'Fixed $' : m === 'percent' ? '% Balance' : m === 'martingale' ? 'Martingale' : 'Score Scaled'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {cfg.stakeMode === 'fixed' && (
                   <>
                     {num('Stake ($)', cfg.stake, v => update({ stake: v }), 0.35, 100000, 0.5)}
@@ -1039,10 +1291,23 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                   </>
                 )}
                 {cfg.stakeMode === 'martingale' && (
-                  <div className="bb-field-row">
-                    {num('Initial stake ($)', cfg.stake, v => update({ stake: v }), 0.35, 10000, 0.5)}
-                    {num('Multiplier ×', cfg.martingaleMultiplier, v => update({ martingaleMultiplier: v }), 1, 10, 0.5)}
-                  </div>
+                  <>
+                    <div className="bb-field-row">
+                      {num('Initial stake ($)', cfg.stake, v => update({ stake: v }), 0.35, 10000, 0.5)}
+                      {num('Multiplier ×', cfg.martingaleMultiplier, v => update({ martingaleMultiplier: v }), 1, 10, 0.5)}
+                    </div>
+                    {num('Max stake cap ($)', cfg.maxStake, v => update({ maxStake: v }), 1, 100000, 1)}
+                    <p className="bb-field-hint">Doubles stake on each loss up to the cap. Highly aggressive — test on demo first.</p>
+                  </>
+                )}
+                {cfg.stakeMode === 'score_scaled' && (
+                  <>
+                    <div className="bb-field-row">
+                      {num('Min stake ($)', cfg.minStake, v => update({ minStake: Math.max(0.35, v) }), 0.35, 10000, 0.5)}
+                      {num('Max stake ($)', cfg.maxStake, v => update({ maxStake: v }), 1, 100000, 1)}
+                    </div>
+                    <p className="bb-field-hint">Stake scales linearly from min→max based on entry score. Requires Entry Scoring to be enabled in Risk Management.</p>
+                  </>
                 )}
 
                 <div className="bb-divider" />
@@ -1103,18 +1368,121 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
             </button>
             {activeBlock === 4 && (
               <div className="bb-block-body">
+
+                {/* ── Loss controls ── */}
+                <p className="bb-section-label">Loss controls</p>
                 {num('Max consecutive losses before pause', cfg.maxConsecLosses, v => update({ maxConsecLosses: Math.max(1, v) }), 1, 50)}
                 {warnFor('maxConsecLosses') && <p className="bb-warn-inline"><AlertTriangle size={11} /> {warnFor('maxConsecLosses')!.message}</p>}
                 {num('Cooldown after pause (minutes)', cfg.cooldownMinutes, v => update({ cooldownMinutes: Math.max(0, v) }), 0, 1440)}
                 {num('Max trades per day', cfg.maxTradesPerDay, v => update({ maxTradesPerDay: Math.max(1, v) }), 1, 1000)}
+                {tog('Non-overlapping execution', 'Wait for current contract to settle before placing the next.', cfg.nonOverlappingExecution, v => update({ nonOverlappingExecution: v }))}
 
                 <div className="bb-divider" />
+                {/* ── Daily loss limit ── */}
+                <p className="bb-section-label">Daily loss limit</p>
                 {tog('Enable daily loss limit', 'Stop all trading when daily loss reaches this amount.', cfg.enableDailyLoss, v => update({ enableDailyLoss: v }))}
-                {cfg.enableDailyLoss && num('Daily loss limit ($)', cfg.dailyLossLimit, v => update({ dailyLossLimit: Math.max(1, v) }), 1, 100000)}
+                {cfg.enableDailyLoss && (
+                  <>
+                    {tog('Use % of balance', 'Express the limit as a % of your starting balance.', cfg.enableDailyLossPercent, v => update({ enableDailyLossPercent: v }))}
+                    {cfg.enableDailyLossPercent
+                      ? num('Daily loss limit (% of balance)', cfg.dailyLossLimitPercent, v => update({ dailyLossLimitPercent: Math.max(0.1, v) }), 0.1, 100, 0.5)
+                      : num('Daily loss limit ($)', cfg.dailyLossLimit, v => update({ dailyLossLimit: Math.max(1, v) }), 1, 100000)
+                    }
+                  </>
+                )}
 
                 <div className="bb-divider" />
+                {/* ── Take profit ── */}
                 {tog('Enable take profit', 'Stop trading when cumulative profit reaches this amount.', cfg.enableTakeProfit, v => update({ enableTakeProfit: v }))}
                 {cfg.enableTakeProfit && num('Take profit target ($)', cfg.takeProfitAmount, v => update({ takeProfitAmount: Math.max(1, v) }), 1, 100000)}
+
+                <div className="bb-divider" />
+                {/* ── Drawdown Governor ── */}
+                <p className="bb-section-label">Drawdown governor</p>
+                <p className="bb-field-hint" style={{ marginBottom: 4 }}>Tiered stake and behaviour adjustments as losses accumulate.</p>
+                <div className="bb-field-row">
+                  {num('After 2 losses — stake overlay (0–1)', cfg.drawdownGovernor.afterLosses2StakeOverlay,
+                    v => update({ drawdownGovernor: { ...cfg.drawdownGovernor, afterLosses2StakeOverlay: Math.min(1, Math.max(0, v)) } }), 0, 1, 0.1)}
+                  {num('Cooldown (min)', cfg.drawdownGovernor.afterLosses2Cooldown,
+                    v => update({ drawdownGovernor: { ...cfg.drawdownGovernor, afterLosses2Cooldown: Math.max(0, v) } }), 0, 1440)}
+                </div>
+                <div className="bb-field">
+                  <label className="bb-label">After 3 losses — action</label>
+                  <div className="bb-radio-group">
+                    {(['pause','reduce'] as const).map(a => (
+                      <button key={a} type="button"
+                        className={`bb-radio-btn ${cfg.drawdownGovernor.afterLosses3Action === a ? 'active' : ''}`}
+                        onClick={() => update({ drawdownGovernor: { ...cfg.drawdownGovernor, afterLosses3Action: a } })}>
+                        {a === 'pause' ? '⏸ Pause' : '↓ Reduce stake'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {num('After 3 losses — cooldown (min)', cfg.drawdownGovernor.afterLosses3Cooldown,
+                  v => update({ drawdownGovernor: { ...cfg.drawdownGovernor, afterLosses3Cooldown: Math.max(0, v) } }), 0, 1440)}
+                {num('After 3 wins — stake overlay (0–1, bankroll protection)', cfg.drawdownGovernor.afterWins3StakeOverlay,
+                  v => update({ drawdownGovernor: { ...cfg.drawdownGovernor, afterWins3StakeOverlay: Math.min(1, Math.max(0, v)) } }), 0, 1, 0.1)}
+                {tog('Reverse direction on loss', 'Flip CALL↔PUT after each losing trade.', cfg.drawdownGovernor.reverseOnLoss,
+                  v => update({ drawdownGovernor: { ...cfg.drawdownGovernor, reverseOnLoss: v } }))}
+                {tog('No martingale (hard block)', 'Prevent stake escalation regardless of stake mode.', cfg.drawdownGovernor.noMartingale,
+                  v => update({ drawdownGovernor: { ...cfg.drawdownGovernor, noMartingale: v } }))}
+
+                <div className="bb-divider" />
+                {/* ── Regime Filter ── */}
+                <p className="bb-section-label">Regime filter (ATR)</p>
+                {tog('Enable regime filter', 'Only trade when ATR/SMA ratio is within the active range.', cfg.regimeFilter.enabled,
+                  v => update({ regimeFilter: { ...cfg.regimeFilter, enabled: v } }))}
+                {cfg.regimeFilter.enabled && (
+                  <>
+                    <div className="bb-field-row">
+                      {num('ATR period', cfg.regimeFilter.atrPeriod,
+                        v => update({ regimeFilter: { ...cfg.regimeFilter, atrPeriod: Math.max(1, v) } }), 2, 200)}
+                      {num('ATR SMA period', cfg.regimeFilter.atrSmaPeriod,
+                        v => update({ regimeFilter: { ...cfg.regimeFilter, atrSmaPeriod: Math.max(2, v) } }), 2, 200)}
+                    </div>
+                    <div className="bb-field-row">
+                      {num('Active range min', cfg.regimeFilter.activeRangeMin,
+                        v => update({ regimeFilter: { ...cfg.regimeFilter, activeRangeMin: v } }), 0, 5, 0.1)}
+                      {num('Active range max', cfg.regimeFilter.activeRangeMax,
+                        v => update({ regimeFilter: { ...cfg.regimeFilter, activeRangeMax: v } }), 0, 5, 0.1)}
+                    </div>
+                    <p className="bb-field-hint">ATR/SMA ratio must be between {cfg.regimeFilter.activeRangeMin} and {cfg.regimeFilter.activeRangeMax}. Below = too quiet, above = too wild.</p>
+                  </>
+                )}
+
+                <div className="bb-divider" />
+                {/* ── Entry Scoring ── */}
+                <p className="bb-section-label">Entry scoring</p>
+                {tog('Enable entry scoring', 'Score each signal 0–100. Only fire if score ≥ threshold.', cfg.entryScoring.enabled,
+                  v => update({ entryScoring: { ...cfg.entryScoring, enabled: v } }))}
+                {cfg.entryScoring.enabled && (
+                  <>
+                    {num('Score threshold (0–100)', cfg.entryScoring.threshold,
+                      v => update({ entryScoring: { ...cfg.entryScoring, threshold: Math.max(0, Math.min(100, v)) } }), 0, 100)}
+                    <p className="bb-section-label" style={{ marginTop: 6 }}>Component weights (must sum to 100)</p>
+                    <div className="bb-field-row">
+                      {num('Breakout strength', cfg.entryScoring.breakoutStrengthWeight,
+                        v => update({ entryScoring: { ...cfg.entryScoring, breakoutStrengthWeight: Math.max(0, v) } }), 0, 100)}
+                      {num('Band expansion', cfg.entryScoring.bandExpansionWeight,
+                        v => update({ entryScoring: { ...cfg.entryScoring, bandExpansionWeight: Math.max(0, v) } }), 0, 100)}
+                    </div>
+                    <div className="bb-field-row">
+                      {num('Confirmation candle', cfg.entryScoring.confirmationCandleWeight,
+                        v => update({ entryScoring: { ...cfg.entryScoring, confirmationCandleWeight: Math.max(0, v) } }), 0, 100)}
+                      {num('ADX strength', cfg.entryScoring.adxStrengthWeight,
+                        v => update({ entryScoring: { ...cfg.entryScoring, adxStrengthWeight: Math.max(0, v) } }), 0, 100)}
+                    </div>
+                    {num('ATR regime', cfg.entryScoring.atrRegimeWeight,
+                      v => update({ entryScoring: { ...cfg.entryScoring, atrRegimeWeight: Math.max(0, v) } }), 0, 100)}
+                    {(() => {
+                      const total = cfg.entryScoring.breakoutStrengthWeight + cfg.entryScoring.bandExpansionWeight +
+                        cfg.entryScoring.confirmationCandleWeight + cfg.entryScoring.adxStrengthWeight + cfg.entryScoring.atrRegimeWeight;
+                      return total !== 100
+                        ? <p className="bb-warn-inline"><AlertTriangle size={11} /> Weights sum to {total} — should be 100.</p>
+                        : <p className="bb-field-hint" style={{ color: '#34d399' }}>✓ Weights sum to 100.</p>;
+                    })()}
+                  </>
+                )}
 
                 {/* Risk score gauge */}
                 <div className="bb-divider" />
@@ -1473,7 +1841,8 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
 
 function RiskGauge({ cfg }: { cfg: BotConfig }) {
   let score = 0;
-  if (cfg.stakeMode === 'martingale') score += 35;
+  if (cfg.stakeMode === 'martingale' && !cfg.drawdownGovernor.noMartingale) score += 35;
+  else if (cfg.stakeMode === 'score_scaled') score += 10;
   else if (cfg.stakeMode === 'percent') score += 15;
   else score += 5;
   if (cfg.maxConsecLosses >= 5) score += 10;
@@ -1481,7 +1850,14 @@ function RiskGauge({ cfg }: { cfg: BotConfig }) {
   else score += 15;
   if (!cfg.enableDailyLoss) score += 20;
   if (cfg.cooldownMinutes === 0) score += 10;
-  score = Math.min(100, score);
+  // Drawdown governor mitigations
+  if (cfg.drawdownGovernor.afterLosses2StakeOverlay < 1) score -= 8;
+  if (cfg.drawdownGovernor.noMartingale) score -= 12;
+  // Regime filter reduces risk (skips bad market conditions)
+  if (cfg.regimeFilter.enabled) score -= 8;
+  // Entry scoring reduces risk (filters low-quality entries)
+  if (cfg.entryScoring.enabled) score -= 6;
+  score = Math.max(0, Math.min(100, score));
 
   const label = score < 30 ? 'Low' : score < 60 ? 'Moderate' : score < 80 ? 'High' : 'Very High';
   const color = score < 30 ? '#34d399' : score < 60 ? '#fbbf24' : '#f87171';
@@ -1496,9 +1872,9 @@ function RiskGauge({ cfg }: { cfg: BotConfig }) {
         <div className="bb-risk-fill" style={{ width: `${score}%`, background: color }} />
       </div>
       <p className="bb-field-hint" style={{ marginTop: 4 }}>
-        {score < 30 ? 'Conservative config — good for real-account use.'
-          : score < 60 ? 'Moderate risk. Recommended for demo testing first.'
-          : score < 80 ? 'High risk. Enable daily loss limit and cooldown.'
+        {score < 30 ? 'Conservative — good for real-account use.'
+          : score < 60 ? 'Moderate. Recommended to test on demo first.'
+          : score < 80 ? 'High. Enable daily loss limit, regime filter and cooldown.'
           : 'Very aggressive. Use paper mode before going live.'}
       </p>
     </div>
