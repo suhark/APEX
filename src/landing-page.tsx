@@ -160,6 +160,22 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
   const [utcTime, setUtcTime] = useState<string>('20:35:45 UTC');
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [policyTab, setPolicyTab] = useState<PolicyTab | null>(null);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactStatus, setContactStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+
+  const submitContact = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setContactStatus('sending');
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.fromEntries(form)) });
+      if (!response.ok) throw new Error('Request failed');
+      event.currentTarget.reset();
+      setContactStatus('sent');
+    } catch {
+      setContactStatus('error');
+    }
+  };
 
   // Live UTC Clock
   useEffect(() => {
@@ -607,6 +623,12 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
               </div>
 
               <div className="footer-col">
+                <span className="col-header font-mono">CONTACT</span>
+                <a href="mailto:support@apextradinglab.app">Email support</a>
+                <button type="button" onClick={() => { setContactOpen(true); setContactStatus('idle'); }}>Feedback / contact form</button>
+              </div>
+
+              <div className="footer-col">
                 <span className="col-header font-mono">LEGAL &amp; RISK</span>
                 <button type="button" onClick={() => setPolicyTab('privacy')}>
                   Privacy policy
@@ -631,6 +653,27 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
           </div>
         </div>
       </footer>
+
+      {contactOpen && (
+        <div className="contact-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContactOpen(false); }}>
+          <section className="contact-modal" role="dialog" aria-modal="true" aria-labelledby="contact-title">
+            <button type="button" className="contact-close" aria-label="Close contact form" onClick={() => setContactOpen(false)}>×</button>
+            <span className="eyebrow font-mono">GET IN TOUCH</span>
+            <h2 id="contact-title">Contact APEX support</h2>
+            <p>Send feedback or a support request to our team.</p>
+            {contactStatus === 'sent' ? <div className="contact-success">Thanks — your message has been sent.</div> : (
+              <form onSubmit={submitContact} className="contact-form">
+                <label>Name<input name="name" required autoComplete="name" /></label>
+                <label>Email<input name="email" type="email" required autoComplete="email" /></label>
+                <label>Subject<input name="subject" maxLength={150} /></label>
+                <label>Message<textarea name="message" required maxLength={10000} rows={5} /></label>
+                <button className="hero-primary-btn" type="submit" disabled={contactStatus === 'sending'}>{contactStatus === 'sending' ? 'Sending…' : 'Send message'}</button>
+                {contactStatus === 'error' && <small className="contact-error">Could not send your message. Please email support@apextradinglab.app.</small>}
+              </form>
+            )}
+          </section>
+        </div>
+      )}
 
       {/* Policy Modal Overlay */}
       {policyTab && (
