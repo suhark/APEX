@@ -629,7 +629,7 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
 
               <div className="footer-col">
                 <span className="col-header font-mono">CONTACT</span>
-                <a href="mailto:support@apextradinglab.app">Email support</a>
+                <a href="mailto:support@apextradinglab.app" onClick={(event) => { event.stopPropagation(); }}>Email support</a>
                 <button type="button" onClick={() => { setContactOpen(true); setContactStatus('idle'); setContactError(''); }}>Feedback / contact form</button>
               </div>
 
