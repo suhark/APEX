@@ -16,11 +16,11 @@
  *   - JSON export / import
  */
 
-import { useCallback, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight,
   Code2, Download, Play, Plus, RefreshCw,
-  RotateCcw, RotateCw, Shield, Trash2, Upload,
+  RotateCcw, RotateCw, Shield, Square, Trash2, Upload,
   X, Zap, BarChart3, BookOpen,
 } from 'lucide-react';
 
@@ -481,9 +481,27 @@ function ConditionEditor({
 
 export interface BotBuilderProps {
   setNotice: (msg: string) => void;
+  derivConnected: boolean;
+  runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; duration?: number }) => Promise<void>;
 }
 
-export function BotBuilder({ setNotice }: BotBuilderProps) {
+/** Map BotConfig trade type + direction to Deriv contract_type string */
+function resolveDirection(cfg: BotConfig, callPut: 'CALL' | 'PUT'): string {
+  switch (cfg.tradeType) {
+    case 'rise_fall':      return callPut;
+    case 'higher_lower':   return callPut;
+    case 'touch_no_touch': return callPut === 'CALL' ? 'ONETOUCH' : 'NOTOUCH';
+    case 'in_out':         return callPut === 'CALL' ? 'EXPIRYRANGE' : 'EXPIRYMISS';
+    case 'asians':         return callPut === 'CALL' ? 'ASIANU' : 'ASIAND';
+    case 'digits_even':    return 'DIGITEVEN';
+    case 'digits_odd':     return 'DIGITODD';
+    case 'digits_over':    return 'DIGITOVER';
+    case 'digits_under':   return 'DIGITUNDER';
+    default:               return callPut;
+  }
+}
+
+export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderProps) {
   const [state, dispatch] = useReducer(historyReducer, {
     past: [],
     present: { ...DEFAULT_CONFIG },
@@ -501,6 +519,71 @@ export function BotBuilder({ setNotice }: BotBuilderProps) {
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // ── Bot running state ─────────────────────────────────────────────────────
+  const [isRunning, setIsRunning] = useState(false);
+  const [tradeCount, setTradeCount] = useState(0);
+  const [consecLosses, setConsecLosses] = useState(0);
+  const intervalRef = useRef<number | null>(null);
+  const cfgRef = useRef(cfg);
+  cfgRef.current = cfg;
+
+  const stopBot = useCallback(() => {
+    if (intervalRef.current) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
+    setIsRunning(false);
+  }, []);
+
+  const startBot = useCallback(() => {
+    if (!derivConnected) { setNotice('Connect a Deriv account before running your bot.'); return; }
+    if (warnings.length > 0) { setNotice(`Fix ${warnings.length} validation issue(s) before starting.`); return; }
+    setTradeCount(0);
+    setConsecLosses(0);
+    setIsRunning(true);
+    setNotice(`Bot "${cfgRef.current.name}" started — trading every 5 seconds.`);
+
+    intervalRef.current = window.setInterval(async () => {
+      const c = cfgRef.current;
+      // Determine direction for this cycle
+      let dir: string;
+      if (c.direction === 'both') {
+        // Alternate CALL/PUT each cycle
+        dir = resolveDirection(c, tradeCount % 2 === 0 ? 'CALL' : 'PUT');
+      } else {
+        dir = resolveDirection(c, c.direction as 'CALL' | 'PUT');
+      }
+
+      // Stake with martingale
+      let stake = c.stake;
+      if (c.stakeMode === 'martingale' && consecLosses > 0) {
+        stake = Math.min(c.stake * Math.pow(c.martingaleMultiplier, consecLosses), 500);
+      }
+
+      try {
+        await runTrade({
+          instrument: c.market,
+          direction: dir,
+          stake,
+          source: 'builder',
+          botName: c.name,
+          duration: c.durationUnit === 'ticks' ? c.duration : undefined,
+        });
+        setTradeCount(n => n + 1);
+      } catch {
+        // runTrade handles its own notices
+      }
+    }, 5000);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [derivConnected, runTrade, warnings.length]);
+
+  // Stop bot when component unmounts or Deriv disconnects
+  useEffect(() => {
+    if (!derivConnected && isRunning) {
+      stopBot();
+      setNotice('Bot stopped — Deriv disconnected.');
+    }
+  }, [derivConnected, isRunning, stopBot, setNotice]);
+
+  useEffect(() => () => stopBot(), [stopBot]);
 
   const warnings = validate(cfg);
   const summary = buildSummary(cfg);
@@ -546,6 +629,13 @@ export function BotBuilder({ setNotice }: BotBuilderProps) {
     setSaved(true);
     setNotice(`Bot "${cfg.name}" saved to your library.`);
     setTimeout(() => setSaved(false), 2500);
+  };
+
+  const resetConfig = () => {
+    if (isRunning) stopBot();
+    dispatch({ type: 'RESET', payload: { ...DEFAULT_CONFIG } });
+    setBacktestResult(null);
+    setNotice('Bot configuration reset to defaults.');
   };
 
   const sel = (label: string, value: string, options: { value: string; label: string }[], onChange: (v: string) => void) => (
@@ -612,10 +702,25 @@ export function BotBuilder({ setNotice }: BotBuilderProps) {
           <button type="button" className="bb-icon-btn" title="Export JSON" onClick={exportJson}>
             <Download size={15} />
           </button>
+          <button type="button" className="bb-icon-btn bb-reset-btn" title="Reset to defaults" onClick={resetConfig}>
+            <RefreshCw size={15} />
+          </button>
           <button type="button" className={saved ? 'secondary' : 'primary'} style={{ fontSize: 11, padding: '6px 16px' }}
             onClick={saveBotCfg}>
             {saved ? <><Check size={13} /> Saved!</> : <><Code2 size={13} /> Save bot</>}
           </button>
+          {/* Start / Stop bot */}
+          {isRunning ? (
+            <button type="button" className="bb-stop-btn" onClick={stopBot} style={{ fontSize: 11, padding: '6px 14px' }}>
+              <Square size={12} fill="currentColor" /> Stop bot
+            </button>
+          ) : (
+            <button type="button" className="bb-start-btn" onClick={startBot}
+              disabled={!derivConnected} title={!derivConnected ? 'Connect Deriv first' : 'Start bot'}
+              style={{ fontSize: 11, padding: '6px 14px' }}>
+              <Play size={12} /> {derivConnected ? 'Start bot' : 'Connect Deriv'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -918,6 +1023,30 @@ export function BotBuilder({ setNotice }: BotBuilderProps) {
               </div>
             )}
           </div>
+
+          {/* Live bot status */}
+          {isRunning && (
+            <div className="bb-running-card">
+              <div className="bb-running-header">
+                <span className="live-dot" />
+                <span className="bb-running-label">Bot running</span>
+                <button type="button" className="bb-stop-btn-sm" onClick={stopBot}>
+                  <Square size={11} fill="currentColor" /> Stop
+                </button>
+              </div>
+              <div className="bb-running-stats">
+                <div className="bb-qs-item"><span>Trades fired</span><b>{tradeCount}</b></div>
+                <div className="bb-qs-item"><span>Consec losses</span><b className={consecLosses >= cfg.maxConsecLosses ? 'negative' : ''}>{consecLosses}</b></div>
+              </div>
+              <p className="bb-running-market">{cfg.market} · {cfg.tradeType.replace('_', '/')} · ${cfg.stake}</p>
+            </div>
+          )}
+          {!isRunning && !derivConnected && (
+            <div className="bb-connect-notice">
+              <AlertTriangle size={12} />
+              <span>Connect a Deriv account to run this bot on live markets.</span>
+            </div>
+          )}
 
           {/* Quick stats */}
           <div className="bb-quick-stats">

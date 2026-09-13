@@ -2195,7 +2195,7 @@ function PageView({
       />
     );
   }
-  if (page === 'builder') return <BotBuilder setNotice={setNotice} />;
+  if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} />;
   if (page === 'signals') return <Signals tick={tick} runTrade={runTrade} />;
   if (page === 'bulk') return <Bulk tick={tick} runTrade={runTrade} />;
   if (page === 'quick') return <Quick tick={tick} runTrade={runTrade} />;

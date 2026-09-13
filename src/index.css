@@ -3305,6 +3305,115 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 .bb-risk-track  { height: 6px; background: #1a2e2a; border-radius: 3px; overflow: hidden; }
 .bb-risk-fill   { height: 100%; border-radius: 3px; transition: width .3s ease; }
 
+/* ── Start / Stop / Reset buttons ── */
+.bb-start-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 7px;
+  border: 1px solid #10b981;
+  background: linear-gradient(135deg, #065f46, #10b981);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .15s;
+}
+.bb-start-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #047857, #059669);
+  box-shadow: 0 4px 14px rgba(16,185,129,.3);
+  transform: translateY(-1px);
+}
+.bb-start-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  border-color: #1a3330;
+  background: #0a1614;
+  color: #4a6a62;
+}
+
+.bb-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 7px;
+  border: 1px solid #ef4444;
+  background: rgba(239,68,68,.12);
+  color: #f87171;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .15s;
+}
+.bb-stop-btn:hover {
+  background: rgba(239,68,68,.22);
+  box-shadow: 0 4px 14px rgba(239,68,68,.2);
+}
+
+.bb-reset-btn { color: #6b8a84; }
+.bb-reset-btn:hover { color: #fbbf24 !important; border-color: #fbbf24 !important; }
+
+/* ── Running status card ── */
+.bb-running-card {
+  background: rgba(16,185,129,.07);
+  border: 1px solid rgba(16,185,129,.25);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn .2s ease;
+}
+.bb-running-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.bb-running-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #34d399;
+  flex: 1;
+}
+.bb-stop-btn-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(239,68,68,.4);
+  background: rgba(239,68,68,.1);
+  color: #f87171;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .12s;
+}
+.bb-stop-btn-sm:hover { background: rgba(239,68,68,.2); }
+.bb-running-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.bb-running-market {
+  font-size: 9px;
+  color: #2d4a45;
+  margin: 0;
+  font-family: 'DM Mono', monospace;
+}
+
+.bb-connect-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 10px 12px;
+  background: rgba(251,191,36,.06);
+  border: 1px solid rgba(251,191,36,.2);
+  border-radius: 10px;
+  font-size: 10px;
+  color: #fbbf24;
+  line-height: 1.5;
+}
+.bb-connect-notice svg { flex-shrink: 0; margin-top: 1px; }
+
 /* ==========================================================================
    TECHNICAL BLUEPRINT LANDING PAGE (MATCHING SPEC & REFERENCE WITH TEAL BRAND)
    ========================================================================== */
