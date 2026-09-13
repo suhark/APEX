@@ -86,7 +86,12 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
         }
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Authentication failed';
+      const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Authentication failed';
+      // Supabase free-tier email rate limit — translate to a user-friendly message
+      const isRateLimit = /rate.?limit|too.?many|email.?rate|over_email_send_rate/i.test(raw);
+      const message = isRateLimit
+        ? 'Too many sign-up attempts from this email address. Please wait a few minutes and try again — or sign in if you already have an account.'
+        : raw;
       setError(message);
     } finally {
       setLoading(false);
