@@ -483,6 +483,7 @@ export interface BotBuilderProps {
   setNotice: (msg: string) => void;
   derivConnected: boolean;
   runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; duration?: number }) => Promise<void>;
+  trades?: Array<{ id: string; instrument: string; direction: string; stake: number; result: string; profit: number; created_at: string; bot_name?: string; entry_price?: number; exit_price?: number }>;
 }
 
 /** Map BotConfig trade type + direction to Deriv contract_type string */
@@ -501,7 +502,7 @@ function resolveDirection(cfg: BotConfig, callPut: 'CALL' | 'PUT'): string {
   }
 }
 
-export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderProps) {
+export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }: BotBuilderProps) {
   const [state, dispatch] = useReducer(historyReducer, {
     past: [],
     present: { ...DEFAULT_CONFIG },
@@ -529,9 +530,15 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
   const [isRunning, setIsRunning] = useState(false);
   const [tradeCount, setTradeCount] = useState(0);
   const [consecLosses, setConsecLosses] = useState(0);
+  const [sessionStart, setSessionStart] = useState<string | null>(null);
+  const [showPanel, setShowPanel] = useState(false);
+  const [panelTab, setPanelTab] = useState<'summary' | 'transactions' | 'journal'>('summary');
   const intervalRef = useRef<number | null>(null);
   const cfgRef = useRef(cfg);
   cfgRef.current = cfg;
+  // Use refs for mutable counters so interval closure always reads fresh values
+  const tradeCountRef = useRef(0);
+  const consecLossesRef = useRef(0);
 
   const stopBot = useCallback(() => {
     if (intervalRef.current) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
@@ -541,23 +548,41 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
   const startBot = useCallback(() => {
     if (!derivConnected) { setNotice('Connect a Deriv account before running your bot.'); return; }
     if (warningsRef.current.length > 0) { setNotice(`Fix ${warningsRef.current.length} validation issue(s) before starting.`); return; }
+    tradeCountRef.current = 0;
+    consecLossesRef.current = 0;
     setTradeCount(0);
     setConsecLosses(0);
+    setSessionStart(new Date().toISOString());
+    setShowPanel(true); // auto-open panel when bot starts
     setIsRunning(true);
     setNotice(`Bot "${cfgRef.current.name}" started — trading every 5 seconds.`);
 
     intervalRef.current = window.setInterval(async () => {
       const c = cfgRef.current;
+      const cycleNum = tradeCountRef.current;
       let dir: string;
       if (c.direction === 'both') {
-        dir = resolveDirection(c, tradeCount % 2 === 0 ? 'CALL' : 'PUT');
+        dir = resolveDirection(c, cycleNum % 2 === 0 ? 'CALL' : 'PUT');
       } else {
         dir = resolveDirection(c, c.direction as 'CALL' | 'PUT');
       }
 
+      // Martingale stake using ref for fresh consecutive loss count
       let stake = c.stake;
-      if (c.stakeMode === 'martingale' && consecLosses > 0) {
-        stake = Math.min(c.stake * Math.pow(c.martingaleMultiplier, consecLosses), 500);
+      if (c.stakeMode === 'martingale' && consecLossesRef.current > 0) {
+        stake = Math.min(c.stake * Math.pow(c.martingaleMultiplier, consecLossesRef.current), 500);
+      }
+      if (c.stakeMode === 'percent') {
+        // stake is set at configure time as stakePercent — use that
+        stake = c.stakePercent; // App.tsx runTrade will compute % of balance
+      }
+
+      // Pause if consecutive loss limit hit
+      if (consecLossesRef.current >= c.maxConsecLosses) {
+        setNotice(`⏸ Bot paused — ${consecLossesRef.current} consecutive losses. Cooldown: ${c.cooldownMinutes}min.`);
+        if (intervalRef.current) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
+        setIsRunning(false);
+        return;
       }
 
       try {
@@ -569,7 +594,8 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
           botName: c.name,
           duration: c.durationUnit === 'ticks' ? c.duration : undefined,
         });
-        setTradeCount(n => n + 1);
+        tradeCountRef.current += 1;
+        setTradeCount(tradeCountRef.current);
       } catch {
         // runTrade handles its own notices
       }
@@ -586,6 +612,33 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
   }, [derivConnected, isRunning, stopBot, setNotice]);
 
   useEffect(() => () => stopBot(), [stopBot]);
+
+  // Derive this session's trades from the trades prop (filtered by bot name + session start)
+  const sessionTrades = sessionStart
+    ? trades.filter(t =>
+        t.bot_name === cfg.name &&
+        new Date(t.created_at).getTime() >= new Date(sessionStart).getTime() - 2000 &&
+        (t.result === 'won' || t.result === 'lost')
+      )
+    : [];
+
+  // Keep consecLossesRef in sync with real settled trades
+  useEffect(() => {
+    if (!sessionStart) return;
+    let streak = 0;
+    for (const t of [...sessionTrades].reverse()) {
+      if (t.result === 'lost') streak++;
+      else break;
+    }
+    consecLossesRef.current = streak;
+    setConsecLosses(streak);
+  }, [sessionTrades.length, sessionStart]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sessionWins   = sessionTrades.filter(t => t.result === 'won').length;
+  const sessionLosses = sessionTrades.filter(t => t.result === 'lost').length;
+  const totalStake    = sessionTrades.reduce((s, t) => s + Number(t.stake ?? 0), 0);
+  const totalPnl      = sessionTrades.reduce((s, t) => s + Number(t.profit ?? 0), 0);
+  const totalPayout   = sessionTrades.filter(t => t.result === 'won').reduce((s, t) => s + Number(t.stake ?? 0) + Number(t.profit ?? 0), 0);
 
   const runBt = () => {
     setBacktesting(true);
@@ -703,6 +756,10 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
           </button>
           <button type="button" className="bb-icon-btn bb-reset-btn" title="Reset to defaults" onClick={resetConfig}>
             <RefreshCw size={15} />
+          </button>
+          <button type="button" className={`bb-icon-btn ${showPanel ? 'active' : ''}`} title="Trade journal"
+            onClick={() => setShowPanel(v => !v)}>
+            <BarChart3 size={15} />
           </button>
           <button type="button" className={saved ? 'secondary' : 'primary'} style={{ fontSize: 11, padding: '6px 16px' }}
             onClick={saveBotCfg}>
@@ -1079,6 +1136,226 @@ export function BotBuilder({ setNotice, derivConnected, runTrade }: BotBuilderPr
 
         </div>
       </div>
+
+      {/* ── Trade Journal Panel — collapsible slide-in from right ── */}
+      {showPanel && (
+        <div className="bb-journal-panel">
+          <div className="bb-journal-header">
+            {/* Status bar */}
+            <div className="bb-journal-status">
+              {isRunning ? (
+                <>
+                  <span className="live-dot" />
+                  <span className="bb-journal-status-label">Contract bought</span>
+                  <div className="bb-journal-progress">
+                    <div className="bb-journal-progress-fill" />
+                  </div>
+                </>
+              ) : (
+                <span className="bb-journal-status-label" style={{ color: '#64748b' }}>Bot not running</span>
+              )}
+              <button type="button" className="bb-icon-btn" style={{ marginLeft: 'auto', width: 24, height: 24 }}
+                onClick={() => setShowPanel(false)}>
+                <X size={13} />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="bb-journal-tabs">
+              {(['summary', 'transactions', 'journal'] as const).map(tab => (
+                <button key={tab} type="button"
+                  className={`bb-journal-tab ${panelTab === tab ? 'active' : ''}`}
+                  onClick={() => setPanelTab(tab)}>
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="bb-journal-body">
+            {/* ── Summary tab ── */}
+            {panelTab === 'summary' && (
+              <div className="bb-journal-summary">
+                {sessionTrades.length === 0 && !isRunning && (
+                  <p className="bb-journal-empty">Start the bot to see live trading stats here.</p>
+                )}
+                {(sessionTrades.length > 0 || isRunning) && (
+                  <>
+                    {/* Current contract indicator */}
+                    <div className="bb-journal-market-row">
+                      <div className="bb-journal-market-badge">
+                        {cfg.market.replace('Volatility ', 'V').replace(' Index', '').replace('(1s)', '1s').substring(0, 6)}
+                      </div>
+                      <div>
+                        <strong className="bb-journal-market-name">{cfg.market}</strong>
+                        <span className="bb-journal-type">{TRADE_TYPES.find(t => t.key === cfg.tradeType)?.label}</span>
+                      </div>
+                    </div>
+
+                    {/* Totals grid */}
+                    <div className="bb-journal-grid">
+                      <div className="bb-journal-cell">
+                        <span>Total stake</span>
+                        <b>${totalStake.toFixed(2)} USD</b>
+                      </div>
+                      <div className="bb-journal-cell">
+                        <span>Total payout</span>
+                        <b>${totalPayout.toFixed(2)} USD</b>
+                      </div>
+                      <div className="bb-journal-cell">
+                        <span>No. of runs</span>
+                        <b>{tradeCount}</b>
+                      </div>
+                    </div>
+
+                    <div className="bb-journal-divider" />
+
+                    <div className="bb-journal-grid">
+                      <div className="bb-journal-cell">
+                        <span>Contracts lost</span>
+                        <b className="negative">{sessionLosses}</b>
+                      </div>
+                      <div className="bb-journal-cell">
+                        <span>Contracts won</span>
+                        <b className="positive">{sessionWins}</b>
+                      </div>
+                      <div className="bb-journal-cell">
+                        <span>Total profit/loss</span>
+                        <b className={totalPnl >= 0 ? 'positive' : 'negative'}>
+                          {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)} USD
+                        </b>
+                      </div>
+                    </div>
+
+                    {/* Win/loss bar */}
+                    {sessionTrades.length > 0 && (
+                      <div className="bb-journal-bar-wrap">
+                        <BacktestBar wins={sessionWins} losses={sessionLosses} />
+                        <div className="bb-journal-bar-labels">
+                          <span className="positive">{sessionWins} won</span>
+                          <span className="negative">{sessionLosses} lost</span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Reset session */}
+                <button type="button" className="secondary"
+                  style={{ width: '100%', marginTop: 12, fontSize: 11 }}
+                  onClick={() => { setSessionStart(new Date().toISOString()); setTradeCount(0); tradeCountRef.current = 0; consecLossesRef.current = 0; setConsecLosses(0); }}>
+                  <RefreshCw size={12} /> Reset session stats
+                </button>
+              </div>
+            )}
+
+            {/* ── Transactions tab ── */}
+            {panelTab === 'transactions' && (
+              <div className="bb-journal-transactions">
+                <div className="bb-journal-toolbar">
+                  <button type="button" className="secondary" style={{ fontSize: 10, padding: '4px 10px' }}
+                    onClick={() => {
+                      const csv = ['Time,Market,Direction,Stake,Result,P/L',
+                        ...sessionTrades.map(t => `${t.created_at},${t.instrument},${t.direction},${t.stake},${t.result},${t.profit}`)
+                      ].join('\n');
+                      const blob = new Blob([csv], { type: 'text/csv' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a'); a.href = url; a.download = `${cfg.name}-trades.csv`; a.click(); URL.revokeObjectURL(url);
+                    }}>
+                    <Download size={11} /> Download
+                  </button>
+                </div>
+                {sessionTrades.length === 0 ? (
+                  <p className="bb-journal-empty">No settled trades yet for this session.</p>
+                ) : (
+                  <div className="bb-transaction-list">
+                    <div className="bb-transaction-header">
+                      <span>Type</span>
+                      <span>Entry / Exit</span>
+                      <span>Stake & P/L</span>
+                    </div>
+                    {[...sessionTrades].reverse().map(t => (
+                      <div key={t.id} className="bb-transaction-row">
+                        <div className="bb-tx-type">
+                          <span className="bb-tx-market">{t.instrument.replace('Volatility ', 'V').replace(' Index', '').replace(' (1s)', '1s')}</span>
+                          <span className={`bb-tx-dir ${t.direction === 'CALL' ? 'call-text' : 'put-text'}`}>{t.direction}</span>
+                        </div>
+                        <div className="bb-tx-prices">
+                          <span>● {t.entry_price?.toFixed(2) ?? '—'}</span>
+                          <span>○ {t.exit_price?.toFixed(2) ?? '—'}</span>
+                        </div>
+                        <div className="bb-tx-pnl">
+                          <span>${t.stake.toFixed(2)}</span>
+                          <b className={t.result === 'won' ? 'positive' : 'negative'}>
+                            {t.result === 'won' ? '+' : '-'}${Math.abs(t.profit).toFixed(2)} USD
+                          </b>
+                        </div>
+                      </div>
+                    ))}
+                    {/* Session totals */}
+                    <div className="bb-transaction-footer">
+                      <div className="bb-journal-grid">
+                        <div className="bb-journal-cell"><span>Total stake</span><b>${totalStake.toFixed(2)}</b></div>
+                        <div className="bb-journal-cell"><span>Contracts won</span><b className="positive">{sessionWins}</b></div>
+                        <div className="bb-journal-cell"><span>Total P/L</span><b className={totalPnl >= 0 ? 'positive' : 'negative'}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)}</b></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Journal tab ── */}
+            {panelTab === 'journal' && (
+              <div className="bb-journal-log">
+                <div className="bb-journal-toolbar">
+                  <button type="button" className="secondary" style={{ fontSize: 10, padding: '4px 10px' }}
+                    onClick={() => {
+                      const lines = sessionTrades.flatMap(t => [
+                        `Bought: Contract purchased\n${new Date(t.created_at).toLocaleString()}`,
+                        `${t.result === 'won' ? 'Won' : 'Loss'} amount: ${t.result === 'won' ? '+' : '-'}$${Math.abs(t.profit).toFixed(2)} USD\n${new Date(t.created_at).toLocaleString()}`,
+                      ]);
+                      const blob = new Blob([lines.join('\n\n')], { type: 'text/plain' });
+                      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${cfg.name}-journal.txt`; a.click(); URL.revokeObjectURL(url);
+                    }}>
+                    <Download size={11} /> Download
+                  </button>
+                </div>
+                {sessionTrades.length === 0 && !isRunning ? (
+                  <p className="bb-journal-empty">No activity yet. Start the bot to see the journal.</p>
+                ) : (
+                  <div className="bb-journal-entries">
+                    {isRunning && (
+                      <div className="bb-journal-entry bought">
+                        <span className="bb-je-label">Running — next trade in ~5s</span>
+                        <span className="bb-je-time">{new Date().toLocaleString()}</span>
+                      </div>
+                    )}
+                    {[...sessionTrades].reverse().map(t => (
+                      <div key={t.id}>
+                        <div className="bb-journal-entry bought">
+                          <span className="bb-je-label">Bought: Contract purchased ({t.instrument.replace('Volatility ', 'V').replace(' Index', '')} · {t.direction})</span>
+                          <span className="bb-je-time">{new Date(t.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'medium' })}</span>
+                        </div>
+                        <div className={`bb-journal-entry ${t.result === 'won' ? 'won' : 'lost'}`}>
+                          <span className="bb-je-label">
+                            {t.result === 'won' ? 'Won' : 'Loss'} amount:{' '}
+                            <b className={t.result === 'won' ? 'positive' : 'negative'}>
+                              {t.result === 'won' ? '+' : '-'}${Math.abs(t.profit).toFixed(2)} USD
+                            </b>
+                          </span>
+                          <span className="bb-je-time">{new Date(t.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'medium' })}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

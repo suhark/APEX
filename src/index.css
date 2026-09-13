@@ -2869,6 +2869,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 }
 .bb-icon-btn:hover:not(:disabled) { border-color: #2dd4bf; color: #2dd4bf; background: rgba(45,212,191,.06); }
 .bb-icon-btn:disabled { opacity: .35; cursor: not-allowed; }
+.bb-icon-btn.active { border-color: #2dd4bf; color: #2dd4bf; background: rgba(45,212,191,.1); }
 
 /* ── Templates / import panels ── */
 .bb-templates-panel,
@@ -3413,6 +3414,184 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   line-height: 1.5;
 }
 .bb-connect-notice svg { flex-shrink: 0; margin-top: 1px; }
+
+/* ── Trade Journal Panel ── */
+.bb-journal-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 320px;
+  background: #080f0e;
+  border-left: 1px solid #1e3530;
+  display: flex;
+  flex-direction: column;
+  z-index: 300;
+  animation: slideInRight .2s ease;
+  box-shadow: -8px 0 32px rgba(0,0,0,.55);
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.bb-journal-header {
+  flex-shrink: 0;
+  border-bottom: 1px solid #1e3530;
+}
+
+.bb-journal-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #162925;
+  min-height: 44px;
+}
+.bb-journal-status-label { font-size: 11px; font-weight: 700; color: #34d399; }
+.bb-journal-progress {
+  flex: 1;
+  height: 4px;
+  background: #1a2e2a;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.bb-journal-progress-fill {
+  height: 100%;
+  width: 70%;
+  background: linear-gradient(90deg, #2dd4bf, #10b981);
+  border-radius: 2px;
+  animation: progressPulse 1.8s ease-in-out infinite;
+}
+@keyframes progressPulse {
+  0%,100% { opacity: .7; width: 60%; }
+  50%      { opacity: 1; width: 85%; }
+}
+
+.bb-journal-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 8px;
+}
+.bb-journal-tab {
+  flex: 1;
+  padding: 10px 4px;
+  border: none;
+  background: transparent;
+  color: #4a6a62;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all .15s;
+  font-family: inherit;
+}
+.bb-journal-tab:hover { color: #94a3b8; }
+.bb-journal-tab.active { color: #2dd4bf; border-bottom-color: #2dd4bf; }
+
+.bb-journal-body {
+  flex: 1;
+  overflow-y: auto;
+}
+.bb-journal-empty {
+  padding: 24px 16px;
+  font-size: 11px;
+  color: #3d5a54;
+  text-align: center;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Summary tab */
+.bb-journal-summary { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.bb-journal-market-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: #091413;
+  border: 1px solid #1e3530;
+  border-radius: 10px;
+}
+.bb-journal-market-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  background: #112824;
+  border: 1px solid #1e4a3e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 800;
+  color: #2dd4bf;
+  font-family: 'DM Mono', monospace;
+  flex-shrink: 0;
+}
+.bb-journal-market-name { display: block; font-size: 12px; font-weight: 700; color: #e2e8f0; }
+.bb-journal-type { font-size: 10px; color: #4a6a62; }
+
+.bb-journal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+.bb-journal-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.bb-journal-cell span { font-size: 9px; color: #4a6a62; text-transform: uppercase; letter-spacing: .05em; }
+.bb-journal-cell b { font-size: 12px; color: #e2e8f0; font-family: 'DM Mono', monospace; }
+.bb-journal-divider { height: 1px; background: #111e1c; }
+.bb-journal-bar-wrap { display: flex; flex-direction: column; gap: 4px; }
+.bb-journal-bar-labels { display: flex; justify-content: space-between; font-size: 9px; }
+
+/* Transactions tab */
+.bb-journal-transactions { padding: 10px; }
+.bb-journal-toolbar { display: flex; gap: 6px; margin-bottom: 10px; }
+.bb-transaction-list { display: flex; flex-direction: column; gap: 0; }
+.bb-transaction-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  padding: 6px 8px;
+  font-size: 9px;
+  color: #3d5a54;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 700;
+}
+.bb-transaction-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: center;
+  padding: 10px 8px;
+  border-top: 1px solid #111e1c;
+  font-size: 11px;
+  gap: 4px;
+}
+.bb-tx-type { display: flex; flex-direction: column; gap: 2px; }
+.bb-tx-market { font-size: 9px; font-weight: 800; color: #2dd4bf; font-family: 'DM Mono', monospace; }
+.bb-tx-dir { font-size: 10px; font-weight: 700; }
+.bb-tx-prices { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #94a3b8; font-family: 'DM Mono', monospace; }
+.bb-tx-pnl { display: flex; flex-direction: column; gap: 2px; text-align: right; }
+.bb-tx-pnl span { font-size: 10px; color: #64748b; }
+.bb-tx-pnl b { font-size: 11px; font-family: 'DM Mono', monospace; }
+.bb-transaction-footer { padding: 10px 8px; border-top: 1px solid #1e3530; background: #080f0e; }
+
+/* Journal tab */
+.bb-journal-log { padding: 10px; }
+.bb-journal-entries { display: flex; flex-direction: column; gap: 0; }
+.bb-journal-entry {
+  padding: 9px 10px;
+  border-top: 1px solid #111e1c;
+}
+.bb-journal-entry.bought { background: transparent; }
+.bb-journal-entry.won    { background: rgba(52,211,153,.04); }
+.bb-journal-entry.lost   { background: rgba(248,113,113,.04); }
+.bb-je-label { display: block; font-size: 11px; color: #94a3b8; line-height: 1.4; }
+.bb-journal-entry.bought .bb-je-label { color: #2dd4bf; }
+.bb-je-time  { display: block; font-size: 9px; color: #2d4a45; margin-top: 2px; }
 
 /* ==========================================================================
    TECHNICAL BLUEPRINT LANDING PAGE (MATCHING SPEC & REFERENCE WITH TEAL BRAND)
