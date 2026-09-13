@@ -166,14 +166,15 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
 
   const submitContact = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setContactStatus('sending');
     setContactError('');
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     try {
       const response = await fetch('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.fromEntries(form)) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
-      event.currentTarget.reset();
+      formElement.reset();
       setContactStatus('sent');
     } catch (error) {
       setContactError(error instanceof Error ? error.message : 'Unable to send your message. Please try again.');
