@@ -162,17 +162,21 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
   const [policyTab, setPolicyTab] = useState<PolicyTab | null>(null);
   const [contactOpen, setContactOpen] = useState(false);
   const [contactStatus, setContactStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [contactError, setContactError] = useState('');
 
   const submitContact = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setContactStatus('sending');
+    setContactError('');
     const form = new FormData(event.currentTarget);
     try {
       const response = await fetch('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.fromEntries(form)) });
-      if (!response.ok) throw new Error('Request failed');
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
       event.currentTarget.reset();
       setContactStatus('sent');
-    } catch {
+    } catch (error) {
+      setContactError(error instanceof Error ? error.message : 'Unable to send your message. Please try again.');
       setContactStatus('error');
     }
   };
@@ -625,7 +629,7 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
               <div className="footer-col">
                 <span className="col-header font-mono">CONTACT</span>
                 <a href="mailto:support@apextradinglab.app">Email support</a>
-                <button type="button" onClick={() => { setContactOpen(true); setContactStatus('idle'); }}>Feedback / contact form</button>
+                <button type="button" onClick={() => { setContactOpen(true); setContactStatus('idle'); setContactError(''); }}>Feedback / contact form</button>
               </div>
 
               <div className="footer-col">
@@ -668,7 +672,7 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
                 <label>Subject<input name="subject" maxLength={150} /></label>
                 <label>Message<textarea name="message" required maxLength={10000} rows={5} /></label>
                 <button className="hero-primary-btn" type="submit" disabled={contactStatus === 'sending'}>{contactStatus === 'sending' ? 'Sending…' : 'Send message'}</button>
-                {contactStatus === 'error' && <small className="contact-error">Could not send your message. Please email support@apextradinglab.app.</small>}
+                {contactStatus === 'error' && <small className="contact-error">{contactError || 'Unable to send your message. Please try again.'} If this continues, email <a href="mailto:support@apextradinglab.app">support@apextradinglab.app</a>.</small>}
               </form>
             )}
           </section>
