@@ -3041,10 +3041,16 @@ function MarketScanner() {
     };
     const fast = ema(9); const slow = ema(20);
     const trendBonus = fast !== null && slow !== null && fast !== slow ? 0.025 : 0;
+    const returns = quotes.slice(1).map((quote, index) => (quote - quotes[index]) / Math.max(quotes[index], Number.EPSILON));
+    const meanReturn = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : 0;
+    const variance = returns.length ? returns.reduce((sum, value) => sum + ((value - meanReturn) ** 2), 0) / returns.length : 0;
+    const volatility = Math.sqrt(variance);
+    const structure = latest > Math.max(...quotes.slice(-10)) ? 'BREAKOUT_UP' : latest < Math.min(...quotes.slice(-10)) ? 'BREAKOUT_DOWN' : 'RANGE';
     setRows([5, 10, 15].map((duration, index) => {
-      const probability = Math.min(0.7, Math.max(0.3, 0.5 + trendBonus + Math.min(0.04, movement * 6) - index * 0.01));
+      const structureBonus = structure === 'RANGE' ? 0 : (structure === direction === 'CALL' ? 0.02 : -0.02);
+            const probability = Math.min(0.7, Math.max(0.3, 0.5 + trendBonus + structureBonus + Math.min(0.04, movement * 6) - Math.min(0.03, volatility * 20) - index * 0.01));
       const breakEven = 0.55; const edge = probability - breakEven;
-      return { symbol: 'Volatility 75 Index', market_family: 'Volatility', contract_type: direction, duration, status: ticks.length < 20 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', score: Math.min(100, Math.round((ticks.length / 12) + (fast !== null && slow !== null ? 20 : 0))), estimated_probability: probability, break_even_probability: breakEven, edge, sample_size: ticks.length };
+      return { symbol: 'Volatility 75 Index', market_family: 'Volatility', contract_type: direction, duration, status: ticks.length < 20 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', score: Math.min(100, Math.round((ticks.length / 12) + (fast !== null && slow !== null ? 20 : 0) + (structure === 'RANGE' ? 0 : 10))), estimated_probability: probability, break_even_probability: breakEven, edge, sample_size: ticks.length };
     }));
     setLastRefresh(new Date());
   };
