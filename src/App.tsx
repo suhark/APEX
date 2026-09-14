@@ -3016,7 +3016,7 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
 
 
 function MarketScanner() {
-  const derivConnected = false;
+  const derivConnected = true;
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'>('ALL');
   const [lastRefresh, setLastRefresh] = useState(() => new Date());
   const [loading, setLoading] = useState(false);
