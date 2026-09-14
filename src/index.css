@@ -19,6 +19,26 @@
 .bulk-controls input, .bulk-controls select { width: 100%; border: 1px solid #24443d; border-radius: 6px; padding: 10px; color: #e8f5f2; background: #091310; outline: none; }
 .bulk-controls input:focus, .bulk-controls select:focus { border-color: #42d5bb; }
 .bulk-result { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 11px; border: 1px solid #266b5c; border-radius: 7px; color: #63e3ca; font-size: 12px; }
+.scanner-error { margin-bottom: 14px; padding: 12px 14px; border: 1px solid #713b3b; border-radius: 8px; color: #fca5a5; background: #281717; font-size: 12px; }
+.scanner-gate { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; padding: 14px 16px; border: 1px solid #27554a; border-radius: 10px; background: #0d211d; color: #63e3ca; }
+.scanner-gate b, .scanner-gate span { display: block; }
+.scanner-gate span { margin-top: 4px; color: #8aa59e; font-size: 11px; }
+.scanner-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.scanner-toolbar .eyebrow { margin-right: 8px; }
+.active-filter { border-color: #42d5bb; color: #42d5bb; }
+.scanner-table-wrap { overflow-x: auto; }
+.scanner-table { min-width: 900px; }
+.scanner-row { display: grid; grid-template-columns: 2fr 1fr repeat(5, minmax(78px, .7fr)); align-items: center; gap: 14px; padding: 16px 0; border-top: 1px solid #1a2b27; }
+.scanner-row > div:first-child b, .scanner-row > div:first-child span, .scanner-row > div:not(:first-child) span, .scanner-row > div:not(:first-child) strong { display: block; }
+.scanner-row > div:first-child span, .scanner-row > div:not(:first-child) span { margin-top: 5px; color: #708780; font-size: 10px; }
+.scanner-row > div:not(:first-child) strong { margin-top: 4px; font-family: 'DM Mono', monospace; font-size: 12px; }
+.scanner-status { width: max-content; padding: 4px 7px; border-radius: 4px; font-size: 9px; font-weight: 800; letter-spacing: .05em; }
+.scanner-status.qualified { color: #65e3cb; background: #123b32; }
+.scanner-status.watch { color: #f2bd68; background: #3a2b13; }
+.scanner-status.no-signal { color: #a2b1ae; background: #1c2825; }
+.scanner-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 14px; }
+.scanner-cards p { margin-top: 10px; line-height: 1.6; }
+@media (max-width: 800px) { .scanner-cards { grid-template-columns: 1fr; } }
 
 :root { font-family: 'Manrope', system-ui, sans-serif; color: #f4f7f7; background: #08100f; font-synthesis: none; }
 * { box-sizing: border-box; }

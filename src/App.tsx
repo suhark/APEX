@@ -19,7 +19,7 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY ?? '',
 );
 
-type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift';
+type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'scanner' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift';
 type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 
@@ -115,7 +115,7 @@ const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'bots',      label: 'Free Bots',      icon: Bot },
   { key: 'manual',    label: 'Manual Trader',   icon: Target },
   { key: 'builder',   label: 'Bot Builder',     icon: Code2 },
-  { key: 'signals',   label: 'Signal AI',       icon: Sparkles },
+  { key: 'scanner',   label: 'Market Scanner',  icon: Activity },
   { key: 'bulk',      label: 'Bulk Trader',     icon: ListFilter },
   { key: 'quick',     label: 'Quick Bot',       icon: Zap },
   { key: 'apex',      label: 'Apex Bot',        icon: Rocket },
@@ -501,7 +501,7 @@ function App() {
   const [authChecking, setAuthChecking] = useState(true);
   const [page, setPageState] = useState<Page>(() => {
     const saved = sessionStorage.getItem('apex_page');
-    const valid: Page[] = ['dashboard','bots','manual','builder','signals','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
+    const valid: Page[] = ['dashboard','bots','manual','builder','scanner','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
     return (saved && valid.includes(saved as Page)) ? saved as Page : 'dashboard';
   });
   const setPage = (p: Page) => { sessionStorage.setItem('apex_page', p); setPageState(p); };
@@ -2196,7 +2196,7 @@ function PageView({
     );
   }
   if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} trades={trades} />;
-  if (page === 'signals') return <Signals tick={tick} runTrade={runTrade} />;
+  if (page === 'scanner') return <MarketScanner />;
   if (page === 'bulk') return <Bulk tick={tick} runTrade={runTrade} />;
   if (page === 'quick') return <Quick tick={tick} runTrade={runTrade} />;
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
@@ -3015,7 +3015,34 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
 
 
 
-function Signals({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string }) => Promise<void> }) { const [signal, setSignal] = useState<{ instrument: string; direction: string; confidence: number } | null>(null); const generate = () => setSignal({ instrument: instruments[tick % instruments.length], direction: tick % 2 ? 'CALL' : 'PUT', confidence: 72 + (tick % 20) }); return <><PageHeader eyebrow="Assisted decisions" title="Signal AI" description="Generate a plain-language suggestion, then approve or reject it yourself. Nothing executes without your click." action={<button className="primary" onClick={generate}><Sparkles size={16} /> Generate signal</button>} /><div className="signal-layout"><section className="panel signal-hero"><div className="signal-orb"><Sparkles size={28} /></div><span className="eyebrow">AI market read</span>{signal ? <><h2>{signal.direction} opportunity on {signal.instrument}</h2><p>Momentum is leaning {signal.direction === 'CALL' ? 'upward' : 'downward'} after a confirmed synthetic-index move. The model sees a clean setup, but the final decision stays with you.</p><div className="confidence"><div><span>Confidence</span><b>{signal.confidence}%</b></div><div className="progress"><span style={{ width: `${signal.confidence}%` }} /></div></div><div className="signal-actions"><button className="primary" onClick={() => void runTrade({ instrument: signal.instrument, direction: signal.direction, stake: 10, source: 'signal_ai' })}><Check size={16} /> Approve & execute</button><button className="secondary" onClick={() => setSignal(null)}><X size={16} /> Reject</button></div></> : <><h2>Ask for a fresh signal</h2><p>Generate a read of the current synthetic market, review the reasoning, and decide whether to execute.</p><button className="secondary" onClick={generate}>Generate first signal <ChevronRight size={15} /></button></>}</section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Process</span><h2>How approval works</h2></div></div>{['Market conditions are scanned', 'Signal direction and confidence are shown', 'You approve or reject the trade', 'Execution and result enter the ledger'].map((item, index) => <div className="step" key={item}><span>{String(index + 1).padStart(2, '0')}</span><b>{item}</b><Check size={16} /></div>)}</section></div></>; }
+function MarketScanner() {
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'>('ALL');
+  const [lastRefresh, setLastRefresh] = useState(() => new Date());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [rows, setRows] = useState<Array<{ symbol: string; market_family: string; contract_type: string; duration: number; status: 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'; score: number; estimated_probability: number; break_even_probability: number; edge: number; sample_size: number }>>([]);
+  const loadSnapshot = async () => {
+    setLoading(true); setError('');
+    try {
+      const response = await fetch('/api/scanner-snapshot', { cache: 'no-store' });
+      const responseText = await response.text();
+      let data: { error?: string; rows?: typeof rows; generated_at?: string };
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(`Scanner endpoint returned invalid data (${response.status}). Check the Vercel function deployment for a runtime error.`);
+      }
+      if (!response.ok) throw new Error(data.error || `Scanner request failed (${response.status})`);
+      if (!Array.isArray(data.rows) || !data.generated_at) throw new Error('Scanner endpoint returned an incomplete snapshot.');
+      setRows(data.rows);
+      setLastRefresh(new Date(data.generated_at));
+    } catch (loadError) { setError(loadError instanceof Error ? loadError.message : 'Unable to load scanner snapshot.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { void loadSnapshot(); }, []);
+  const visible = rows.filter((row) => statusFilter === 'ALL' || row.status === statusFilter);
+  return <><PageHeader eyebrow="Research-first scanner" title="APEX Market Scanner" description="V1 scope: Volatility 75 Rise/Fall only. This dashboard ranks compact research snapshots; it does not use an LLM or execute trades." action={<button className="primary" disabled={loading} onClick={() => void loadSnapshot()}>{loading ? <><RefreshCw className="spin" size={16} /> Loading…</> : <><RefreshCw size={16} /> Refresh snapshot</>}</button>} />{error && <div className="scanner-error">{error}</div>}<div className="scanner-gate"><ShieldCheck size={18} /><div><b>Research gate active</b><span>Expand markets only after out-of-sample validation supports the model.</span></div></div><div className="scanner-toolbar"><span className="eyebrow">Opportunity state</span>{(['ALL', 'QUALIFIED', 'WATCH', 'NO SIGNAL'] as const).map((status) => <button key={status} className={statusFilter === status ? 'secondary active-filter' : 'secondary'} onClick={() => setStatusFilter(status)}>{status}</button>)}</div><section className="panel scanner-table-wrap"><div className="panel-title"><div><span className="eyebrow">Current research configurations</span><h2>V75 directional evidence</h2></div><span className="muted">Updated {lastRefresh.toLocaleTimeString()}</span></div><div className="scanner-table">{visible.map((row) => <div className="scanner-row" key={`${row.duration}-${row.status}`}><div><b>{row.symbol}</b><span>{row.market_family} · {row.contract_type === 'CALL' ? 'Rise/Fall' : 'Rise/Fall'} · {row.duration} ticks</span></div><span className={`scanner-status ${row.status.toLowerCase().replace(' ', '-')}`}>{row.status}</span><div><span>Score</span><strong>{row.score}/100</strong></div><div><span>Probability</span><strong>{(row.estimated_probability * 100).toFixed(1)}%</strong></div><div><span>Break-even</span><strong>{(row.break_even_probability * 100).toFixed(1)}%</strong></div><div><span>Edge</span><strong className={row.edge > 0 ? 'positive' : 'negative'}>{row.edge > 0 ? '+' : ''}{(row.edge * 100).toFixed(1)}%</strong></div><div><span>Sample</span><strong>{row.sample.toLocaleString()}</strong></div></div>)}{!visible.length && <EmptyState title="No matching opportunities" text="The scanner is behaving conservatively. No configuration currently meets this filter." />}</div></section><div className="scanner-cards"><section className="panel"><span className="eyebrow">Methodology</span><h2>How qualification works</h2><p className="muted">Technical quality, statistical quality, historical validation, contract economics and data quality are tracked separately. The score is a ranking score, not a probability.</p></section><section className="panel"><span className="eyebrow">V1 boundaries</span><h2>Free-tier safe by design</h2><p className="muted">Rolling state stays in the scanner process. Supabase is reserved for compact opportunities, signal history and aggregated statistics — never raw tick storage.</p></section></div></>;
+}
 
 function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string }) => Promise<void> }) {
   const [selected, setSelected] = useState(instruments.slice(0, 3));
