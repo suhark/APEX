@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createClient } from '@supabase/supabase-js';
 
 type ScannerRow = {
   symbol: string;
@@ -42,16 +43,44 @@ function buildSnapshot(): ScannerRow[] {
   });
 }
 
-export default function handler(req: VercelRequest, res: VercelResponse) {
+const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+
+async function loadPersistedRows(): Promise<ScannerRow[] | null> {
+  if (!supabaseUrl || !supabaseServiceKey) return null;
+  const supabase = createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } });
+  const { data, error } = await supabase
+    .from('market_opportunities')
+    .select('symbol,market_family,contract_type,duration,duration_unit,score,estimated_probability,confidence_lower,break_even_probability,edge,status,sample_size,breakdown')
+    .eq('symbol', SYMBOL)
+    .gt('expires_at', new Date().toISOString())
+    .order('score', { ascending: false });
+  if (error || !data?.length) return null;
+  return data as ScannerRow[];
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'Method not allowed' });
   }
   res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).json({
-    version: 'v1-research-fixture',
-    generated_at: new Date().toISOString(),
-    scope: { symbols: [SYMBOL], contract_types: ['CALL', 'PUT'], durations: CONFIGS },
-    rows: buildSnapshot(),
-  });
+  try {
+    const rows = await loadPersistedRows();
+    return res.status(200).json({
+      version: rows ? 'v1-supabase' : 'v1-research-fixture',
+      generated_at: new Date().toISOString(),
+      scope: { symbols: [SYMBOL], contract_types: ['CALL', 'PUT'], durations: CONFIGS },
+      rows: rows ?? buildSnapshot(),
+    });
+  } catch (error) {
+    console.error('[scanner-snapshot] persistence read failed:', error);
+    return res.status(200).json({
+      version: 'v1-research-fixture',
+      generated_at: new Date().toISOString(),
+      scope: { symbols: [SYMBOL], contract_types: ['CALL', 'PUT'], durations: CONFIGS },
+      rows: buildSnapshot(),
+      warning: 'Persisted opportunities unavailable; showing conservative fixture data.',
+    });
+  }
 }
