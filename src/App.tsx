@@ -3025,6 +3025,30 @@ function MarketScanner() {
   const [marketLive, setMarketLive] = useState<{ quote: number; updatedAt: string } | null>(null);
   const scannerTicksRef = useRef<DerivTick[]>([]);
   const [rows, setRows] = useState<Array<{ symbol: string; market_family: string; contract_type: string; duration: number; status: 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'; score: number; estimated_probability: number; break_even_probability: number; edge: number; sample_size: number }>>([]);
+  const updateRowsFromTicks = (ticks: DerivTick[]) => {
+    if (ticks.length < 2) return;
+    const quotes = ticks.map((tick) => Number(tick.quote));
+    const latest = quotes[quotes.length - 1];
+    const previous = quotes[quotes.length - 2];
+    const direction = latest >= previous ? 'CALL' : 'PUT';
+    const movement = previous ? Math.abs(latest - previous) / previous : 0;
+    const ema = (period: number) => {
+      if (quotes.length < period) return null;
+      const multiplier = 2 / (period + 1);
+      let value = quotes.slice(0, period).reduce((sum, quote) => sum + quote, 0) / period;
+      quotes.slice(period).forEach((quote) => { value = (quote - value) * multiplier + value; });
+      return value;
+    };
+    const fast = ema(9); const slow = ema(20);
+    const trendBonus = fast !== null && slow !== null && fast !== slow ? 0.025 : 0;
+    setRows([5, 10, 15].map((duration, index) => {
+      const probability = Math.min(0.7, Math.max(0.3, 0.5 + trendBonus + Math.min(0.04, movement * 6) - index * 0.01));
+      const breakEven = 0.55; const edge = probability - breakEven;
+      return { symbol: 'Volatility 75 Index', market_family: 'Volatility', contract_type: direction, duration, status: ticks.length < 20 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', score: Math.min(100, Math.round((ticks.length / 12) + (fast !== null && slow !== null ? 20 : 0))), estimated_probability: probability, break_even_probability: breakEven, edge, sample_size: ticks.length };
+    }));
+    setLastRefresh(new Date());
+  };
+
   const loadSnapshot = async () => {
     setLoading(true); setError('');
     try {
@@ -3060,6 +3084,7 @@ function MarketScanner() {
         const unsubscribe = subscribeTicks('R_75' as DerivSymbol, (tick) => {
           scannerTicksRef.current = [...scannerTicksRef.current.slice(-119), tick];
           setMarketLive({ quote: tick.quote, updatedAt: new Date().toISOString() });
+          updateRowsFromTicks(scannerTicksRef.current);
         });
         return unsubscribe;
       }
