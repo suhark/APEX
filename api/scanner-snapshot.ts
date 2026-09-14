@@ -19,6 +19,7 @@ type ScannerRow = {
 
 const CONFIGS = [5, 10, 15];
 const SYMBOL = 'Volatility 75 Index';
+const DERIV_WS_URL = 'wss://ws.derivws.com/websockets/v3?app_id=34mV1HDCcx9gNO0aCEQMg';
 
 function buildSnapshot(): ScannerRow[] {
   return CONFIGS.map((duration, index) => {
@@ -46,6 +47,43 @@ function buildSnapshot(): ScannerRow[] {
 const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
+async function fetchLiveTicks(count = 120): Promise<{ quote: number; epoch: number }[]> {
+  const WebSocketCtor = globalThis.WebSocket;
+  if (!WebSocketCtor) throw new Error('WebSocket is unavailable in this runtime');
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocketCtor(DERIV_WS_URL);
+    const ticks: { quote: number; epoch: number }[] = [];
+    const timeout = setTimeout(() => { socket.close(); reject(new Error('Deriv tick request timed out')); }, 8000);
+    socket.onopen = () => socket.send(JSON.stringify({ ticks_history: 'R_75', count, end: 'latest', style: 'ticks' }));
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(String(event.data));
+        if (payload.error) { clearTimeout(timeout); socket.close(); reject(new Error(payload.error.message)); return; }
+        if (payload.history?.prices) {
+          const times = payload.history.times ?? [];
+          ticks.push(...payload.history.prices.map((quote: number, index: number) => ({ quote: Number(quote), epoch: Number(times[index]) })));
+          clearTimeout(timeout); socket.close(); resolve(ticks);
+        }
+      } catch (error) { clearTimeout(timeout); socket.close(); reject(error); }
+    };
+    socket.onerror = () => { clearTimeout(timeout); socket.close(); reject(new Error('Unable to connect to Deriv')); };
+  });
+}
+
+function buildLiveSnapshot(ticks: { quote: number; epoch: number }[]): ScannerRow[] {
+  const latest = ticks.at(-1)?.quote ?? 0;
+  const previous = ticks.at(-2)?.quote ?? latest;
+  const direction = latest >= previous ? 'CALL' : 'PUT';
+  const movement = previous ? Math.abs(latest - previous) / previous : 0;
+  const dataQuality = Math.min(10, Math.round((ticks.length / 120) * 10));
+  return CONFIGS.map((duration, index) => {
+    const probability = Math.min(0.7, Math.max(0.3, 0.5 + movement * 8 + (index === 0 ? 0.02 : 0)));
+    const breakEven = 0.55;
+    const edge = probability - breakEven;
+    return { symbol: SYMBOL, market_family: 'Volatility', contract_type: direction, duration, duration_unit: 't', score: Math.round(dataQuality * 5 + Math.min(40, movement * 10000)), estimated_probability: probability, confidence_lower: Math.max(0.3, probability - 0.04), break_even_probability: breakEven, edge, status: ticks.length < 100 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', sample_size: ticks.length, breakdown: { technical: Math.round(movement * 10000), statistical: 0, validation: 0, economics: Math.round(edge * 100), data: dataQuality } };
+  });
+}
+
 async function loadPersistedRows(): Promise<ScannerRow[] | null> {
   if (!supabaseUrl || !supabaseServiceKey) return null;
   const supabase = createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } });
@@ -67,8 +105,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     const rows = await loadPersistedRows();
+    if (rows) return res.status(200).json({ version: 'v1-supabase', generated_at: new Date().toISOString(), scope: { symbols: [SYMBOL], contract_types: ['CALL', 'PUT'], durations: CONFIGS }, rows });
+    const ticks = await fetchLiveTicks();
     return res.status(200).json({
-      version: rows ? 'v1-supabase' : 'v1-research-fixture',
+      version: 'v1-live-deriv',
+      generated_at: new Date().toISOString(),
+      scope: { symbols: [SYMBOL], contract_types: ['CALL', 'PUT'], durations: CONFIGS },
+      rows: buildLiveSnapshot(ticks),
+    });
+
+    return res.status(200).json({
+      version: 'v1-research-fixture',
       generated_at: new Date().toISOString(),
       scope: { symbols: [SYMBOL], contract_types: ['CALL', 'PUT'], durations: CONFIGS },
       rows: rows ?? buildSnapshot(),
