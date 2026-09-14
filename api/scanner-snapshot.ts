@@ -72,8 +72,8 @@ async function fetchLiveTicks(count = 120): Promise<{ quote: number; epoch: numb
 }
 
 function buildLiveSnapshot(ticks: { quote: number; epoch: number }[]): ScannerRow[] {
-  const latest = ticks.at(-1)?.quote ?? 0;
-  const previous = ticks.at(-2)?.quote ?? latest;
+  const latest = ticks.length ? ticks[ticks.length - 1].quote : 0;
+  const previous = ticks.length > 1 ? ticks[ticks.length - 2].quote : latest;
   const direction = latest >= previous ? 'CALL' : 'PUT';
   const movement = previous ? Math.abs(latest - previous) / previous : 0;
   const dataQuality = Math.min(10, Math.round((ticks.length / 120) * 10));
@@ -123,7 +123,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       warning: 'Live Deriv and persisted opportunity data were unavailable; showing fallback fixture data.',
       scope: { symbols: [SYMBOL], contract_types: ['CALL', 'PUT'], durations: CONFIGS },
       rows: buildSnapshot(),
-      warning: 'Persisted opportunities unavailable; showing conservative fixture data.',
     });
   }
 }

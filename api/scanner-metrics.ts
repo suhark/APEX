@@ -30,7 +30,7 @@ function rsi(values: number[], period = 14): number | null {
 
 function buildMetrics(ticks: Tick[]) {
   const quotes = ticks.map((tick) => tick.quote);
-  const last = quotes.at(-1) ?? null;
+  const last = quotes.length ? quotes[quotes.length - 1] : null;
   const ema9 = ema(quotes, 9);
   const ema20 = ema(quotes, 20);
   const rsi14 = rsi(quotes);

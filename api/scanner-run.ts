@@ -17,8 +17,8 @@ function ema(values: number[], period: number): number | null {
 
 function buildRows(ticks: Tick[]) {
   const quotes = ticks.map((tick) => tick.quote);
-  const latest = quotes.at(-1) ?? 0;
-  const previous = quotes.at(-2) ?? latest;
+  const latest = quotes.length ? quotes[quotes.length - 1] : 0;
+  const previous = quotes.length > 1 ? quotes[quotes.length - 2] : latest;
   const fast = ema(quotes, 9);
   const slow = ema(quotes, 20);
   const direction = fast !== null && slow !== null && fast < slow ? 'PUT' : 'CALL';
