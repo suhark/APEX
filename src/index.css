@@ -21,6 +21,11 @@
 .bulk-result { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 11px; border: 1px solid #266b5c; border-radius: 7px; color: #63e3ca; font-size: 12px; }
 .scanner-command-center { position: relative; display: flex; align-items: center; gap: 24px; min-height: 148px; margin-bottom: 16px; padding: 24px 28px; overflow: hidden; border: 1px solid #245448; border-radius: 14px; background: radial-gradient(circle at 12% 50%, #123b32 0, #0d211d 24%, #0b1715 62%); box-shadow: inset 0 0 35px #2dd4bf0b, 0 12px 40px #00000025; }
 .scanner-command-center::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(105deg, transparent 20%, #50dbc408 50%, transparent 80%); animation: scanner-glow 4s ease-in-out infinite; }
+.scanner-command-center.scanner-idle::after { animation: none; opacity: 0; }
+.scanner-command-center.scanner-idle { border-color: #253a35; background: #0d1715; box-shadow: none; }
+.scanner-command-center.scanner-idle .radar-sweep { animation: none; opacity: .2; }
+.scanner-command-center.scanner-idle .radar-ring { animation: none; opacity: .15; }
+.scanner-command-center.scanner-idle .radar-core { color: #71837e; }
 .scanner-radar { position: relative; width: 92px; height: 92px; flex: 0 0 92px; border: 1px solid #2e7464; border-radius: 50%; background: radial-gradient(circle, #1c6454 0 3%, transparent 4% 100%), repeating-radial-gradient(circle, transparent 0 17px, #2e746455 18px 19px); box-shadow: 0 0 28px #2dd4bf20; }
 .radar-ring { position: absolute; inset: 50%; width: 5px; height: 5px; border: 1px solid #51dec4; border-radius: 50%; transform: translate(-50%, -50%); }
 .ring-one { animation: radar-ping 2.2s ease-out infinite; }.ring-two { animation: radar-ping 2.2s .8s ease-out infinite; }
