@@ -11,6 +11,7 @@ import { BotBuilder } from './bot-builder';
 import { DigitsAnalyser } from './digits-analyser';
 import { LandingPage } from './landing-page';
 import { PolicyModal, getPolicyConsent, recordPolicyConsent, type PolicyTab } from './policy-modal';
+import { AnalysisLab } from './analysis-lab';
 
 const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
 
@@ -19,7 +20,7 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY ?? '',
 );
 
-type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'scanner' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift';
+type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'scanner' | 'analysis' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift';
 type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 
@@ -116,6 +117,7 @@ const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'manual',    label: 'Manual Trader',   icon: Target },
   { key: 'builder',   label: 'Bot Builder',     icon: Code2 },
   { key: 'scanner',   label: 'Market Scanner',  icon: Activity },
+  { key: 'analysis',  label: 'Analysis Lab',    icon: CandlestickChart },
   { key: 'bulk',      label: 'Bulk Trader',     icon: ListFilter },
   { key: 'quick',     label: 'Quick Bot',       icon: Zap },
   { key: 'apex',      label: 'Apex Bot',        icon: Rocket },
@@ -501,7 +503,7 @@ function App() {
   const [authChecking, setAuthChecking] = useState(true);
   const [page, setPageState] = useState<Page>(() => {
     const saved = sessionStorage.getItem('apex_page');
-    const valid: Page[] = ['dashboard','bots','manual','builder','scanner','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
+    const valid: Page[] = ['dashboard','bots','manual','builder','scanner','analysis','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
     return (saved && valid.includes(saved as Page)) ? saved as Page : 'dashboard';
   });
   const setPage = (p: Page) => { sessionStorage.setItem('apex_page', p); setPageState(p); };
@@ -2197,6 +2199,7 @@ function PageView({
   }
   if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} trades={trades} />;
   if (page === 'scanner') return <MarketScanner />;
+  if (page === 'analysis') return <AnalysisLab />;
   if (page === 'bulk') return <Bulk tick={tick} runTrade={runTrade} />;
   if (page === 'quick') return <Quick tick={tick} runTrade={runTrade} />;
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
