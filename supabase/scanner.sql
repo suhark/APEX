@@ -22,15 +22,32 @@ create table if not exists public.market_opportunities (
   expires_at timestamptz not null
 );
 
-create unique index if not exists market_opportunities_config_idx
-  on public.market_opportunities (symbol, contract_type, duration, duration_unit, model_version);
-create index if not exists market_opportunities_active_idx
-  on public.market_opportunities (symbol, expires_at, status);
-
+create unique index if not exists market_opportunities_config_idx on public.market_opportunities (symbol, contract_type, duration, duration_unit, model_version);
+create index if not exists market_opportunities_active_idx on public.market_opportunities (symbol, expires_at, status);
 alter table public.market_opportunities enable row level security;
-create policy "Anyone can read active market opportunities"
-  on public.market_opportunities for select
-  using (expires_at > now());
+drop policy if exists "Anyone can read active market opportunities" on public.market_opportunities;
+create policy "Anyone can read active market opportunities" on public.market_opportunities for select using (expires_at > now());
 
--- Example only: call /api/scanner-ingest with a server-side SCANNER_INGEST_KEY.
--- Never put the service role key or ingest key in browser code.
+create table if not exists public.signal_history (
+  id uuid primary key default gen_random_uuid(),
+  symbol text not null,
+  contract_type text not null,
+  duration integer not null,
+  signal_timestamp timestamptz not null default now(),
+  proposal_timestamp timestamptz,
+  execution_timestamp timestamptz,
+  score numeric not null,
+  estimated_probability numeric not null,
+  break_even_probability numeric not null,
+  edge numeric not null,
+  status text not null,
+  outcome text,
+  outcome_profit numeric,
+  model_version text not null,
+  validation_metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists signal_history_validation_idx on public.signal_history (symbol, contract_type, duration, signal_timestamp);
+alter table public.signal_history enable row level security;
+drop policy if exists "Anyone can read signal history" on public.signal_history;
+create policy "Anyone can read signal history" on public.signal_history for select using (true);
