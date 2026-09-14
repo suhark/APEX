@@ -670,10 +670,13 @@ export async function executeTrade(params: {
 
 export function subscribeTicks(symbol: DerivSymbol, cb: (tick: DerivTick) => void): () => void {
   const id = ++tickCallbackId;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    window.setTimeout(() => { if (ws && ws.readyState === WebSocket.OPEN) void subscribeTicks(symbol, cb); }, 500);
+  }
   // Ensure the subscription is sent for every active listener. This also
   // supports pages opened after authorization has already completed.
   if (!tickCallbacks.has(symbol)) tickCallbacks.set(symbol, new Map());
-  if (tickCallbacks.get(symbol)!.size === 0) {
+  if (tickCallbacks.get(symbol)!.size === 0 && ws && ws.readyState === WebSocket.OPEN) {
     send<{ subscription?: { id: string } }>({ ticks: symbol, subscribe: 1 })
       .then(resp => { if (resp.subscription?.id) symbolSubscriptionIds.set(symbol, resp.subscription.id); })
       .catch(() => {});
