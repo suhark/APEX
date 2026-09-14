@@ -31,3 +31,6 @@ alter table public.market_opportunities enable row level security;
 create policy "Anyone can read active market opportunities"
   on public.market_opportunities for select
   using (expires_at > now());
+
+-- Example only: call /api/scanner-ingest with a server-side SCANNER_INGEST_KEY.
+-- Never put the service role key or ingest key in browser code.
