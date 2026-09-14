@@ -3026,7 +3026,7 @@ function MarketScanner() {
     try {
       const response = await fetch('/api/scanner-snapshot', { cache: 'no-store' });
       const responseText = await response.text();
-      let data: { error?: string; rows?: typeof rows; generated_at?: string };
+      let data: { error?: string; rows?: typeof rows; generated_at?: string; version?: string; warning?: string };
       try {
         data = JSON.parse(responseText);
       } catch {
@@ -3036,6 +3036,7 @@ function MarketScanner() {
       if (!Array.isArray(data.rows) || !data.generated_at) throw new Error('Scanner endpoint returned an incomplete snapshot.');
       setRows(data.rows);
       setLastRefresh(new Date(data.generated_at));
+      if (data.version) setError(data.warning ? `${data.version}: ${data.warning}` : `Data source: ${data.version}`);
     } catch (loadError) { setError(loadError instanceof Error ? loadError.message : 'Unable to load scanner snapshot.'); }
     finally { setLoading(false); }
   };

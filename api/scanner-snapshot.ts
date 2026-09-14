@@ -20,6 +20,7 @@ type ScannerRow = {
 const CONFIGS = [5, 10, 15];
 const SYMBOL = 'Volatility 75 Index';
 const DERIV_WS_URL = 'wss://ws.derivws.com/websockets/v3?app_id=34mV1HDCcx9gNO0aCEQMg';
+const DERIV_SYMBOL = 'R_75';
 
 function buildSnapshot(): ScannerRow[] {
   return CONFIGS.map((duration, index) => {
@@ -54,7 +55,7 @@ async function fetchLiveTicks(count = 120): Promise<{ quote: number; epoch: numb
     const socket = new WebSocketCtor(DERIV_WS_URL);
     const ticks: { quote: number; epoch: number }[] = [];
     const timeout = setTimeout(() => { socket.close(); reject(new Error('Deriv tick request timed out')); }, 8000);
-    socket.onopen = () => socket.send(JSON.stringify({ ticks_history: 'R_75', count, end: 'latest', style: 'ticks' }));
+    socket.onopen = () => socket.send(JSON.stringify({ ticks_history: DERIV_SYMBOL, count, end: 'latest', style: 'ticks' }));
     socket.onmessage = (event) => {
       try {
         const payload = JSON.parse(String(event.data));
@@ -119,6 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       version: 'v1-research-fixture',
       generated_at: new Date().toISOString(),
+      warning: 'Live Deriv and persisted opportunity data were unavailable; showing fallback fixture data.',
       scope: { symbols: [SYMBOL], contract_types: ['CALL', 'PUT'], durations: CONFIGS },
       rows: buildSnapshot(),
       warning: 'Persisted opportunities unavailable; showing conservative fixture data.',

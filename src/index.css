@@ -19,7 +19,7 @@
 .bulk-controls input, .bulk-controls select { width: 100%; border: 1px solid #24443d; border-radius: 6px; padding: 10px; color: #e8f5f2; background: #091310; outline: none; }
 .bulk-controls input:focus, .bulk-controls select:focus { border-color: #42d5bb; }
 .bulk-result { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 11px; border: 1px solid #266b5c; border-radius: 7px; color: #63e3ca; font-size: 12px; }
-.scanner-error { margin-bottom: 14px; padding: 12px 14px; border: 1px solid #713b3b; border-radius: 8px; color: #fca5a5; background: #281717; font-size: 12px; }
+.scanner-error { margin-bottom: 14px; padding: 12px 14px; border: 1px solid #315b50; border-radius: 8px; color: #9de8d5; background: #10251f; font-size: 12px; }
 .scanner-gate { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; padding: 14px 16px; border: 1px solid #27554a; border-radius: 10px; background: #0d211d; color: #63e3ca; }
 .scanner-gate b, .scanner-gate span { display: block; }
 .scanner-gate span { margin-top: 4px; color: #8aa59e; font-size: 11px; }
