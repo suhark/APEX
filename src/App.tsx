@@ -1143,7 +1143,7 @@ function App() {
   };
 
   const handleSignOut = async () => {
-    if (derivConnected) {
+    {
       deriv.disconnect();
     }
     setLiveArmed(false);
@@ -3016,7 +3016,6 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
 
 
 function MarketScanner() {
-  const derivConnected = false;
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'>('ALL');
   const [lastRefresh, setLastRefresh] = useState(() => new Date());
   const [loading, setLoading] = useState(false);
@@ -3098,10 +3097,11 @@ function MarketScanner() {
     finally { setLoading(false); }
   };
   const runScanner = () => {
-    if (!scannerConnected) {
-      setRunMessage('Connect a Deriv account first. The live scanner uses the browser WebSocket connection.');
+    if (scannerTicksRef.current.length < 2) {
+      setRunMessage('Waiting for live Deriv ticks. Keep the Deriv connection open for a few seconds, then try again.');
       return;
     }
+    setScannerConnected(true);
     setRunMessage('Live scan active. Processing incoming Deriv ticks in the browser.');
     updateRowsFromTicks(scannerTicksRef.current);
   };
