@@ -114,14 +114,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       rows: buildLiveSnapshot(ticks),
     });
 
-    return res.status(200).json({
-      version: 'v1-research-fixture',
-      generated_at: new Date().toISOString(),
-      scope: { symbols: [SYMBOL], contract_types: ['CALL', 'PUT'], durations: CONFIGS },
-      rows: rows ?? buildSnapshot(),
-    });
   } catch (error) {
-    console.error('[scanner-snapshot] persistence read failed:', error);
+    console.error('[scanner-snapshot] live/persistence read failed:', error);
     return res.status(200).json({
       version: 'v1-research-fixture',
       generated_at: new Date().toISOString(),
