@@ -3,7 +3,7 @@ import { createClient, type User } from '@supabase/supabase-js';
 import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, Ghost, Globe, Hash, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
-import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
+import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, subscribeTicks, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult, type DerivTick } from './deriv-client';
 import { handleOAuthCallback } from './deriv-oauth';
 import { AuthModal } from './auth-modal';
 import { ManualTrader } from './manual-trader';
@@ -3020,6 +3020,9 @@ function MarketScanner() {
   const [lastRefresh, setLastRefresh] = useState(() => new Date());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [runMessage, setRunMessage] = useState('');
+    const [marketLive, setMarketLive] = useState<{ quote: number; updatedAt: string } | null>(null);
+    const scannerTicksRef = useRef<DerivTick[]>([]);
   const [rows, setRows] = useState<Array<{ symbol: string; market_family: string; contract_type: string; duration: number; status: 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'; score: number; estimated_probability: number; break_even_probability: number; edge: number; sample_size: number }>>([]);
   const loadSnapshot = async () => {
     setLoading(true); setError('');
@@ -3040,9 +3043,39 @@ function MarketScanner() {
     } catch (loadError) { setError(loadError instanceof Error ? loadError.message : 'Unable to load scanner snapshot.'); }
     finally { setLoading(false); }
   };
-  useEffect(() => { void loadSnapshot(); }, []);
+  const runScanner = async () => {
+    setLoading(true); setRunMessage('');
+    try {
+      const response = await fetch('/api/scanner-run', { method: 'POST' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Scanner run failed (${response.status})`);
+      setRunMessage(`Live scan persisted ${data.sample_size ?? 0} ticks across ${data.rows?.length ?? 0} configurations. Trace: ${data.trace ?? 'n/a'}`);
+      await loadSnapshot();
+    } catch (runError) { setRunMessage(runError instanceof Error ? runError.message : 'Unable to run the live scanner.'); setLoading(false); }
+  };
+  useEffect(() => {
+      void loadSnapshot();
+      if (derivConnected) {
+        const unsubscribe = subscribeTicks('R_75' as DerivSymbol, (tick) => {
+          scannerTicksRef.current = [...scannerTicksRef.current.slice(-119), tick];
+          setMarketLive({ quote: tick.quote, updatedAt: new Date().toISOString() });
+        });
+        return unsubscribe;
+      }
+      const refreshMarket = async () => {
+        try {
+          const response = await fetch('/api/deriv-proxy?symbol=R_75&count=20', { cache: 'no-store' });
+          const data = await response.json();
+          const quote = Number(data?.history?.prices?.at(-1) ?? data?.prices?.at(-1));
+          if (Number.isFinite(quote)) setMarketLive({ quote, updatedAt: new Date().toISOString() });
+        } catch { /* scanner snapshot remains independent */ }
+      };
+      void refreshMarket();
+      const timer = window.setInterval(() => void refreshMarket(), 15000);
+      return () => window.clearInterval(timer);
+    }, []);
   const visible = rows.filter((row) => statusFilter === 'ALL' || row.status === statusFilter);
-  return <><PageHeader eyebrow="Research-first scanner" title="APEX Market Scanner" description="V1 scope: Volatility 75 Rise/Fall only. This dashboard ranks compact research snapshots; it does not use an LLM or execute trades." action={<button className="primary" disabled={loading} onClick={() => void loadSnapshot()}>{loading ? <><RefreshCw className="spin" size={16} /> Loading…</> : <><RefreshCw size={16} /> Refresh snapshot</>}</button>} />{error && <div className="scanner-error">{error}</div>}<div className="scanner-gate"><ShieldCheck size={18} /><div><b>Research gate active</b><span>Expand markets only after out-of-sample validation supports the model.</span></div></div><div className="scanner-toolbar"><span className="eyebrow">Opportunity state</span>{(['ALL', 'QUALIFIED', 'WATCH', 'NO SIGNAL'] as const).map((status) => <button key={status} className={statusFilter === status ? 'secondary active-filter' : 'secondary'} onClick={() => setStatusFilter(status)}>{status}</button>)}</div><section className="panel scanner-table-wrap"><div className="panel-title"><div><span className="eyebrow">Current research configurations</span><h2>V75 directional evidence</h2></div><span className="muted">Updated {lastRefresh.toLocaleTimeString()}</span></div><div className="scanner-table">{visible.map((row) => <div className="scanner-row" key={`${row.duration}-${row.status}`}><div><b>{row.symbol}</b><span>{row.market_family} · {row.contract_type === 'CALL' ? 'Rise/Fall' : 'Rise/Fall'} · {row.duration} ticks</span></div><span className={`scanner-status ${row.status.toLowerCase().replace(' ', '-')}`}>{row.status}</span><div><span>Score</span><strong>{Number(row.score ?? 0)}/100</strong></div><div><span>Probability</span><strong>{(Number(row.estimated_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Break-even</span><strong>{(Number(row.break_even_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Edge</span><strong className={row.edge > 0 ? 'positive' : 'negative'}>{row.edge > 0 ? '+' : ''}{(row.edge * 100).toFixed(1)}%</strong></div><div><span>Sample</span><strong>{Number(row.sample_size ?? 0).toLocaleString()}</strong></div></div>)}{!visible.length && <EmptyState title="No matching opportunities" text="The scanner is behaving conservatively. No configuration currently meets this filter." />}</div></section><div className="scanner-cards"><section className="panel"><span className="eyebrow">Methodology</span><h2>How qualification works</h2><p className="muted">Technical quality, statistical quality, historical validation, contract economics and data quality are tracked separately. The score is a ranking score, not a probability.</p></section><section className="panel"><span className="eyebrow">V1 boundaries</span><h2>Free-tier safe by design</h2><p className="muted">Rolling state stays in the scanner process. Supabase is reserved for compact opportunities, signal history and aggregated statistics — never raw tick storage.</p></section></div></>;
+  return <><PageHeader eyebrow="Research-first scanner" title="APEX Market Scanner" description="V1 scope: Volatility 75 Rise/Fall only. This dashboard ranks compact research snapshots; it does not use an LLM or execute trades." action={<div style={{ display: 'flex', gap: 8 }}><button className="secondary" disabled={loading} onClick={() => void runScanner()}><Activity size={16} /> Run live scan</button><button className="primary" disabled={loading} onClick={() => void loadSnapshot()}>{loading ? <><RefreshCw className="spin" size={16} /> Loading…</> : <><RefreshCw size={16} /> Refresh</>}</button></div>} />{(error || runMessage) && <div className="scanner-error">{runMessage || error}</div>}{error && <div className="scanner-error">{error}</div>}{marketLive && <div className="scanner-live-tick"><Activity size={16} /><span>Live V75 quote</span><strong>{marketLive.quote}</strong><small>updated {new Date(marketLive.updatedAt).toLocaleTimeString()}</small></div>}<div className="scanner-gate"><ShieldCheck size={18} /><div><b>Research gate active</b><span>Expand markets only after out-of-sample validation supports the model.</span></div></div><div className="scanner-toolbar"><span className="eyebrow">Opportunity state</span>{(['ALL', 'QUALIFIED', 'WATCH', 'NO SIGNAL'] as const).map((status) => <button key={status} className={statusFilter === status ? 'secondary active-filter' : 'secondary'} onClick={() => setStatusFilter(status)}>{status}</button>)}</div><section className="panel scanner-table-wrap"><div className="panel-title"><div><span className="eyebrow">Current research configurations</span><h2>V75 directional evidence</h2></div><span className="muted">Updated {lastRefresh.toLocaleTimeString()}</span></div><div className="scanner-table">{visible.map((row) => <div className="scanner-row" key={`${row.duration}-${row.status}`}><div><b>{row.symbol}</b><span>{row.market_family} · {row.contract_type === 'CALL' ? 'Rise/Fall' : 'Rise/Fall'} · {row.duration} ticks</span></div><span className={`scanner-status ${row.status.toLowerCase().replace(' ', '-')}`}>{row.status}</span><div><span>Score</span><strong>{Number(row.score ?? 0)}/100</strong></div><div><span>Probability</span><strong>{(Number(row.estimated_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Break-even</span><strong>{(Number(row.break_even_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Edge</span><strong className={row.edge > 0 ? 'positive' : 'negative'}>{row.edge > 0 ? '+' : ''}{(row.edge * 100).toFixed(1)}%</strong></div><div><span>Sample</span><strong>{Number(row.sample_size ?? 0).toLocaleString()}</strong></div></div>)}{!visible.length && <EmptyState title="No matching opportunities" text="The scanner is behaving conservatively. No configuration currently meets this filter." />}</div></section><div className="scanner-cards"><section className="panel"><span className="eyebrow">Methodology</span><h2>How qualification works</h2><p className="muted">Technical quality, statistical quality, historical validation, contract economics and data quality are tracked separately. The score is a ranking score, not a probability.</p></section><section className="panel"><span className="eyebrow">V1 boundaries</span><h2>Free-tier safe by design</h2><p className="muted">Rolling state stays in the scanner process. Supabase is reserved for compact opportunities, signal history and aggregated statistics — never raw tick storage.</p></section></div></>;
 }
 
 function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string }) => Promise<void> }) {
