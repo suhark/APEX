@@ -3041,6 +3041,8 @@ function MarketScanner() {
     };
     const fast = ema(9); const slow = ema(20);
     const trendBonus = fast !== null && slow !== null && fast !== slow ? 0.025 : 0;
+        const rsiBonus = rsi > 55 && direction === 'CALL' ? 0.015 : rsi < 45 && direction === 'PUT' ? 0.015 : 0;
+        const trendQuality = adxProxy >= 18 ? 0.01 : -0.005;
     const returns = quotes.slice(1).map((quote, index) => (quote - quotes[index]) / Math.max(quotes[index], Number.EPSILON));
         const candleBuckets = new Map<number, { open: number; high: number; low: number; close: number }>();
         ticks.forEach((tick) => {
@@ -3051,6 +3053,10 @@ function MarketScanner() {
         const candles = Array.from(candleBuckets.values());
         const trueRanges = candles.slice(1).map((candle, index) => Math.max(candle.high - candle.low, Math.abs(candle.high - candles[index].close), Math.abs(candle.low - candles[index].close)));
         const atr = trueRanges.length ? trueRanges.reduce((sum, value) => sum + value, 0) / trueRanges.length : 0;
+            const gains = returns.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
+            const losses = Math.abs(returns.filter((value) => value < 0).reduce((sum, value) => sum + value, 0));
+            const rsi = losses === 0 ? 100 : 100 - (100 / (1 + (gains / Math.max(returns.length, 1)) / Math.max(losses / Math.max(returns.length, 1), Number.EPSILON)));
+            const adxProxy = volatility > 0 ? Math.min(50, Math.abs(meanReturn) / volatility * 25) : 0;
     const meanReturn = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : 0;
     const variance = returns.length ? returns.reduce((sum, value) => sum + ((value - meanReturn) ** 2), 0) / returns.length : 0;
     const volatility = Math.sqrt(variance);
@@ -3058,9 +3064,9 @@ function MarketScanner() {
     setRows([5, 10, 15].map((duration, index) => {
       const structureBonus = structure === 'RANGE' ? 0 : (structure === direction === 'CALL' ? 0.02 : -0.02);
             const atrPenalty = latest ? Math.min(0.025, (atr / latest) * 4) : 0;
-            const probability = Math.min(0.7, Math.max(0.3, 0.5 + trendBonus + structureBonus + Math.min(0.04, movement * 6) - Math.min(0.03, volatility * 20) - atrPenalty - index * 0.01));
+            const probability = Math.min(0.7, Math.max(0.3, 0.5 + trendBonus + rsiBonus + trendQuality + structureBonus + Math.min(0.04, movement * 6) - Math.min(0.03, volatility * 20) - atrPenalty - index * 0.01));
       const breakEven = 0.55; const edge = probability - breakEven;
-      return { symbol: 'Volatility 75 Index', market_family: 'Volatility', contract_type: direction, duration, status: ticks.length < 20 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', score: Math.min(100, Math.round((ticks.length / 12) + (fast !== null && slow !== null ? 20 : 0) + (structure === 'RANGE' ? 0 : 10))), estimated_probability: probability, break_even_probability: breakEven, edge, sample_size: ticks.length };
+      return { symbol: 'Volatility 75 Index', market_family: 'Volatility', contract_type: direction, duration, status: ticks.length < 20 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', score: Math.min(100, Math.round((ticks.length / 12) + (fast !== null && slow !== null ? 20 : 0) + Math.min(20, adxProxy) + (structure === 'RANGE' ? 0 : 10))), estimated_probability: probability, break_even_probability: breakEven, edge, sample_size: ticks.length };
     }));
     setLastRefresh(new Date());
   };
