@@ -67,7 +67,7 @@ async function fetchLiveTicks(count = 120): Promise<{ quote: number; epoch: numb
         }
       } catch (error) { clearTimeout(timeout); socket.close(); reject(error); }
     };
-    socket.onerror = () => { clearTimeout(timeout); socket.close(); reject(new Error('Unable to connect to Deriv')); };
+    socket.onerror = () => { clearTimeout(timeout); socket.close(); reject(new Error('Unable to connect to Deriv WebSocket from Vercel. Use a persistent scanner worker for live collection; serverless WebSocket connections are not reliable here.')); };
   });
 }
 
