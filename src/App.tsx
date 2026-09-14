@@ -3107,13 +3107,14 @@ function MarketScanner() {
   };
   useEffect(() => {
     void loadSnapshot();
-    const unsubscribe = subscribeTicks('R_75' as DerivSymbol, (tick) => {
+    const subscribe = () => subscribeTicks('R_75' as DerivSymbol, (tick) => {
       scannerTicksRef.current = [...scannerTicksRef.current.slice(-119), tick];
       setScannerConnected(true);
       setMarketLive({ quote: tick.quote, updatedAt: new Date().toISOString() });
       setScanPulse((value) => value + 1);
       updateRowsFromTicks(scannerTicksRef.current);
     });
+    const unsubscribe = subscribe();
     return unsubscribe;
   }, []);
   const visible = rows.filter((row) => statusFilter === 'ALL' || row.status === statusFilter);

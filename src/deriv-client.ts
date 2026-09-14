@@ -670,8 +670,10 @@ export async function executeTrade(params: {
 
 export function subscribeTicks(symbol: DerivSymbol, cb: (tick: DerivTick) => void): () => void {
   const id = ++tickCallbackId;
-  if (!tickCallbacks.has(symbol)) {
-    tickCallbacks.set(symbol, new Map());
+  // Ensure the subscription is sent for every active listener. This also
+  // supports pages opened after authorization has already completed.
+  if (!tickCallbacks.has(symbol)) tickCallbacks.set(symbol, new Map());
+  if (tickCallbacks.get(symbol)!.size === 0) {
     send<{ subscription?: { id: string } }>({ ticks: symbol, subscribe: 1 })
       .then(resp => { if (resp.subscription?.id) symbolSubscriptionIds.set(symbol, resp.subscription.id); })
       .catch(() => {});
