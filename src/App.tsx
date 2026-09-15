@@ -3,16 +3,13 @@ import { createClient, type User } from '@supabase/supabase-js';
 import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, Ghost, Globe, Hash, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
-import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, subscribeTicks, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult, type DerivTick } from './deriv-client';
+import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult } from './deriv-client';
 import { handleOAuthCallback } from './deriv-oauth';
 import { AuthModal } from './auth-modal';
 import { ManualTrader } from './manual-trader';
-import { BotBuilder } from './bot-builder';
 import { DigitsAnalyser } from './digits-analyser';
 import { LandingPage } from './landing-page';
 import { PolicyModal, getPolicyConsent, recordPolicyConsent, type PolicyTab } from './policy-modal';
-import { AnalysisLab } from './analysis-lab';
-import { BulkTrader } from './bulk-trader';
 
 const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
 
@@ -21,8 +18,8 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY ?? '',
 );
 
-type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'scanner' | 'analysis' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift';
-type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; batch_id?: string | null; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
+type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'signals' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings';
+type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 
 // Per-bot user-configurable parameters. Stored in localStorage per user.
@@ -46,28 +43,7 @@ interface StpConfig {
 interface DefaultBotConfig {
   stake: number;                  // fixed stake, default 10
 }
-// ── Digit Surge config ────────────────────────────────────────────────────────
-interface DigitSurgeConfig {
-  stake: number;                  // fixed stake, default 5
-  lookback: number;               // ticks to analyse parity pattern, default 8
-  biasThreshold: number;          // parity imbalance needed to fire, 0–1, default 0.75
-  maxConsecLosses: number;        // consecutive losses before pause, default 3
-}
-// ── Boom/Crash Rider config ───────────────────────────────────────────────────
-interface BoomCrashConfig {
-  stake: number;                  // fixed stake, default 8
-  spikeThreshold: number;         // % move in last tick to confirm spike, default 0.30
-  trendTicks: number;             // ticks used for pre-spike trend, default 10
-  cooldownMs: number;             // ms cooldown after a spike trade, default 20000
-}
-// ── Asian Drift config ────────────────────────────────────────────────────────
-interface AsianDriftConfig {
-  stake: number;                  // fixed stake, default 6
-  maPeriod: number;               // moving-average period for drift, default 12
-  driftThreshold: number;         // min |close-MA|/MA ratio to fire, default 0.0012
-  durationTicks: number;          // contract duration ticks, default 10
-}
-type BotConfig = PhantomConfig | StpConfig | DefaultBotConfig | DigitSurgeConfig | BoomCrashConfig | AsianDriftConfig;
+type BotConfig = PhantomConfig | StpConfig | DefaultBotConfig;
 
 function getBotConfigKey(userId: string, botName: string) {
   return `apex_bot_cfg_${userId}_${botName.replace(/\s+/g, '_')}`;
@@ -91,12 +67,9 @@ const PHANTOM_DEFAULTS: PhantomConfig = {
 };
 const STP_DEFAULTS: StpConfig = {
   stakeMode: 'percent', stakeValue: 1, stakeMin: 5, stakeMax: 50,
-  scoreThreshold: 50, adxMin: 15, cooldownMinutes: 15,
+  scoreThreshold: 75, adxMin: 22, cooldownMinutes: 15,
 };
 const DEFAULT_BOT_DEFAULTS: DefaultBotConfig = { stake: 10 };
-const DIGIT_SURGE_DEFAULTS: DigitSurgeConfig   = { stake: 5, lookback: 8, biasThreshold: 0.75, maxConsecLosses: 3 };
-const BOOM_CRASH_DEFAULTS: BoomCrashConfig      = { stake: 8, spikeThreshold: 0.30, trendTicks: 10, cooldownMs: 20000 };
-const ASIAN_DRIFT_DEFAULTS: AsianDriftConfig    = { stake: 6, maPeriod: 12, driftThreshold: 0.0012, durationTicks: 10 };
 type Workspace = { id: string; user_id?: string | null; mode: string; balance: number; starting_balance: number; loss_limit: number; deriv_connected?: boolean; deriv_loginid?: string | null; deriv_is_virtual?: boolean | null; deriv_balance?: number | null; active_bots?: string[] | null };
 
 type TradeAlert = {
@@ -113,18 +86,14 @@ type TradeAlert = {
 
 const instruments = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
 const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { key: 'bots',      label: 'Free Bots',      icon: Bot },
-  { key: 'manual',    label: 'Manual Trader',   icon: Target },
-  { key: 'builder',   label: 'Bot Builder',     icon: Code2 },
-  { key: 'scanner',   label: 'Market Scanner',  icon: Activity },
-  { key: 'analysis',  label: 'Analysis Lab',    icon: CandlestickChart },
-  { key: 'bulk',      label: 'Bulk Trader',     icon: ListFilter },
-  { key: 'quick',     label: 'Quick Bot',       icon: Zap },
-  { key: 'apex',      label: 'Apex Bot',        icon: Rocket },
-  { key: 'digits',    label: 'Digits Analyser', icon: Hash },
-  { key: 'record',    label: 'Track Record',    icon: LineChart },
-  { key: 'settings',  label: 'Settings',        icon: Settings2 },
+  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { key: 'bots', label: 'Free Bots', icon: Bot },
+  { key: 'manual', label: 'Manual Trader', icon: Target }, { key: 'builder', label: 'Bot Builder', icon: Code2 },
+  { key: 'signals', label: 'Signal AI', icon: Sparkles }, { key: 'bulk', label: 'Bulk Trader', icon: ListFilter },
+  { key: 'quick', label: 'Quick Bot', icon: Zap }, { key: 'apex', label: 'Apex Bot', icon: Rocket },
+  { key: 'phantom', label: 'Phantom Scalper', icon: Ghost },
+  { key: 'stpv3', label: 'Trend Pullback V3', icon: CandlestickChart },
+  { key: 'digits', label: 'Digits Analyser', icon: Hash },
+  { key: 'record', label: 'Track Record', icon: LineChart }, { key: 'settings', label: 'Settings', icon: Settings2 },
 ];
 
 function priceFor(index: number, tick: number) { return Number((100 + Math.sin((tick + index * 7) / 4) * 2.5 + Math.cos((tick + index) / 8) * 1.4).toFixed(2)); }
@@ -444,7 +413,7 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
   const emaSlopeUp   = ema20 > ema20Prev5;
   const emaSlopeDown = ema20 < ema20Prev5;
   const emaGap = Math.abs(ema20 - ema50);
-  if (emaGap < 0.05 * atr14) return null;          // insufficient separation (relaxed for synthetic)
+  if (emaGap < 0.10 * atr14) return null;          // insufficient separation
   if (!bullish && !bearish)   return null;
   const isBull = bullish && emaSlopeUp;
   const isBear = bearish && emaSlopeDown;
@@ -454,7 +423,7 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
   const pullDist = isBull
     ? Math.abs(lastCandle.low  - ema20)
     : Math.abs(lastCandle.high - ema20);
-  if (pullDist > 0.60 * atr14) return null;         // pullback too deep (relaxed for synthetic)
+  if (pullDist > 0.30 * atr14) return null;         // pullback too deep / not close enough
 
   // ── Stage 3: Structure — swing high/low must stay intact ────────────────────
   // Approximate: previous candle must form a higher low (bull) or lower high (bear)
@@ -463,7 +432,7 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
 
   // ── Stage 4: Confirmation candle ────────────────────────────────────────────
   const bodySize = Math.abs(lastCandle.close - lastCandle.open);
-  if (bodySize < 0.20 * atr14) return null;         // body too small (relaxed for synthetic)
+  if (bodySize < 0.50 * atr14) return null;         // body too small
   const bullConf = lastCandle.close > lastCandle.open && lastCandle.close > ema20;
   const bearConf = lastCandle.close < lastCandle.open && lastCandle.close < ema20;
   if (isBull && !bullConf) return null;
@@ -504,7 +473,7 @@ function App() {
   const [authChecking, setAuthChecking] = useState(true);
   const [page, setPageState] = useState<Page>(() => {
     const saved = sessionStorage.getItem('apex_page');
-    const valid: Page[] = ['dashboard','bots','manual','builder','scanner','analysis','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
+    const valid: Page[] = ['dashboard','bots','manual','builder','signals','bulk','quick','apex','phantom','stpv3','digits','record','settings'];
     return (saved && valid.includes(saved as Page)) ? saved as Page : 'dashboard';
   });
   const setPage = (p: Page) => { sessionStorage.setItem('apex_page', p); setPageState(p); };
@@ -554,10 +523,6 @@ function App() {
     consecutiveLosses: 0,
     lastLossTime: 0,
   });
-  // Boom/Crash Rider runtime state — tracks last trade time for cooldown
-  const boomCrashStateRef = useRef<{ lastTradeTime: number }>({ lastTradeTime: 0 });
-  // Digit Surge — tracks consecutive losses in a ref so it resets when bot is restarted
-  const digitSurgeLossRef = useRef<number>(0);
   // Per-bot live-readable config (read in the setInterval closure)
   const botConfigRef = useRef<Record<string, BotConfig>>({});
   // Live signal status per bot — shown on the dedicated pages
@@ -897,11 +862,8 @@ function App() {
     );
     botConfigRef.current = {
       ...defaultCfgs,
-      'Phantom Scalper':  loadBotConfig(currentUser.id, 'Phantom Scalper',  PHANTOM_DEFAULTS),
+      'Phantom Scalper': loadBotConfig(currentUser.id, 'Phantom Scalper', PHANTOM_DEFAULTS),
       'Trend Pullback V3': loadBotConfig(currentUser.id, 'Trend Pullback V3', STP_DEFAULTS),
-      'Digit Surge':      loadBotConfig(currentUser.id, 'Digit Surge',      DIGIT_SURGE_DEFAULTS),
-      'Boom/Crash Rider': loadBotConfig(currentUser.id, 'Boom/Crash Rider', BOOM_CRASH_DEFAULTS),
-      'Asian Drift':      loadBotConfig(currentUser.id, 'Asian Drift',      ASIAN_DRIFT_DEFAULTS),
     };
     setLoading(false);
 
@@ -1146,7 +1108,7 @@ function App() {
   };
 
   const handleSignOut = async () => {
-    {
+    if (derivConnected) {
       deriv.disconnect();
     }
     setLiveArmed(false);
@@ -1182,7 +1144,7 @@ function App() {
   derivConnectedRef.current = derivConnected;
   derivAccountRef.current = deriv.account;
 
-  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; batchId?: string; barrier?: number; growth_rate?: number; duration?: number }) => {
+  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; barrier?: number; growth_rate?: number; duration?: number }) => {
     if (!workspace) return;
     const ws = workspaceRef.current;
     if (!ws) return;
@@ -1275,7 +1237,6 @@ function App() {
           profit: 0,
           source: details.source,
           bot_name: details.botName,
-          batch_id: details.batchId ?? null,
           entry_price: result.entryPrice,
           exit_price: undefined,
           created_at: new Date().toISOString(),
@@ -1334,14 +1295,6 @@ function App() {
                   stpV3StateRef.current.lastLossTime = Date.now();
                 } else {
                   stpV3StateRef.current.consecutiveLosses = 0;
-                }
-              }
-              // Digit Surge consecutive loss tracking (ref-based, resets on restart)
-              if (details.botName === 'Digit Surge') {
-                if (!win) {
-                  digitSurgeLossRef.current += 1;
-                } else {
-                  digitSurgeLossRef.current = 0;
                 }
               }
             }
@@ -1445,13 +1398,6 @@ function App() {
 
   const toggleBot = async (bot: BotRow) => {
     const nextActive = !bot.active;
-    // Reset per-bot runtime state when (re)starting
-    if (nextActive && bot.name === 'Digit Surge') {
-      digitSurgeLossRef.current = 0;
-    }
-    if (nextActive && bot.name === 'Boom/Crash Rider') {
-      boomCrashStateRef.current.lastTradeTime = 0;
-    }
     const nextBots = bots.map((item) => (item.id === bot.id ? { ...item, active: nextActive } : item));
     setBots(nextBots);
 
@@ -1494,9 +1440,8 @@ function App() {
         if (botPendingTradesRef.current.has(bot.name)) return;
 
         let instrument: string;
-        let direction: 'CALL' | 'PUT' | string;
+        let direction: 'CALL' | 'PUT';
         let stake: number;
-        let botDuration: number | undefined = undefined;
 
         if (bot.name === 'Phantom Scalper') {
           // ── Phantom Scalper: multi-signal strategy ──────────────────────────
@@ -1600,109 +1545,6 @@ function App() {
           } else {
             stake = Math.max(1, cfg.stakeValue);
           }
-        } else if (bot.name === 'Digit Surge') {
-          const cfg = (botConfigRef.current['Digit Surge'] ?? DIGIT_SURGE_DEFAULTS) as DigitSurgeConfig;
-
-          // Use a ref-based counter so it resets cleanly when the bot is restarted
-          if (digitSurgeLossRef.current >= cfg.maxConsecLosses) {
-            setBotStatus(s => ({ ...s, 'Digit Surge': `🛑 Stopped — ${digitSurgeLossRef.current} consecutive losses. Restart to resume.` }));
-            // Deactivate the bot so the UI shows Start instead of Pause
-            setBots(prev => prev.map(b => b.name === 'Digit Surge' ? { ...b, active: false } : b));
-            botPendingTradesRef.current.delete('Digit Surge');
-            return;
-          }
-
-          // Parity bias from synthetic tick sequence on instrument index 0 (V10)
-          let evenCount = 0; let oddCount = 0;
-          for (let t = 0; t < cfg.lookback; t++) {
-            const p = priceFor(0, currentTick - t);
-            const lastDigit = Math.round(p * 100) % 10;
-            if (lastDigit % 2 === 0) evenCount++; else oddCount++;
-          }
-          const total = evenCount + oddCount;
-          const evenBias = evenCount / total;
-          const oddBias  = oddCount / total;
-
-          if (Math.max(evenBias, oddBias) < cfg.biasThreshold) {
-            setBotStatus(s => ({ ...s, 'Digit Surge': `🔍 Scanning — bias ${(Math.max(evenBias, oddBias) * 100).toFixed(0)}% < ${(cfg.biasThreshold * 100).toFixed(0)}%` }));
-            return;
-          }
-
-          const digitDir = evenBias >= oddBias ? 'DIGITEVEN' : 'DIGITODD';
-          setBotStatus(s => ({ ...s, 'Digit Surge': `✅ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias, oddBias) * 100).toFixed(0)}% — losses: ${digitSurgeLossRef.current}/${cfg.maxConsecLosses}` }));
-          instrument = 'Volatility 10 (1s) Index';
-          direction  = digitDir;
-          stake      = Math.max(0.35, cfg.stake);
-
-        } else if (bot.name === 'Boom/Crash Rider') {
-          // ── Boom/Crash Rider: pre-spike setup on Boom/Crash indices ──────
-          // Boom 1000: periodic sharp upward spikes preceded by a quiet drift
-          // downward. We wait for ≥70% falling ticks + price compression
-          // (last move < threshold × avg move), then buy CALL on Boom 1000.
-          // Mirror logic for Crash 1000 with rising ticks → PUT.
-          const cfg = (botConfigRef.current['Boom/Crash Rider'] ?? BOOM_CRASH_DEFAULTS) as BoomCrashConfig;
-
-          const bcState = boomCrashStateRef.current;
-          if (Date.now() - bcState.lastTradeTime < cfg.cooldownMs) {
-            const remain = Math.ceil((cfg.cooldownMs - (Date.now() - bcState.lastTradeTime)) / 1000);
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `⏸ Cooldown — ${remain}s` }));
-            return;
-          }
-
-          let fallingTicks = 0; let risingTicks = 0;
-          for (let t = 1; t <= cfg.trendTicks; t++) {
-            const prev = priceFor(2, currentTick - t);
-            const cur  = priceFor(2, currentTick - t + 1);
-            if (cur < prev) fallingTicks++; else if (cur > prev) risingTicks++;
-          }
-
-          // Simplified: directional dominance only — compression check was too tight
-          // with synthetic priceFor() prices. ≥70% in one direction is the signal.
-          const strongFall = fallingTicks >= Math.ceil(cfg.trendTicks * 0.70);
-          const strongRise = risingTicks  >= Math.ceil(cfg.trendTicks * 0.70);
-
-          if (strongFall) {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ BOOM setup — ${fallingTicks}/${cfg.trendTicks} falling ticks` }));
-            instrument = 'Boom 1000 Index';
-            direction  = 'CALL';
-          } else if (strongRise) {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ CRASH setup — ${risingTicks}/${cfg.trendTicks} rising ticks` }));
-            instrument = 'Crash 1000 Index';
-            direction  = 'PUT';
-          } else {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔍 Scanning — fall:${fallingTicks} rise:${risingTicks}/${cfg.trendTicks}` }));
-            return;
-          }
-
-          stake = Math.max(0.35, cfg.stake);
-          boomCrashStateRef.current.lastTradeTime = Date.now();
-
-        } else if (bot.name === 'Asian Drift') {
-          // ── Asian Drift: MA drift → Asian Up/Down on V50 ─────────────────
-          // Asian options settle on the average price of all ticks during the
-          // contract. ASIANU wins if the final spot > average; ASIAND if below.
-          // Signal: if current price is significantly above the MA the average
-          // will lag behind the close → back ASIANU. Below MA → ASIAND.
-          const cfg = (botConfigRef.current['Asian Drift'] ?? ASIAN_DRIFT_DEFAULTS) as AsianDriftConfig;
-
-          let maSum = 0;
-          for (let t = 0; t < cfg.maPeriod; t++) maSum += priceFor(2, currentTick - t);
-          const ma    = maSum / cfg.maPeriod;
-          const close = priceFor(2, currentTick);
-          const drift = (close - ma) / (ma || 1);
-
-          if (Math.abs(drift) < cfg.driftThreshold) {
-            setBotStatus(s => ({ ...s, 'Asian Drift': `🔍 Scanning — drift ${(drift * 100).toFixed(3)}%` }));
-            return;
-          }
-
-          const asianDir = drift > 0 ? 'ASIANU' : 'ASIAND';
-          setBotStatus(s => ({ ...s, 'Asian Drift': `✅ ASIAN ${drift > 0 ? 'UP' : 'DOWN'} drift ${(Math.abs(drift) * 100).toFixed(3)}%` }));
-          instrument = 'Volatility 50 Index';
-          direction  = asianDir;
-          stake      = Math.max(0.35, cfg.stake);
-          botDuration = cfg.durationTicks;
-
         } else {
           // Default strategy for all other bots — stake from config
           const cfg = (botConfigRef.current[bot.name] ?? DEFAULT_BOT_DEFAULTS) as DefaultBotConfig;
@@ -1711,7 +1553,7 @@ function App() {
           stake      = Math.max(1, cfg.stake);
         }
 
-        void runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name, duration: botDuration });
+        void runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name });
       });
     }, 5000);
     return () => window.clearInterval(interval);
@@ -2181,7 +2023,7 @@ function PageView({
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
   if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} />;
-  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} botConfig={botConfig} onSaveBotConfig={onSaveBotConfig} setPage={setPage} />;
+  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} botConfig={botConfig} onSaveBotConfig={onSaveBotConfig} />;
   if (page === 'manual') {
     return (
       <ManualTrader
@@ -2199,17 +2041,13 @@ function PageView({
       />
     );
   }
-  if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} trades={trades} />;
-  if (page === 'scanner') return <MarketScanner />;
-  if (page === 'analysis') return <AnalysisLab />;
-  if (page === 'bulk') return <BulkTrader runTrade={runTrade} trades={trades} />;
+  if (page === 'builder') return <Builder setNotice={setNotice} />;
+  if (page === 'signals') return <Signals tick={tick} runTrade={runTrade} />;
+  if (page === 'bulk') return <Bulk tick={tick} runTrade={runTrade} />;
   if (page === 'quick') return <Quick tick={tick} runTrade={runTrade} />;
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
   if (page === 'phantom') return <PhantomScalper bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Phantom Scalper', cfg)} initialConfig={botConfig?.['Phantom Scalper'] as PhantomConfig | undefined} />;
   if (page === 'stpv3') return <TrendPullbackV3 bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Trend Pullback V3', cfg)} initialConfig={botConfig?.['Trend Pullback V3'] as StpConfig | undefined} />;
-  if (page === 'digitsurge') return <DigitSurge bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Digit Surge', cfg)} initialConfig={botConfig?.['Digit Surge'] as DigitSurgeConfig | undefined} />;
-  if (page === 'boomcrash') return <BoomCrashRider bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Boom/Crash Rider', cfg)} initialConfig={botConfig?.['Boom/Crash Rider'] as BoomCrashConfig | undefined} />;
-  if (page === 'asiandrift') return <AsianDrift bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Asian Drift', cfg)} initialConfig={botConfig?.['Asian Drift'] as AsianDriftConfig | undefined} />;
   if (page === 'digits') return <DigitsAnalyser derivConnected={derivConnected} tick={tick} runTrade={runTrade} derivAccount={deriv.account} workspaceBalance={workspace?.balance ?? 0} />;
   if (page === 'record') return <Record trades={trades} />;
   return (
@@ -2909,7 +2747,7 @@ function EquityChart({
   );
 }
 
-function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onSaveBotConfig, setPage }: {
+function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onSaveBotConfig }: {
   bots: BotRow[];
   toggleBot: (bot: BotRow) => Promise<void>;
   runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>;
@@ -2917,7 +2755,6 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
   botsLoadError?: boolean;
   botConfig: Record<string, BotConfig>;
   onSaveBotConfig: (botName: string, cfg: BotConfig) => void;
-  setPage: (page: Page) => void;
 }) {
   // Local stake overrides per bot — seeded from botConfig (safe against empty/undefined)
   const [stakeMap, setStakeMap] = useState<Record<string, number>>(() => {
@@ -2933,15 +2770,6 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
     const next = Math.max(1, value);
     setStakeMap(m => ({ ...m, [botName]: next }));
     onSaveBotConfig(botName, { ...((botConfig[botName] as DefaultBotConfig) ?? DEFAULT_BOT_DEFAULTS), stake: next });
-  };
-
-  // Bots that have a dedicated detail page
-  const BOT_DETAIL_PAGE: Record<string, Page> = {
-    'Phantom Scalper':  'phantom',
-    'Trend Pullback V3': 'stpv3',
-    'Digit Surge':      'digitsurge',
-    'Boom/Crash Rider': 'boomcrash',
-    'Asian Drift':      'asiandrift',
   };
 
   return (
@@ -2998,16 +2826,10 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
                 <button className={bot.active ? 'secondary active-button' : 'primary'} onClick={() => void toggleBot(bot)}>
                   {bot.active ? <><Pause size={15} /> Pause bot</> : <><Play size={15} /> Start bot</>}
                 </button>
-                {BOT_DETAIL_PAGE[bot.name] ? (
-                  <button className="secondary" onClick={() => setPage(BOT_DETAIL_PAGE[bot.name])}>
-                    <ChevronRight size={14} /> Details
-                  </button>
-                ) : (
-                  <button className="ghost"
-                    onClick={() => void runTrade({ instrument: instruments[0], direction: 'CALL', stake, source: 'demo', botName: bot.name })}>
-                    Test ${stake}
-                  </button>
-                )}
+                <button className="ghost"
+                  onClick={() => void runTrade({ instrument: instruments[0], direction: 'CALL', stake, source: 'demo', botName: bot.name })}>
+                  Test ${stake}
+                </button>
               </div>
               {bot.active && <div className="watching"><i className="live-dot" /> Running · ${stake}/trade · every 5 s</div>}
             </div>
@@ -3020,169 +2842,12 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
 
 
 
-function MarketScanner() {
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'>('ALL');
-  const [lastRefresh, setLastRefresh] = useState(() => new Date());
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [runMessage, setRunMessage] = useState('');
-  const [marketLive, setMarketLive] = useState<{ quote: number; updatedAt: string } | null>(null);
-  const [scanPulse, setScanPulse] = useState(0);
-  const [scannerConnected, setScannerConnected] = useState(false);
-  const [scannerRunning, setScannerRunning] = useState(false);
-  const scannerTicksRef = useRef<DerivTick[]>([]);
-  const [rows, setRows] = useState<Array<{ symbol: string; market_family: string; contract_type: string; duration: number; status: 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'; score: number; estimated_probability: number; break_even_probability: number; edge: number; sample_size: number }>>([]);
-  const updateRowsFromTicks = (ticks: DerivTick[]) => {
-    if (ticks.length < 2) return;
-    const quotes = ticks.map((tick) => Number(tick.quote));
-    const latest = quotes[quotes.length - 1];
-    const previous = quotes[quotes.length - 2];
-    const direction = latest >= previous ? 'CALL' : 'PUT';
-    const movement = previous ? Math.abs(latest - previous) / previous : 0;
-    const ema = (period: number) => {
-      if (quotes.length < period) return null;
-      const multiplier = 2 / (period + 1);
-      let value = quotes.slice(0, period).reduce((sum, quote) => sum + quote, 0) / period;
-      quotes.slice(period).forEach((quote) => { value = (quote - value) * multiplier + value; });
-      return value;
-    };
-    const fast = ema(9); const slow = ema(20);
-    const returns = quotes.slice(1).map((quote, index) => (quote - quotes[index]) / Math.max(quotes[index], Number.EPSILON));
-    const candleBuckets = new Map<number, { open: number; high: number; low: number; close: number }>();
-    ticks.forEach((tick) => {
-      const bucket = Math.floor(Number(tick.epoch) / 60) * 60;
-      const existing = candleBuckets.get(bucket);
-      candleBuckets.set(bucket, existing ? { ...existing, high: Math.max(existing.high, tick.quote), low: Math.min(existing.low, tick.quote), close: tick.quote } : { open: tick.quote, high: tick.quote, low: tick.quote, close: tick.quote });
-    });
-    const candles = Array.from(candleBuckets.values());
-    const trueRanges = candles.slice(1).map((candle, index) => Math.max(candle.high - candle.low, Math.abs(candle.high - candles[index].close), Math.abs(candle.low - candles[index].close)));
-    const atr = trueRanges.length ? trueRanges.reduce((sum, value) => sum + value, 0) / trueRanges.length : 0;
-    const gains = returns.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
-    const losses = Math.abs(returns.filter((value) => value < 0).reduce((sum, value) => sum + value, 0));
-    const rsi = losses === 0 ? 100 : 100 - (100 / (1 + (gains / Math.max(returns.length, 1)) / Math.max(losses / Math.max(returns.length, 1), Number.EPSILON)));
-    const meanReturn = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : 0;
-    const variance = returns.length ? returns.reduce((sum, value) => sum + ((value - meanReturn) ** 2), 0) / returns.length : 0;
-    const volatility = Math.sqrt(variance);
-    const adxProxy = volatility > 0 ? Math.min(50, Math.abs(meanReturn) / volatility * 25) : 0;
-    const rsiBonus = rsi > 55 && direction === 'CALL' ? 0.015 : rsi < 45 && direction === 'PUT' ? 0.015 : 0;
-    const trendQuality = adxProxy >= 18 ? 0.01 : -0.005;
-    const recentRange = quotes.length >= 20 ? Math.max(...quotes.slice(-20)) - Math.min(...quotes.slice(-20)) : 0;
-    const recentHigh = quotes.length >= 20 ? Math.max(...quotes.slice(-20)) : latest;
-    const recentLow = quotes.length >= 20 ? Math.min(...quotes.slice(-20)) : latest;
-    const pullbackQuality = recentRange > 0 ? Math.min(1, Math.abs(latest - (direction === 'CALL' ? recentLow : recentHigh)) / recentRange) : 0;
-    const pullbackBonus = pullbackQuality > 0.35 && pullbackQuality < 0.8 ? 0.01 : 0;
-    const structure = latest > Math.max(...quotes.slice(-10)) ? 'BREAKOUT_UP' : latest < Math.min(...quotes.slice(-10)) ? 'BREAKOUT_DOWN' : 'RANGE';
-    setRows([5, 10, 15].map((duration, index) => {
-      const structureBonus = structure === 'RANGE' ? 0 : ((structure === 'BREAKOUT_UP' && direction === 'CALL') || (structure === 'BREAKOUT_DOWN' && direction === 'PUT') ? 0.02 : -0.02);
-      const atrPenalty = latest ? Math.min(0.025, (atr / latest) * 4) : 0;
-            const trendBonus = fast !== null && slow !== null && fast !== slow ? 0.025 : 0;
-                  const probability = Math.min(0.7, Math.max(0.3, 0.5 + trendBonus + rsiBonus + trendQuality + pullbackBonus + structureBonus + Math.min(0.04, movement * 6) - Math.min(0.03, volatility * 20) - atrPenalty - index * 0.01));
-      const breakEven = 0.55; const edge = probability - breakEven;
-      return { symbol: 'Volatility 75 Index', market_family: 'Volatility', contract_type: direction, duration, status: ticks.length < 20 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', score: Math.min(100, Math.round((ticks.length / 12) + (fast !== null && slow !== null ? 20 : 0) + Math.min(20, adxProxy) + (structure === 'RANGE' ? 0 : 10))), estimated_probability: probability, break_even_probability: breakEven, edge, sample_size: ticks.length };
-    }));
-    setLastRefresh(new Date());
-  };
+function Builder({ setNotice }: { setNotice: (notice: string) => void }) { const [blocks, setBlocks] = useState(['Price crosses moving average', 'Confirm momentum direction']); const options = ['Price crosses moving average', 'RSI leaves oversold zone', 'Three candles agree', 'Volatility is below threshold']; return <><PageHeader eyebrow="No-code strategy lab" title="Bot builder" description="Assemble readable conditions, choose money management, and test the idea in your demo workspace." action={<button className="primary" onClick={() => setNotice('Strategy saved to your bot library.') }><Check size={16} /> Save strategy</button>} /><div className="builder-grid"><section className="panel"><div className="panel-title"><div><span className="eyebrow">When all conditions are true</span><h2>Entry conditions</h2></div><span className="count-badge">{blocks.length} blocks</span></div>{blocks.map((block, index) => <div className="condition" key={`${block}-${index}`}><div className="drag">⋮⋮</div><div><small>Condition {index + 1}</small><strong>{block}</strong></div><button className="icon-button" onClick={() => setBlocks((current) => current.filter((_, item) => item !== index))}><Trash2 size={15} /></button></div>)}<div className="add-blocks">{options.filter((option) => !blocks.includes(option)).map((option) => <button key={option} onClick={() => setBlocks((current) => [...current, option])}><Plus size={14} /> {option}</button>)}</div></section><section className="panel"><span className="eyebrow">Money management</span><h2>Execution rules</h2><label>Stake per trade<div className="input-prefix"><span>$</span><input defaultValue="10" /></div></label><label>Max trades per session<input type="number" defaultValue="8" /></label><label>Direction preference<select defaultValue="Both directions"><option>Both directions</option><option>CALL only</option><option>PUT only</option></select></label><div className="backtest"><div><BarChart3 size={18} /><div><strong>Ready to backtest</strong><span>Use your conditions against synthetic price history.</span></div></div><button className="secondary" onClick={() => setNotice('Backtest complete: 68% win rate across 124 synthetic trades.')}>Run backtest</button></div></section></div></>; }
 
-  const loadSnapshot = async () => {
-    setLoading(true); setError('');
-    try {
-      const response = await fetch('/api/scanner-snapshot', { cache: 'no-store' });
-      const responseText = await response.text();
-      let data: { error?: string; rows?: typeof rows; generated_at?: string; version?: string; warning?: string };
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        throw new Error(`Scanner endpoint returned invalid data (${response.status}). Check the Vercel function deployment for a runtime error.`);
-      }
-      if (!response.ok) throw new Error(data.error || `Scanner request failed (${response.status})`);
-      if (!Array.isArray(data.rows) || !data.generated_at) throw new Error('Scanner endpoint returned an incomplete snapshot.');
-      if (scannerTicksRef.current.length < 2) setRows(data.rows);
-      setLastRefresh(new Date(data.generated_at));
-      if (data.version && data.version !== 'v1-research-fixture') setError(data.warning ? `${data.version}: ${data.warning}` : `Data source: ${data.version}`);
-    } catch (loadError) { setError(loadError instanceof Error ? loadError.message : 'Unable to load scanner snapshot.'); }
-    finally { setLoading(false); }
-  };
-  const runScanner = () => {
-    if (!scannerConnected) {
-      setRunMessage('Connect Deriv first, then start the scanner.');
-      return;
-    }
-    setScannerRunning((running) => !running);
-    setRunMessage(scannerRunning ? 'Scanner stopped. Live ticks are no longer being processed.' : 'Scanner started. Processing live Deriv ticks.');
-    if (!scannerRunning) updateRowsFromTicks(scannerTicksRef.current);
-    return;
-    setRunMessage(scannerRunning ? 'Scanner stopped. Live ticks are no longer being processed.' : 'Scanner started. Processing live Deriv ticks.');
-  };
-  useEffect(() => {
-    void loadSnapshot();
-    const subscribe = () => subscribeTicks('R_75' as DerivSymbol, (tick) => {
-      scannerTicksRef.current = [...scannerTicksRef.current.slice(-119), tick];
-      setScannerConnected(true);
-    if (!scannerRunning) return;
-    setMarketLive({ quote: tick.quote, updatedAt: new Date().toISOString() });
-      setScanPulse((value) => value + 1);
-      updateRowsFromTicks(scannerTicksRef.current);
-    });
-    const unsubscribe = subscribe();
-    return unsubscribe;
-  }, []);
-  const visible = rows.filter((row) => statusFilter === 'ALL' || row.status === statusFilter);
-  return <><PageHeader eyebrow="Research-first scanner" title="APEX Market Scanner" description="V1 scope: Volatility 75 Rise/Fall only. This dashboard ranks compact research snapshots; it does not use an LLM or execute trades." action={<div style={{ display: 'flex', gap: 8 }}><button className="secondary" disabled={loading || !scannerConnected} onClick={runScanner}><Activity size={16} /> {!scannerConnected ? 'Waiting for Deriv' : scannerRunning ? 'Stop scanner' : 'Start scanner'}</button><button className="primary" disabled={loading} onClick={() => void loadSnapshot()}>{loading ? <><RefreshCw className="spin" size={16} /> Loading…</> : <><RefreshCw size={16} /> Refresh</>}</button></div>} />{(error || runMessage) && <div className="scanner-error">{runMessage || error}</div>}<div className={`scanner-command-center ${scannerConnected ? 'scanner-active' : 'scanner-idle'}`}><div className="scanner-radar"><span className="radar-ring ring-one" /><span className="radar-ring ring-two" /><span className="radar-sweep" /><span className="radar-core"><Activity size={18} /></span></div><div className="scanner-command-copy"><span className="eyebrow">LIVE RESEARCH ENGINE</span><h2>{scannerConnected ? 'Scanning Volatility 75' : 'Scanner on standby'}</h2><p>{scannerConnected ? 'Incoming Deriv ticks are being evaluated against the active V1 model.' : 'Connect a Deriv account to begin live analysis.'}</p></div><div className="scanner-readout"><span>Ticks processed</span><strong>{scanPulse.toLocaleString()}</strong><small>{marketLive ? `Last quote ${marketLive.quote}` : 'Standby'}</small></div></div><div className="scanner-gate"><ShieldCheck size={18} /><div><b>Research gate active</b><span>Expand markets only after out-of-sample validation supports the model.</span></div></div><div className="scanner-toolbar"><span className="eyebrow">Opportunity state</span>{(['ALL', 'QUALIFIED', 'WATCH', 'NO SIGNAL'] as const).map((status) => <button key={status} className={statusFilter === status ? 'secondary active-filter' : 'secondary'} onClick={() => setStatusFilter(status)}>{status}</button>)}</div><section className="panel scanner-table-wrap"><div className="panel-title"><div><span className="eyebrow">Current research configurations</span><h2>V75 directional evidence</h2></div><span className="muted">Updated {lastRefresh.toLocaleTimeString()}</span></div><div className="scanner-table">{visible.map((row) => <div className="scanner-row" key={`${row.duration}-${row.status}`}><div><b>{row.symbol}</b><span>{row.market_family} · {row.contract_type === 'CALL' ? 'Rise/Fall' : 'Rise/Fall'} · {row.duration} ticks</span></div><span className={`scanner-status ${row.status.toLowerCase().replace(' ', '-')}`}>{row.status}</span><div><span>Score</span><strong>{Number(row.score ?? 0)}/100</strong></div><div><span>Probability</span><strong>{(Number(row.estimated_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Break-even</span><strong>{(Number(row.break_even_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Edge</span><strong className={row.edge > 0 ? 'positive' : 'negative'}>{row.edge > 0 ? '+' : ''}{(row.edge * 100).toFixed(1)}%</strong></div><div><span>Sample</span><strong>{Number(row.sample_size ?? 0).toLocaleString()}</strong></div></div>)}{!visible.length && <EmptyState title="No matching opportunities" text="The scanner is behaving conservatively. No configuration currently meets this filter." />}</div></section><div className="scanner-cards"><section className="panel"><span className="eyebrow">Methodology</span><h2>How qualification works</h2><p className="muted">Technical quality, statistical quality, historical validation, contract economics and data quality are tracked separately. The score is a ranking score, not a probability.</p></section><section className="panel"><span className="eyebrow">V1 boundaries</span><h2>Free-tier safe by design</h2><p className="muted">Rolling state stays in the scanner process. Supabase is reserved for compact opportunities, signal history and aggregated statistics — never raw tick storage.</p></section></div></>;
-}
+function Signals({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string }) => Promise<void> }) { const [signal, setSignal] = useState<{ instrument: string; direction: string; confidence: number } | null>(null); const generate = () => setSignal({ instrument: instruments[tick % instruments.length], direction: tick % 2 ? 'CALL' : 'PUT', confidence: 72 + (tick % 20) }); return <><PageHeader eyebrow="Assisted decisions" title="Signal AI" description="Generate a plain-language suggestion, then approve or reject it yourself. Nothing executes without your click." action={<button className="primary" onClick={generate}><Sparkles size={16} /> Generate signal</button>} /><div className="signal-layout"><section className="panel signal-hero"><div className="signal-orb"><Sparkles size={28} /></div><span className="eyebrow">AI market read</span>{signal ? <><h2>{signal.direction} opportunity on {signal.instrument}</h2><p>Momentum is leaning {signal.direction === 'CALL' ? 'upward' : 'downward'} after a confirmed synthetic-index move. The model sees a clean setup, but the final decision stays with you.</p><div className="confidence"><div><span>Confidence</span><b>{signal.confidence}%</b></div><div className="progress"><span style={{ width: `${signal.confidence}%` }} /></div></div><div className="signal-actions"><button className="primary" onClick={() => void runTrade({ instrument: signal.instrument, direction: signal.direction, stake: 10, source: 'signal_ai' })}><Check size={16} /> Approve & execute</button><button className="secondary" onClick={() => setSignal(null)}><X size={16} /> Reject</button></div></> : <><h2>Ask for a fresh signal</h2><p>Generate a read of the current synthetic market, review the reasoning, and decide whether to execute.</p><button className="secondary" onClick={generate}>Generate first signal <ChevronRight size={15} /></button></>}</section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Process</span><h2>How approval works</h2></div></div>{['Market conditions are scanned', 'Signal direction and confidence are shown', 'You approve or reject the trade', 'Execution and result enter the ledger'].map((item, index) => <div className="step" key={item}><span>{String(index + 1).padStart(2, '0')}</span><b>{item}</b><Check size={16} /></div>)}</section></div></>; }
 
-function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; batchId?: string; duration?: number }) => Promise<void> }) {
-  return null;
-}
-/*
-  const [selected, setSelected] = useState(instruments.slice(0, 3));
-  const [direction, setDirection] = useState<'CALL' | 'PUT'>('CALL');
-  const [stake, setStake] = useState(5);
-  const [duration, setDuration] = useState(5);
-  const [running, setRunning] = useState(false);
-  const [completed, setCompleted] = useState(0);
-  const [lastRun, setLastRun] = useState<string | null>(null);
-  const [batchId, setBatchId] = useState<string | null>(null);
-  const [batchStartedAt, setBatchStartedAt] = useState<string | null>(null);
-  const [showLedger, setShowLedger] = useState(true);
+function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string }) => Promise<void> }) { const [selected, setSelected] = useState(instruments.slice(0, 3)); const [running, setRunning] = useState(false); const execute = async () => { setRunning(true); for (const instrument of selected) await runTrade({ instrument, direction: tick % 2 ? 'CALL' : 'PUT', stake: 5, source: 'bulk' }); setRunning(false); }; return <><PageHeader eyebrow="Multi-market execution" title="Bulk trader" description="Select a group of instruments and run one strategy across all of them with consistent sizing." action={<button className="primary" disabled={running || !selected.length} onClick={() => void execute()}>{running ? <><RefreshCw className="spin" size={16} /> Running…</> : <><Play size={16} /> Run across {selected.length}</>}</button>} /><div className="bulk-grid"><section className="panel"><div className="panel-title"><div><span className="eyebrow">Market selection</span><h2>Choose instruments</h2></div><button className="text-button" onClick={() => setSelected(selected.length === instruments.length ? [] : instruments)}>Select all</button></div>{instruments.map((instrument, index) => <button className={selected.includes(instrument) ? 'instrument selected' : 'instrument'} key={instrument} onClick={() => setSelected((current) => current.includes(instrument) ? current.filter((item) => item !== instrument) : [...current, instrument])}><div><span className="check-box">{selected.includes(instrument) && <Check size={13} />}</span><b>{instrument}</b></div><span className={index % 2 ? 'negative' : 'positive'}>{index % 2 ? '-0.18%' : '+0.31%'}</span></button>)}</section><section className="panel"><span className="eyebrow">Strategy preview</span><h2>Momentum Pulse</h2><p className="muted">Trades in the current direction when price momentum confirms. Each instrument uses a $5 stake in this demo run.</p><div className="bulk-summary"><div><span>Selected</span><strong>{selected.length}</strong></div><div><span>Total stake</span><strong>{money(selected.length * 5)}</strong></div><div><span>Mode</span><strong>Demo</strong></div></div><div className="guard-note"><ShieldCheck size={16} /> Loss guard applies to every trade in the batch.</div></section></div></>; }
 
-  const execute = async () => {
-    if (!selected.length || stake <= 0 || duration <= 0) return;
-    const id = `BULK-${Date.now().toString(36).toUpperCase()}`;
-    setBatchId(id); setBatchStartedAt(new Date().toISOString()); setRunning(true); setCompleted(0); setLastRun(null);
-    let finished = 0;
-    try {
-      for (const instrument of selected) {
-        await runTrade({ instrument, direction, stake, duration, source: 'bulk', batchId: id });
-        finished += 1;
-        setCompleted(finished);
-      }
-      setLastRun(`${finished} contract${finished === 1 ? '' : 's'} submitted`);
-    } finally { setRunning(false); }
-  };
-
-  return <>
-    <PageHeader eyebrow="Multi-market execution" title="Bulk trader" description="Configure one contract and submit it across multiple Deriv synthetic markets. Each market is sent as a separate contract and follows the same risk controls." action={<button className="primary" disabled={running || !selected.length || stake <= 0} onClick={() => void execute()}>{running ? <><RefreshCw className="spin" size={16} /> Submitted {completed}/{selected.length}</> : <><Play size={16} /> Submit batch</>}</button>} />
-    <div className="bulk-grid">
-      <section className="panel">
-        <div className="panel-title"><div><span className="eyebrow">Market selection</span><h2>Choose instruments</h2></div><button className="text-button" onClick={() => setSelected(selected.length === instruments.length ? [] : instruments)}>{selected.length === instruments.length ? 'Clear all' : 'Select all'}</button></div>
-        {instruments.map((instrument, index) => <button className={selected.includes(instrument) ? 'instrument selected' : 'instrument'} key={instrument} onClick={() => setSelected((current) => current.includes(instrument) ? current.filter((item) => item !== instrument) : [...current, instrument])}><div><span className="check-box">{selected.includes(instrument) && <Check size={13} />}</span><b>{instrument}</b></div><span className={index % 2 ? 'negative' : 'positive'}>{index % 2 ? '-0.18%' : '+0.31%'}</span></button>)}
-      </section>
-      <section className="panel">
-        <span className="eyebrow">Batch configuration</span><h2>Same contract on every market</h2>
-        <div className="bulk-controls">
-          <label>Direction<select value={direction} onChange={(event) => setDirection(event.target.value as 'CALL' | 'PUT')}><option value="CALL">CALL / Rise</option><option value="PUT">PUT / Fall</option></select></label>
-          <label>Stake per contract<input type="number" min="0.35" step="0.01" value={stake} onChange={(event) => setStake(Number(event.target.value))} /></label>
-          <label>Duration (ticks)<input type="number" min="1" max="1000" step="1" value={duration} onChange={(event) => setDuration(Number(event.target.value))} /></label>
-        </div>
-        <div className="bulk-summary"><div><span>Selected</span><strong>{selected.length}</strong></div><div><span>Total stake</span><strong>{money(selected.length * stake)}</strong></div><div><span>Direction</span><strong>{direction}</strong></div></div>
-        <div className="guard-note"><ShieldCheck size={16} /> Every contract passes the session loss limit, account, live-arm, and risk-cap checks.</div>
-        {batchId && <div className="bulk-run-card"><button className="text-button bulk-ledger-toggle" onClick={() => setShowLedger((value) => !value)}>{showLedger ? 'Collapse batch ledger' : 'Open batch ledger'}</button>{showLedger && <><div><span className="eyebrow">Batch ledger</span><h2>{batchId}</h2><p className="muted">{batchStartedAt ? new Date(batchStartedAt).toLocaleString() : ''} · {running ? `Submitting ${completed}/${selected.length}` : lastRun}</p></div><div className="bulk-run-stats"><div><span>Contracts</span><strong>{selected.length}</strong></div><div><span>Submitted</span><strong>{completed}</strong></div><div><span>Win/Loss</span><strong>Settling</strong></div><div><span>Net P/L</span><strong>Pending</strong></div></div><div className="bulk-progress"><span style={{ width: `${selected.length ? (completed / selected.length) * 100 : 0}%` }} /></div><p className="muted">Individual results appear in Track Record with source <b>bulk</b> and this batch ID.</p></div></div>}
-      </section>
-    </div>
-  </>;
-}
-
-*/
 function Quick({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void> }) { const presets = [{ name: 'Steady Start', detail: '$5 stake · Conservative', risk: 'Low' }, { name: 'Balanced Pulse', detail: '$10 stake · Moderate', risk: 'Medium' }, { name: 'Fast Momentum', detail: '$25 stake · Aggressive', risk: 'High' }]; return <><PageHeader eyebrow="One-click automation" title="Quick bot" description="Choose a sensible preset and get a bot watching the market in seconds." /><div className="quick-grid">{presets.map((preset, index) => <div className="quick-card" key={preset.name}><div className="quick-icon"><Zap size={20} /></div><span className="risk moderate">{preset.risk} risk</span><h2>{preset.name}</h2><p>{preset.detail}</p><div className="quick-status"><i className="live-dot" /> Ready to start</div><button className="primary full" onClick={() => void runTrade({ instrument: instruments[(tick + index) % instruments.length], direction: index === 1 ? 'PUT' : 'CALL', stake: [5, 10, 25][index], source: 'quick_bot', botName: `Quick · ${preset.name}` })}><Play size={16} /> Start demo run</button></div>)}</div><section className="panel session-panel"><div><span className="eyebrow">Session stats</span><h2>Quick bot runs stay visible</h2><p className="muted">Every result is recorded in the same public ledger so you can see what happened, not just a marketing claim.</p></div><div className="session-stats"><strong>0</strong><span>active quick sessions</span></div></section></>; }
 
 function Apex({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; trades: Trade[] }) {
@@ -3245,16 +2910,11 @@ function PhantomScalper({ bots, toggleBot, trades, botStatus, onSaveConfig, init
 
   const [cfg, setCfg] = useState<PhantomConfig>(initialConfig ?? PHANTOM_DEFAULTS);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [cfgSaved, setCfgSaved] = useState(false);
 
   const updateCfg = <K extends keyof PhantomConfig>(key: K, value: PhantomConfig[K]) => {
-    setCfg(prev => ({ ...prev, [key]: value }));
-  };
-
-  const savePhantomCfg = () => {
-    onSaveConfig(cfg);
-    setCfgSaved(true);
-    setTimeout(() => setCfgSaved(false), 2500);
+    const next = { ...cfg, [key]: value };
+    setCfg(next);
+    onSaveConfig(next);
   };
 
   const currentStatus = botStatus?.['Phantom Scalper'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
@@ -3436,14 +3096,10 @@ VALUES (
                 ))}
               </div>
             </label>
-            {/* Save + Reset */}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
-              <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ fontSize: '11px', padding: '7px 18px', minWidth: 130 }}
-                onClick={savePhantomCfg}>
-                {cfgSaved ? <><Check size={13} /> Saved!</> : 'Save configuration'}
-              </button>
+            {/* Reset to defaults */}
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
               <button type="button" className="secondary" style={{ fontSize: '11px', padding: '7px 14px' }}
-                onClick={() => { setCfg(PHANTOM_DEFAULTS); onSaveConfig(PHANTOM_DEFAULTS); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); }}>
+                onClick={() => { setCfg(PHANTOM_DEFAULTS); onSaveConfig(PHANTOM_DEFAULTS); }}>
                 Reset to defaults
               </button>
             </div>
@@ -3549,16 +3205,11 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
 
   const [cfg, setCfg] = useState<StpConfig>(initialConfig ?? STP_DEFAULTS);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [cfgSaved, setCfgSaved] = useState(false);
 
   const updateCfg = <K extends keyof StpConfig>(key: K, value: StpConfig[K]) => {
-    setCfg(prev => ({ ...prev, [key]: value }));
-  };
-
-  const saveStpCfg = () => {
-    onSaveConfig(cfg);
-    setCfgSaved(true);
-    setTimeout(() => setCfgSaved(false), 2500);
+    const next = { ...cfg, [key]: value };
+    setCfg(next);
+    onSaveConfig(next);
   };
 
   const currentStatus = botStatus?.['Trend Pullback V3'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
@@ -3741,14 +3392,10 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
                 ))}
               </div>
             </label>
-            {/* Save + Reset */}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
-              <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ fontSize: '11px', padding: '7px 18px', minWidth: 130 }}
-                onClick={saveStpCfg}>
-                {cfgSaved ? <><Check size={13} /> Saved!</> : 'Save configuration'}
-              </button>
+            {/* Reset */}
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
               <button type="button" className="secondary" style={{ fontSize: '11px', padding: '7px 14px' }}
-                onClick={() => { setCfg(STP_DEFAULTS); onSaveConfig(STP_DEFAULTS); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); }}>
+                onClick={() => { setCfg(STP_DEFAULTS); onSaveConfig(STP_DEFAULTS); }}>
                 Reset to defaults
               </button>
             </div>
@@ -3834,351 +3481,6 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
       </section>
     </>
   );
-}
-
-// ── Digit Surge page ──────────────────────────────────────────────────────────
-function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
-  bots: BotRow[];
-  toggleBot: (bot: BotRow) => Promise<void>;
-  trades: Trade[];
-  botStatus: Record<string, string>;
-  onSaveConfig: (cfg: BotConfig) => void;
-  initialConfig?: DigitSurgeConfig;
-}) {
-  const bot = bots.find(b => b.name === 'Digit Surge');
-  const botTrades = trades.filter(t => t.bot_name === 'Digit Surge');
-  const closed = botTrades.filter(t => t.result === 'won' || t.result === 'lost');
-  const hasUserTrades = closed.length > 0;
-  const displayWinRate = hasUserTrades
-    ? `${Math.round((closed.filter(t => t.result === 'won').length / closed.length) * 100)}%`
-    : '—';
-
-  const [cfg, setCfg] = useState<DigitSurgeConfig>(initialConfig ?? DIGIT_SURGE_DEFAULTS);
-  const [cfgSaved, setCfgSaved] = useState(false);
-  const persistCfg = (c: DigitSurgeConfig) => { onSaveConfig(c); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); };
-
-  if (!bot) return (
-    <section className="panel">
-      <span className="eyebrow">Bot not found</span>
-      <h2>Digit Surge not in database</h2>
-      <p className="muted">Run the SQL below in your Supabase SQL Editor:</p>
-      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Digit Surge','Parity bias engine on Volatility 10 (1s) Index. Scans the last 8 ticks for even/odd imbalance — enters DIGITEVEN or DIGITODD when bias exceeds 75%. Pauses after 3 consecutive losses.','Low',true,68,420)\nON CONFLICT (name) DO NOTHING;`}</pre>
-    </section>
-  );
-
-  return <>
-    <PageHeader eyebrow="Digit strategy" title="Digit Surge"
-      description="Trades Even/Odd digits on Volatility 10 (1s) Index. Uses parity bias — when the last 8 ticks show 75%+ even or odd endings, enters the dominant side."
-      action={<button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
-        {bot.active ? <><Pause size={16} /> Pause</> : <><Hash size={16} /> Start</>}
-      </button>} />
-
-    <div className="apex-banner">
-      <div>
-        <span className="pro-tag">DIGIT BOT</span>
-        <h2>Parity bias. Precise entry.</h2>
-        <p>Every 5 seconds the bot scans the last 8 ticks on V10 (1s). If 75% or more land on even or odd, it enters that side. Pauses automatically after 3 consecutive losses.</p>
-      </div>
-      <div className="apex-score">
-        <strong>{displayWinRate}</strong>
-        <span>{hasUserTrades ? 'Your win rate' : '0 trades · Not run yet'}</span>
-      </div>
-    </div>
-
-    <div className="bot-stats wide">
-      {bot && <BotStats bot={bot} userTrades={botTrades} />}
-    </div>
-
-    <section className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
-      <div>
-        <span className="eyebrow">Bot control</span>
-        <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Digit Surge is running' : 'Digit Surge is paused'}</h2>
-        <p className="muted">{botStatus['Digit Surge'] || (bot.active ? 'Scanning parity…' : 'Start the bot to begin scanning.')}</p>
-      </div>
-      <button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
-        {bot.active ? <><Pause size={16} /> Pause Digit Surge</> : <><Hash size={16} /> Start Digit Surge</>}
-      </button>
-    </section>
-
-    <div className="settings-grid">
-      <section className="panel">
-        <div className="panel-title"><div><span className="eyebrow">Strategy</span><h2>How it works</h2></div></div>
-        {[
-          { s: '01', l: 'Scan parity', d: `Last ${cfg.lookback} ticks on V10 (1s) — count even/odd last digits.` },
-          { s: '02', l: 'Bias gate',   d: `Only enter if dominant side ≥ ${(cfg.biasThreshold*100).toFixed(0)}%. Below threshold = wait.` },
-          { s: '03', l: 'Enter digit', d: 'Buy DIGITEVEN or DIGITODD matching the dominant parity.' },
-          { s: '04', l: 'Loss guard',  d: `Pause for one cycle after ${cfg.maxConsecLosses} consecutive losses.` },
-        ].map(({ s, l, d }) => (
-          <div className="step" key={s}><span>{s}</span><b>{l}</b><p className="muted" style={{ margin: 0, fontSize: '10px' }}>{d}</p></div>
-        ))}
-      </section>
-      <section className="panel">
-        <div className="panel-title"><div><span className="eyebrow">Configuration</span><h2>Parameters</h2></div></div>
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Stake ($)</span>
-          <input type="number" min={0.35} step={0.5} value={cfg.stake}
-            onChange={e => setCfg({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Lookback ticks</span>
-          <input type="number" min={4} max={20} step={1} value={cfg.lookback}
-            onChange={e => setCfg({ ...cfg, lookback: Math.max(4, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Bias threshold (0–1)</span>
-          <input type="number" min={0.5} max={1} step={0.05} value={cfg.biasThreshold}
-            onChange={e => setCfg({ ...cfg, biasThreshold: Math.min(1, Math.max(0.5, Number(e.target.value))) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <label style={{ display: 'block' }}>
-          <span className="eyebrow">Max consecutive losses before pause</span>
-          <input type="number" min={1} max={10} step={1} value={cfg.maxConsecLosses}
-            onChange={e => setCfg({ ...cfg, maxConsecLosses: Math.max(1, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ marginTop: 16, width: '100%' }} onClick={() => persistCfg(cfg)}>
-          {cfgSaved ? <><Check size={14} /> Saved!</> : 'Save configuration'}
-        </button>
-      </section>
-    </div>
-
-    <section className="panel">
-      <div className="panel-title"><h2>Digit Surge trade log</h2></div>
-      <TradeTable trades={botTrades} />
-    </section>
-  </>;
-}
-
-// ── Boom/Crash Rider page ─────────────────────────────────────────────────────
-function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
-  bots: BotRow[];
-  toggleBot: (bot: BotRow) => Promise<void>;
-  trades: Trade[];
-  botStatus: Record<string, string>;
-  onSaveConfig: (cfg: BotConfig) => void;
-  initialConfig?: BoomCrashConfig;
-}) {
-  const bot = bots.find(b => b.name === 'Boom/Crash Rider');
-  const botTrades = trades.filter(t => t.bot_name === 'Boom/Crash Rider');
-  const closed = botTrades.filter(t => t.result === 'won' || t.result === 'lost');
-  const hasUserTrades = closed.length > 0;
-  const displayWinRate = hasUserTrades
-    ? `${Math.round((closed.filter(t => t.result === 'won').length / closed.length) * 100)}%`
-    : '—';
-
-  const [cfg, setCfg] = useState<BoomCrashConfig>(initialConfig ?? BOOM_CRASH_DEFAULTS);
-  const [cfgSaved, setCfgSaved] = useState(false);
-  const persistCfg = (c: BoomCrashConfig) => { onSaveConfig(c); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); };
-
-  if (!bot) return (
-    <section className="panel">
-      <span className="eyebrow">Bot not found</span>
-      <h2>Boom/Crash Rider not in database</h2>
-      <p className="muted">Run the SQL below in your Supabase SQL Editor:</p>
-      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Boom/Crash Rider','Spike anticipation engine for Boom 1000 and Crash 1000 indices. Waits for 70% directional compression then enters CALL on Boom or PUT on Crash. 20-second cooldown between trades.','Moderate',true,62,215)\nON CONFLICT (name) DO NOTHING;`}</pre>
-    </section>
-  );
-
-  return <>
-    <PageHeader eyebrow="Spike strategy" title="Boom/Crash Rider"
-      description="Anticipates periodic spikes on Boom 1000 and Crash 1000 indices. Enters before the spike, not after it."
-      action={<button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
-        {bot.active ? <><Pause size={16} /> Pause</> : <><Zap size={16} /> Start</>}
-      </button>} />
-
-    <div className="apex-banner" style={{ borderColor: '#614a26' }}>
-      <div>
-        <span className="pro-tag">SPIKE BOT</span>
-        <h2>Ride the spike. Not the noise.</h2>
-        <p>Boom 1000 spikes upward roughly every 1000 ticks. Before each spike, price compresses into a quiet drift. This bot detects that drift + compression pattern and enters CALL on Boom or PUT on Crash with a built-in cooldown to prevent overtrading.</p>
-      </div>
-      <div className="apex-score">
-        <strong>{displayWinRate}</strong>
-        <span>{hasUserTrades ? 'Your win rate' : '0 trades · Not run yet'}</span>
-      </div>
-    </div>
-
-    <div className="bot-stats wide">
-      {bot && <BotStats bot={bot} userTrades={botTrades} />}
-    </div>
-
-    <section className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
-      <div>
-        <span className="eyebrow">Bot control</span>
-        <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Boom/Crash Rider is running' : 'Boom/Crash Rider is paused'}</h2>
-        <p className="muted">{botStatus['Boom/Crash Rider'] || (bot.active ? 'Watching for setup…' : 'Start the bot to begin watching.')}</p>
-      </div>
-      <button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
-        {bot.active ? <><Pause size={16} /> Pause Rider</> : <><Zap size={16} /> Start Rider</>}
-      </button>
-    </section>
-
-    <div className="settings-grid">
-      <section className="panel">
-        <div className="panel-title"><div><span className="eyebrow">Strategy</span><h2>How it works</h2></div></div>
-        {[
-          { s: '01', l: 'Trend scan',      d: `Analyse last ${cfg.trendTicks} ticks — count falling vs rising.` },
-          { s: '02', l: 'Direction gate',  d: `≥70% falling → Boom CALL. ≥70% rising → Crash PUT.` },
-          { s: '03', l: 'Compression check', d: `Last tick move must be < ${(cfg.spikeThreshold*100).toFixed(0)}% of average move — confirms quiet accumulation.` },
-          { s: '04', l: 'Cooldown',        d: `${cfg.cooldownMs / 1000}s minimum between trades to avoid overlapping contracts.` },
-        ].map(({ s, l, d }) => (
-          <div className="step" key={s}><span>{s}</span><b>{l}</b><p className="muted" style={{ margin: 0, fontSize: '10px' }}>{d}</p></div>
-        ))}
-      </section>
-      <section className="panel">
-        <div className="panel-title"><div><span className="eyebrow">Configuration</span><h2>Parameters</h2></div></div>
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Stake ($)</span>
-          <input type="number" min={0.35} step={0.5} value={cfg.stake}
-            onChange={e => setCfg({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Trend ticks (lookback)</span>
-          <input type="number" min={5} max={30} step={1} value={cfg.trendTicks}
-            onChange={e => setCfg({ ...cfg, trendTicks: Math.max(5, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Spike threshold (0–1, lower = tighter)</span>
-          <input type="number" min={0.1} max={0.9} step={0.05} value={cfg.spikeThreshold}
-            onChange={e => setCfg({ ...cfg, spikeThreshold: Math.min(0.9, Math.max(0.1, Number(e.target.value))) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <label style={{ display: 'block' }}>
-          <span className="eyebrow">Cooldown (ms)</span>
-          <input type="number" min={5000} max={120000} step={5000} value={cfg.cooldownMs}
-            onChange={e => setCfg({ ...cfg, cooldownMs: Math.max(5000, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ marginTop: 16, width: '100%' }} onClick={() => persistCfg(cfg)}>
-          {cfgSaved ? <><Check size={14} /> Saved!</> : 'Save configuration'}
-        </button>
-      </section>
-    </div>
-
-    <section className="panel">
-      <div className="panel-title"><h2>Boom/Crash Rider trade log</h2></div>
-      <TradeTable trades={botTrades} />
-    </section>
-  </>;
-}
-
-// ── Asian Drift page ──────────────────────────────────────────────────────────
-function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
-  bots: BotRow[];
-  toggleBot: (bot: BotRow) => Promise<void>;
-  trades: Trade[];
-  botStatus: Record<string, string>;
-  onSaveConfig: (cfg: BotConfig) => void;
-  initialConfig?: AsianDriftConfig;
-}) {
-  const bot = bots.find(b => b.name === 'Asian Drift');
-  const botTrades = trades.filter(t => t.bot_name === 'Asian Drift');
-  const closed = botTrades.filter(t => t.result === 'won' || t.result === 'lost');
-  const hasUserTrades = closed.length > 0;
-  const displayWinRate = hasUserTrades
-    ? `${Math.round((closed.filter(t => t.result === 'won').length / closed.length) * 100)}%`
-    : '—';
-
-  const [cfg, setCfg] = useState<AsianDriftConfig>(initialConfig ?? ASIAN_DRIFT_DEFAULTS);
-  const [cfgSaved, setCfgSaved] = useState(false);
-  const persistCfg = (c: AsianDriftConfig) => { onSaveConfig(c); setCfgSaved(true); setTimeout(() => setCfgSaved(false), 2500); };
-
-  if (!bot) return (
-    <section className="panel">
-      <span className="eyebrow">Bot not found</span>
-      <h2>Asian Drift not in database</h2>
-      <p className="muted">Run the SQL below in your Supabase SQL Editor:</p>
-      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Asian Drift','Moving-average drift engine on Volatility 50 Index. When the current price drifts significantly above or below the 12-tick MA, it enters ASIANU or ASIAND — profiting from the gap between spot price and contract average.','Low',true,65,318)\nON CONFLICT (name) DO NOTHING;`}</pre>
-    </section>
-  );
-
-  return <>
-    <PageHeader eyebrow="Asian strategy" title="Asian Drift"
-      description="Trades Asian Up/Down contracts on Volatility 50 Index using a moving-average drift signal. Enters when spot is significantly displaced from the 12-tick MA."
-      action={<button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
-        {bot.active ? <><Pause size={16} /> Pause</> : <><Globe size={16} /> Start</>}
-      </button>} />
-
-    <div className="apex-banner">
-      <div>
-        <span className="pro-tag">ASIAN BOT</span>
-        <h2>Average price. Edge in drift.</h2>
-        <p>Asian contracts pay out based on the average tick price, not the final spot. When price drifts above the moving average, the contract average lags — ASIANU wins. Drift below MA → ASIAND wins. The further the drift the higher the edge.</p>
-      </div>
-      <div className="apex-score">
-        <strong>{displayWinRate}</strong>
-        <span>{hasUserTrades ? 'Your win rate' : '0 trades · Not run yet'}</span>
-      </div>
-    </div>
-
-    <div className="bot-stats wide">
-      {bot && <BotStats bot={bot} userTrades={botTrades} />}
-    </div>
-
-    <section className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
-      <div>
-        <span className="eyebrow">Bot control</span>
-        <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Asian Drift is running' : 'Asian Drift is paused'}</h2>
-        <p className="muted">{botStatus['Asian Drift'] || (bot.active ? 'Measuring drift…' : 'Start the bot to begin measuring.')}</p>
-      </div>
-      <button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
-        {bot.active ? <><Pause size={16} /> Pause Asian Drift</> : <><Globe size={16} /> Start Asian Drift</>}
-      </button>
-    </section>
-
-    <div className="settings-grid">
-      <section className="panel">
-        <div className="panel-title"><div><span className="eyebrow">Strategy</span><h2>How it works</h2></div></div>
-        {[
-          { s: '01', l: 'Compute MA',     d: `Average of last ${cfg.maPeriod} ticks on V50.` },
-          { s: '02', l: 'Measure drift',  d: `drift = (close − MA) / MA. Must exceed ±${(cfg.driftThreshold*100).toFixed(2)}%.` },
-          { s: '03', l: 'Choose direction', d: 'Drift > 0 → ASIANU. Drift < 0 → ASIAND.' },
-          { s: '04', l: 'Contract',       d: `${cfg.durationTicks}-tick Asian contract. Settles on average price of all ticks.` },
-        ].map(({ s, l, d }) => (
-          <div className="step" key={s}><span>{s}</span><b>{l}</b><p className="muted" style={{ margin: 0, fontSize: '10px' }}>{d}</p></div>
-        ))}
-      </section>
-      <section className="panel">
-        <div className="panel-title"><div><span className="eyebrow">Configuration</span><h2>Parameters</h2></div></div>
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Stake ($)</span>
-          <input type="number" min={0.35} step={0.5} value={cfg.stake}
-            onChange={e => setCfg({ ...cfg, stake: Math.max(0.35, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">MA period (ticks)</span>
-          <input type="number" min={5} max={30} step={1} value={cfg.maPeriod}
-            onChange={e => setCfg({ ...cfg, maPeriod: Math.max(5, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Drift threshold (min |drift| ratio)</span>
-          <input type="number" min={0.0005} max={0.01} step={0.0001} value={cfg.driftThreshold}
-            onChange={e => setCfg({ ...cfg, driftThreshold: Math.max(0.0001, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <label style={{ display: 'block' }}>
-          <span className="eyebrow">Contract duration (ticks)</span>
-          <input type="number" min={5} max={20} step={1} value={cfg.durationTicks}
-            onChange={e => setCfg({ ...cfg, durationTicks: Math.max(5, Number(e.target.value)) })}
-            style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
-        </label>
-        <button type="button" className={cfgSaved ? 'secondary' : 'primary'} style={{ marginTop: 16, width: '100%' }} onClick={() => persistCfg(cfg)}>
-          {cfgSaved ? <><Check size={14} /> Saved!</> : 'Save configuration'}
-        </button>
-      </section>
-    </div>
-
-    <section className="panel">
-      <div className="panel-title"><h2>Asian Drift trade log</h2></div>
-      <TradeTable trades={botTrades} />
-    </section>
-  </>;
 }
 
 function Record({ trades }: { trades: Trade[] }) { const [filter, setFilter] = useState('all'); const filtered = filter === 'all' ? trades : trades.filter((trade) => trade.result === filter); const total = trades.reduce((sum, trade) => sum + Number(trade.profit), 0); const exportCsv = () => { const csv = ['Instrument,Direction,Stake,Result,P/L,Source,Time', ...trades.map((trade) => [trade.instrument, trade.direction, trade.stake, trade.result, trade.profit, trade.source, trade.created_at].join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'apex-track-record.csv'; link.click(); URL.revokeObjectURL(url); }; return <><PageHeader eyebrow="Public performance ledger" title="Track record" description="Every synthetic trade is timestamped and visible. Results cannot be edited after they close." action={<button className="secondary" onClick={exportCsv}><ArrowDownRight size={16} /> Export CSV</button>} /><div className="record-summary"><Stat label="Total trades" value={String(trades.length)} detail="All strategies" icon={BarChart3} /><Stat label="Win rate" value={trades.length ? `${Math.round(trades.filter((trade) => trade.result === 'won').length / trades.length * 100)}%` : '—'} detail="Closed trades" tone="success" icon={Target} /><Stat label="Cumulative P/L" value={money(total)} detail="Across this workspace" tone={total >= 0 ? 'success' : 'danger'} icon={total >= 0 ? TrendingUp : TrendingDown} /></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Cumulative equity curve</h2></div></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><h2>All trades</h2><div className="filter-tabs">{['all', 'won', 'lost'].map((item) => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div></div><TradeTable trades={filtered} /></section></>; }
@@ -4335,7 +3637,6 @@ function Settings({
   onRequestBotLiveConfirm: (onConfirm: () => void) => void;
 }) {
   const [limitInput, setLimitInput] = useState(String(Math.max(1, Number(workspace.loss_limit ?? 50))));
-  const [limitSaved, setLimitSaved] = useState(false);
   const activeBalance = derivConnected && deriv.account ? deriv.account.balance : null;
   const parsedLimit = Math.max(1, Math.min(100000, Number(limitInput) || lossLimit));
 
@@ -4347,8 +3648,7 @@ function Settings({
     const validated = Math.max(1, Math.min(100000, value));
     setLimitInput(String(validated));
     void updateWorkspace({ loss_limit: validated });
-    setLimitSaved(true);
-    setTimeout(() => setLimitSaved(false), 2500);
+    setNotice(`Session loss limit saved: ${money(validated)}`);
   };
 
   return (
@@ -4544,11 +3844,10 @@ function Settings({
             <div className="loss-limit-actions">
               <button
                 type="button"
-                className={limitSaved ? 'secondary' : 'primary'}
+                className="primary"
                 onClick={() => saveLossLimit(parsedLimit)}
-                style={{ minWidth: 130 }}
               >
-                {limitSaved ? <><Check size={14} /> Saved!</> : 'Save loss limit'}
+                Save loss limit
               </button>
               <button type="button" className="secondary" onClick={resetSessionBaseline}>
                 <RefreshCw size={16} /> Reset session baseline
