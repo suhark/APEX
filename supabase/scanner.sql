@@ -28,6 +28,9 @@ alter table public.market_opportunities enable row level security;
 drop policy if exists "Anyone can read active market opportunities" on public.market_opportunities;
 create policy "Anyone can read active market opportunities" on public.market_opportunities for select using (expires_at > now());
 
+alter table public.trading_trades add column if not exists batch_id text;
+create index if not exists trading_trades_batch_idx on public.trading_trades (batch_id);
+
 create table if not exists public.signal_history (
   id uuid primary key default gen_random_uuid(),
   symbol text not null,

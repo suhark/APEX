@@ -12,6 +12,7 @@ import { DigitsAnalyser } from './digits-analyser';
 import { LandingPage } from './landing-page';
 import { PolicyModal, getPolicyConsent, recordPolicyConsent, type PolicyTab } from './policy-modal';
 import { AnalysisLab } from './analysis-lab';
+import { BulkTrader } from './bulk-trader';
 
 const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
 
@@ -21,7 +22,7 @@ const supabase = createClient(
 );
 
 type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'scanner' | 'analysis' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift';
-type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
+type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; batch_id?: string | null; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 
 // Per-bot user-configurable parameters. Stored in localStorage per user.
@@ -1181,7 +1182,7 @@ function App() {
   derivConnectedRef.current = derivConnected;
   derivAccountRef.current = deriv.account;
 
-  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; barrier?: number; growth_rate?: number; duration?: number }) => {
+  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; batchId?: string; barrier?: number; growth_rate?: number; duration?: number }) => {
     if (!workspace) return;
     const ws = workspaceRef.current;
     if (!ws) return;
@@ -1274,6 +1275,7 @@ function App() {
           profit: 0,
           source: details.source,
           bot_name: details.botName,
+          batch_id: details.batchId ?? null,
           entry_price: result.entryPrice,
           exit_price: undefined,
           created_at: new Date().toISOString(),
@@ -2200,7 +2202,7 @@ function PageView({
   if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} trades={trades} />;
   if (page === 'scanner') return <MarketScanner />;
   if (page === 'analysis') return <AnalysisLab />;
-  if (page === 'bulk') return <Bulk tick={tick} runTrade={runTrade} />;
+  if (page === 'bulk') return <BulkTrader runTrade={runTrade} trades={trades} />;
   if (page === 'quick') return <Quick tick={tick} runTrade={runTrade} />;
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
   if (page === 'phantom') return <PhantomScalper bots={bots} toggleBot={toggleBot} trades={trades} botStatus={botStatus} onSaveConfig={(cfg) => onSaveBotConfig('Phantom Scalper', cfg)} initialConfig={botConfig?.['Phantom Scalper'] as PhantomConfig | undefined} />;
@@ -3128,7 +3130,10 @@ function MarketScanner() {
   return <><PageHeader eyebrow="Research-first scanner" title="APEX Market Scanner" description="V1 scope: Volatility 75 Rise/Fall only. This dashboard ranks compact research snapshots; it does not use an LLM or execute trades." action={<div style={{ display: 'flex', gap: 8 }}><button className="secondary" disabled={loading || !scannerConnected} onClick={runScanner}><Activity size={16} /> {!scannerConnected ? 'Waiting for Deriv' : scannerRunning ? 'Stop scanner' : 'Start scanner'}</button><button className="primary" disabled={loading} onClick={() => void loadSnapshot()}>{loading ? <><RefreshCw className="spin" size={16} /> Loading…</> : <><RefreshCw size={16} /> Refresh</>}</button></div>} />{(error || runMessage) && <div className="scanner-error">{runMessage || error}</div>}<div className={`scanner-command-center ${scannerConnected ? 'scanner-active' : 'scanner-idle'}`}><div className="scanner-radar"><span className="radar-ring ring-one" /><span className="radar-ring ring-two" /><span className="radar-sweep" /><span className="radar-core"><Activity size={18} /></span></div><div className="scanner-command-copy"><span className="eyebrow">LIVE RESEARCH ENGINE</span><h2>{scannerConnected ? 'Scanning Volatility 75' : 'Scanner on standby'}</h2><p>{scannerConnected ? 'Incoming Deriv ticks are being evaluated against the active V1 model.' : 'Connect a Deriv account to begin live analysis.'}</p></div><div className="scanner-readout"><span>Ticks processed</span><strong>{scanPulse.toLocaleString()}</strong><small>{marketLive ? `Last quote ${marketLive.quote}` : 'Standby'}</small></div></div><div className="scanner-gate"><ShieldCheck size={18} /><div><b>Research gate active</b><span>Expand markets only after out-of-sample validation supports the model.</span></div></div><div className="scanner-toolbar"><span className="eyebrow">Opportunity state</span>{(['ALL', 'QUALIFIED', 'WATCH', 'NO SIGNAL'] as const).map((status) => <button key={status} className={statusFilter === status ? 'secondary active-filter' : 'secondary'} onClick={() => setStatusFilter(status)}>{status}</button>)}</div><section className="panel scanner-table-wrap"><div className="panel-title"><div><span className="eyebrow">Current research configurations</span><h2>V75 directional evidence</h2></div><span className="muted">Updated {lastRefresh.toLocaleTimeString()}</span></div><div className="scanner-table">{visible.map((row) => <div className="scanner-row" key={`${row.duration}-${row.status}`}><div><b>{row.symbol}</b><span>{row.market_family} · {row.contract_type === 'CALL' ? 'Rise/Fall' : 'Rise/Fall'} · {row.duration} ticks</span></div><span className={`scanner-status ${row.status.toLowerCase().replace(' ', '-')}`}>{row.status}</span><div><span>Score</span><strong>{Number(row.score ?? 0)}/100</strong></div><div><span>Probability</span><strong>{(Number(row.estimated_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Break-even</span><strong>{(Number(row.break_even_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Edge</span><strong className={row.edge > 0 ? 'positive' : 'negative'}>{row.edge > 0 ? '+' : ''}{(row.edge * 100).toFixed(1)}%</strong></div><div><span>Sample</span><strong>{Number(row.sample_size ?? 0).toLocaleString()}</strong></div></div>)}{!visible.length && <EmptyState title="No matching opportunities" text="The scanner is behaving conservatively. No configuration currently meets this filter." />}</div></section><div className="scanner-cards"><section className="panel"><span className="eyebrow">Methodology</span><h2>How qualification works</h2><p className="muted">Technical quality, statistical quality, historical validation, contract economics and data quality are tracked separately. The score is a ranking score, not a probability.</p></section><section className="panel"><span className="eyebrow">V1 boundaries</span><h2>Free-tier safe by design</h2><p className="muted">Rolling state stays in the scanner process. Supabase is reserved for compact opportunities, signal history and aggregated statistics — never raw tick storage.</p></section></div></>;
 }
 
-function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string }) => Promise<void> }) {
+function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; batchId?: string; duration?: number }) => Promise<void> }) {
+  return null;
+}
+/*
   const [selected, setSelected] = useState(instruments.slice(0, 3));
   const [direction, setDirection] = useState<'CALL' | 'PUT'>('CALL');
   const [stake, setStake] = useState(5);
@@ -3136,14 +3141,18 @@ function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrume
   const [running, setRunning] = useState(false);
   const [completed, setCompleted] = useState(0);
   const [lastRun, setLastRun] = useState<string | null>(null);
+  const [batchId, setBatchId] = useState<string | null>(null);
+  const [batchStartedAt, setBatchStartedAt] = useState<string | null>(null);
+  const [showLedger, setShowLedger] = useState(true);
 
   const execute = async () => {
     if (!selected.length || stake <= 0 || duration <= 0) return;
-    setRunning(true); setCompleted(0); setLastRun(null);
+    const id = `BULK-${Date.now().toString(36).toUpperCase()}`;
+    setBatchId(id); setBatchStartedAt(new Date().toISOString()); setRunning(true); setCompleted(0); setLastRun(null);
     let finished = 0;
     try {
       for (const instrument of selected) {
-        await runTrade({ instrument, direction, stake, duration, source: 'bulk' });
+        await runTrade({ instrument, direction, stake, duration, source: 'bulk', batchId: id });
         finished += 1;
         setCompleted(finished);
       }
@@ -3167,12 +3176,13 @@ function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrume
         </div>
         <div className="bulk-summary"><div><span>Selected</span><strong>{selected.length}</strong></div><div><span>Total stake</span><strong>{money(selected.length * stake)}</strong></div><div><span>Direction</span><strong>{direction}</strong></div></div>
         <div className="guard-note"><ShieldCheck size={16} /> Every contract passes the session loss limit, account, live-arm, and risk-cap checks.</div>
-        {lastRun && <div className="bulk-result"><CheckCircle2 size={16} /> {lastRun}</div>}
+        {batchId && <div className="bulk-run-card"><button className="text-button bulk-ledger-toggle" onClick={() => setShowLedger((value) => !value)}>{showLedger ? 'Collapse batch ledger' : 'Open batch ledger'}</button>{showLedger && <><div><span className="eyebrow">Batch ledger</span><h2>{batchId}</h2><p className="muted">{batchStartedAt ? new Date(batchStartedAt).toLocaleString() : ''} · {running ? `Submitting ${completed}/${selected.length}` : lastRun}</p></div><div className="bulk-run-stats"><div><span>Contracts</span><strong>{selected.length}</strong></div><div><span>Submitted</span><strong>{completed}</strong></div><div><span>Win/Loss</span><strong>Settling</strong></div><div><span>Net P/L</span><strong>Pending</strong></div></div><div className="bulk-progress"><span style={{ width: `${selected.length ? (completed / selected.length) * 100 : 0}%` }} /></div><p className="muted">Individual results appear in Track Record with source <b>bulk</b> and this batch ID.</p></div></div>}
       </section>
     </div>
   </>;
 }
 
+*/
 function Quick({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void> }) { const presets = [{ name: 'Steady Start', detail: '$5 stake · Conservative', risk: 'Low' }, { name: 'Balanced Pulse', detail: '$10 stake · Moderate', risk: 'Medium' }, { name: 'Fast Momentum', detail: '$25 stake · Aggressive', risk: 'High' }]; return <><PageHeader eyebrow="One-click automation" title="Quick bot" description="Choose a sensible preset and get a bot watching the market in seconds." /><div className="quick-grid">{presets.map((preset, index) => <div className="quick-card" key={preset.name}><div className="quick-icon"><Zap size={20} /></div><span className="risk moderate">{preset.risk} risk</span><h2>{preset.name}</h2><p>{preset.detail}</p><div className="quick-status"><i className="live-dot" /> Ready to start</div><button className="primary full" onClick={() => void runTrade({ instrument: instruments[(tick + index) % instruments.length], direction: index === 1 ? 'PUT' : 'CALL', stake: [5, 10, 25][index], source: 'quick_bot', botName: `Quick · ${preset.name}` })}><Play size={16} /> Start demo run</button></div>)}</div><section className="panel session-panel"><div><span className="eyebrow">Session stats</span><h2>Quick bot runs stay visible</h2><p className="muted">Every result is recorded in the same public ledger so you can see what happened, not just a marketing claim.</p></div><div className="session-stats"><strong>0</strong><span>active quick sessions</span></div></section></>; }
 
 function Apex({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: BotRow) => Promise<void>; trades: Trade[] }) {
