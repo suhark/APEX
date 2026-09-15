@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { ExternalLink } from 'lucide-react';
+import React, { useState } from 'react';
 import { PolicyModal, type PolicyTab } from './policy-modal';
 
 interface LandingPageProps {
@@ -7,162 +6,57 @@ interface LandingPageProps {
   onExploreDemo?: () => void;
 }
 
-interface MarketRow {
-  symbol: string;
-  name: string;
-  price: number;
-  change: number;
-  trend: 'up' | 'down';
-  history: number[];
-}
-
-const INITIAL_MARKETS: MarketRow[] = [
+const FEATURES = [
   {
-    symbol: '1HZ10V',
-    name: 'Volatility 10 (1s)',
-    price: 101.38,
-    change: -0.04,
-    trend: 'down',
-    history: [101.45, 101.44, 101.42, 101.42, 101.38],
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="1" fill="currentColor" />
+      </svg>
+    ),
+    label: 'Market Scanner',
+    desc: 'Find high-probability opportunities in real time.',
   },
   {
-    symbol: '1HZ25V',
-    name: 'Volatility 25 (1s)',
-    price: 98.21,
-    change: 0.07,
-    trend: 'up',
-    history: [98.12, 98.14, 98.15, 98.18, 98.21],
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="12" width="4" height="9" rx="1" /><rect x="10" y="7" width="4" height="14" rx="1" /><rect x="17" y="3" width="4" height="18" rx="1" />
+      </svg>
+    ),
+    label: 'Analysis Tools',
+    desc: 'Deep market insights and statistical analysis.',
   },
   {
-    symbol: '1HZ50V',
-    name: 'Volatility 50 (1s)',
-    price: 248.89,
-    change: 0.0,
-    trend: 'down',
-    history: [248.95, 248.92, 248.9, 248.9, 248.89],
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+      </svg>
+    ),
+    label: 'Automation',
+    desc: 'Run your strategy 24/7, hands-free.',
   },
   {
-    symbol: '1HZ75V',
-    name: 'Volatility 75 (1s)',
-    price: 482.35,
-    change: 0.01,
-    trend: 'up',
-    history: [482.25, 482.28, 482.3, 482.32, 482.35],
-  },
-  {
-    symbol: '1HZ100V',
-    name: 'Volatility 100 (1s)',
-    price: 929.42,
-    change: 0.07,
-    trend: 'up',
-    history: [929.15, 929.2, 929.28, 929.35, 929.42],
-  },
-];
-
-const MODULES_DATA = [
-  {
-    mod: 'MOD 001',
-    title: 'Automated bot library',
-    desc: 'Deploy pre-built synthetic bots — Momentum Pulse, Range Scout, Reverse Signal — each running its own stake limits and lifecycle, independent of the others.',
-    bullets: [
-      'Multiple bots run concurrently',
-      'Each bot armed and disarmed on its own',
-      'Zero-state track record per user',
-    ],
-  },
-  {
-    mod: 'MOD 002',
-    title: 'Session loss guardrails',
-    desc: 'Set a daily or session loss threshold once. The moment your drawdown reaches it, live execution disarms itself — you don’t have to be watching.',
-    bullets: [
-      'Disarms automatically at your limit',
-      'Open contracts stay protected while it settles',
-      'P/L updates in real time on raw trade',
-    ],
-  },
-  {
-    mod: 'MOD 003',
-    title: 'Manual financial terminal',
-    desc: 'Trade Rise/Fall contracts on a chart built for DTR specifically: dual crosshairs, a live spot halo, and scrollback through recent market history.',
-    bullets: [
-      'Tick-by-tick rendering, no batching',
-      'Pan back through past ticks',
-      'Pinch-to-zoom on touch devices',
-    ],
-  },
-  {
-    mod: 'MOD 004',
-    title: 'No-code strategy builder',
-    desc: 'Combine entry conditions — moving average crossovers, RSI thresholds — without writing a line of code, and test the result in a sandbox before it touches real funds.',
-    bullets: [
-      'Drag-and-drop rule blocks',
-      'Instant backtest against synthetic index history',
-      'Custom stake & direction preferences',
-    ],
-  },
-  {
-    mod: 'MOD 005',
-    title: 'Public audit ledger',
-    desc: 'Every contract you execute through APEX is timestamped and recorded. Your equity curve and win rate are one click away, not buried in a statement.',
-    bullets: [
-      'Permanent trade logging with entry/exit timestamps',
-      'Instant CSV export for external analysis',
-      'Visual performance analytics and drawdown calculation',
-    ],
-  },
-  {
-    mod: 'MOD 006',
-    title: 'Direct Deriv integration',
-    desc: 'Your token only needs Read and Trade scopes. Your funds stay in your Deriv account — orders execute straight across Deriv’s own WebSocket, nothing routes through us.',
-    bullets: [
-      'Non-custodial: zero deposit or withdrawal capabilities',
-      'Sub-100ms contract creation latency',
-      'Seamless multi-account demo and real switching',
-    ],
-  },
-];
-
-const FAQ_DATA = [
-  {
-    num: 'Q 01',
-    q: 'How does APEX execute trades on my Deriv account?',
-    a: 'APEX opens a direct, TLS-encrypted WebSocket connection from your browser to Deriv’s own gateway at wss://ws.derivws.com. When a strategy condition or a manual ticket fires, the contract request goes straight to Deriv with sub-100ms latency — nothing routes through a third-party server or database.',
-  },
-  {
-    num: 'Q 02',
-    q: 'What permissions does my Deriv API token need?',
-    a: 'Only "Read" and "Trade". Do not enable "Admin", "Payments", or "Withdrawals". APEX is strictly non-custodial: it can only read feeds and place contracts you authorize. It cannot withdraw or transfer your capital.',
-  },
-  {
-    num: 'Q 03',
-    q: 'What are synthetic volatility indices?',
-    a: 'Synthetic Volatility Indices (Volatility 10, 25, 50, 75, 100) are engineered financial markets with constant, verifiable volatility generated by cryptographically secure random number generators. They trade 24/7/365, unaffected by market opening hours or unpredictable world news.',
-  },
-  {
-    num: 'Q 04',
-    q: 'Can I practice with virtual funds before trading live?',
-    a: 'Yes. The workspace is demo-first. You can run manual trades and bots against live synthetic feeds with virtual balances. Live execution is disarmed by default and requires explicit manual arming before any real stake is placed.',
-  },
-  {
-    num: 'Q 05',
-    q: 'How does the loss-limit guardrail protect my capital?',
-    a: 'You choose a hard dollar limit for session drawdown (e.g. $50). If cumulative closed trade losses reach that threshold, APEX disarms live execution and pauses active bots automatically so you don’t blow an account during a tilted run.',
-  },
-  {
-    num: 'Q 06',
-    q: 'Can I run multiple automated bots at the same time?',
-    a: 'Yes. You can run Momentum Pulse, Range Scout, and Reverse Signal simultaneously across different synthetic volatility markets. Each bot operates with its own isolated parameters and lifecycle.',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 9h20" /><path d="M7 5v4" /><path d="M17 5v4" />
+        <path d="M6 15h4" /><path d="M14 15h4" />
+      </svg>
+    ),
+    label: 'Trade Basket',
+    desc: 'Execute multiple setups with one click.',
   },
 ];
 
 export function LandingPage({ onOpenAuth }: LandingPageProps) {
-  const [markets, setMarkets] = useState<MarketRow[]>(INITIAL_MARKETS);
-  const [utcTime, setUtcTime] = useState<string>('20:35:45 UTC');
-  const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [policyTab, setPolicyTab] = useState<PolicyTab | null>(null);
   const [contactOpen, setContactOpen] = useState(false);
   const [contactStatus, setContactStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [contactError, setContactError] = useState('');
+
+  const openContact = () => {
+    setContactOpen(true);
+    setContactStatus('idle');
+    setContactError('');
+  };
 
   const submitContact = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -171,516 +65,160 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
     setContactError('');
     const form = new FormData(formElement);
     try {
-      const response = await fetch('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.fromEntries(form)) });
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(form)),
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
       formElement.reset();
       setContactStatus('sent');
     } catch (error) {
-      setContactError(error instanceof Error ? error.message : 'Unable to send your message. Please try again.');
+      setContactError(error instanceof Error ? error.message : 'Unable to send. Please try again.');
       setContactStatus('error');
     }
   };
 
-  // Live UTC Clock
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      setUtcTime(now.toUTCString().slice(17, 25) + ' UTC');
-    };
-    updateTime();
-    const timer = setInterval(updateTime, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Subtle live simulated tick feed for the hero monitor table
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setMarkets((prev) =>
-        prev.map((m, i) => {
-          const delta = (Math.sin(Date.now() / 3000 + i) * 0.15 + (Math.random() - 0.49) * 0.2) * (m.price * 0.0008);
-          const nextPrice = Number((m.price + delta).toFixed(2));
-          const nextChange = Number((((nextPrice - INITIAL_MARKETS[i].price) / INITIAL_MARKETS[i].price) * 100).toFixed(2));
-          const nextTrend = nextChange >= 0 ? 'up' : 'down';
-          const nextHistory = [...m.history.slice(-6), nextPrice];
-          return {
-            ...m,
-            price: nextPrice,
-            change: nextChange,
-            trend: nextTrend,
-            history: nextHistory,
-          };
-        })
-      );
-    }, 2200);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Render SVG Sparkline
-  const renderSparkline = (history: number[], trend: 'up' | 'down') => {
-    if (!history || history.length < 2) return null;
-    const min = Math.min(...history);
-    const max = Math.max(...history);
-    const range = max - min || 1;
-    const width = 54;
-    const height = 18;
-
-    const points = history.map((val, idx) => {
-      const x = (idx / (history.length - 1)) * width;
-      const y = height - 2 - ((val - min) / range) * (height - 4);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    });
-
-    const color = trend === 'up' ? '#2dd4bf' : '#f87171';
-
-    return (
-      <svg width={width} height={height} className="sparkline-svg">
-        <polyline
-          fill="none"
-          stroke={color}
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          points={points.join(' ')}
-        />
-      </svg>
-    );
-  };
-
   return (
-    <div className="blueprint-landing">
-      {/* Top Status Strip */}
-      <div className="top-status-strip">
-        <div className="status-container">
-          <div className="status-left">
-            <span className="status-dot connected" />
-            <span className="status-label">connected</span>
-            <span className="status-url">wss://ws.derivws.com</span>
-          </div>
-          <div className="status-right">
-            <span className="status-ping">ping 14ms</span>
-            <span className="status-time font-mono">{utcTime}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Navigation */}
-      <header className="blueprint-nav">
-        <div className="nav-container">
-          <a href="#" className="nav-brand" aria-label="APEX Trading Lab Home">
-            <img
-              src="/apex-logo.png"
-              alt="APEX Trading Lab"
-              className="landing-nav-logo"
-            />
+    <div className="lp-root">
+      {/* Nav */}
+      <header className="lp-nav">
+        <div className="lp-nav-inner">
+          <a href="#" className="lp-nav-brand" aria-label="APEX Trading Lab Home">
+            <img src="/apex-logo.png" alt="APEX Trading Lab" className="lp-logo" />
           </a>
 
-          <nav className="nav-menu">
-            <a href="#modules">Automation</a>
-            <a href="#markets">Markets</a>
-            <a href="#circuit-breaker">Risk Controls</a>
-            <a href="#faq">FAQ</a>
-            <button
-              type="button"
-              className="nav-policy-btn"
-              onClick={() => setPolicyTab('privacy')}
-            >
-              Policies
+          <div className="lp-nav-right">
+            <button type="button" className="lp-contact-btn" onClick={openContact}>
+              Contact
             </button>
-          </nav>
-
-          <button
-            type="button"
-            className="nav-launch-btn"
-            onClick={onOpenAuth}
-          >
-            Launch Terminal
-          </button>
+            <button type="button" className="lp-cta-btn" onClick={onOpenAuth}>
+              Get Started
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Hero Section: 2-Column Asymmetrical Split */}
-      <section className="blueprint-hero">
-        <div className="hero-container">
-          {/* Left Column */}
-          <div className="hero-left">
-            <h1 className="hero-title">
-              Automate synthetic volatility trading with the guardrails built in.
+      {/* Hero */}
+      <section className="lp-hero">
+        <div className="lp-hero-inner">
+          {/* Left: Copy */}
+          <div className="lp-hero-copy">
+            <p className="lp-eyebrow">TRADE SMARTER</p>
+            <h1 className="lp-headline">
+              Data-Driven<br />
+              Synthetic Trading<br />
+              <span className="lp-headline-accent">Made Simple.</span>
             </h1>
-            <p className="hero-desc">
-              Run algorithmic strategies against Deriv's synthetic indices, execute manually
-              on a live tick chart, and cap what a bad session can cost you before it happens.
+            <p className="lp-sub">
+              Real-time market scanner, powerful analysis tools,
+              and automation — all in one platform.
             </p>
 
-            <div className="hero-action-row">
-              <button
-                type="button"
-                className="hero-primary-btn"
-                onClick={onOpenAuth}
-              >
-                Start trading now
+            <div className="lp-actions">
+              <button type="button" className="lp-start-btn" onClick={onOpenAuth}>
+                Start Trading <span className="lp-arrow">→</span>
               </button>
-              <a
-                href="https://home.deriv.com/dashboard/profile/api-tokens"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hero-link-btn"
-              >
-                Get Deriv API token &rarr;
-              </a>
-            </div>
-
-            <div className="hero-specs-grid">
-              <div className="spec-item">
-                <span>Sub-100ms execution</span>
-              </div>
-              <div className="spec-divider" />
-              <div className="spec-item">
-                <span>Non-custodial, zero fees</span>
-              </div>
-              <div className="spec-item">
-                <span>Direct client-side WSS</span>
-              </div>
-              <div className="spec-divider" />
-              <div className="spec-item">
-                <span>Hard loss guardrails</span>
-              </div>
+              <button type="button" className="lp-ghost-btn" onClick={onOpenAuth}>
+                Explore Tools
+              </button>
             </div>
           </div>
 
-          {/* Right Column: Live Terminal Market Monitor */}
-          <div className="hero-right" id="markets">
-            <div className="market-monitor-card">
-              <div className="monitor-header">
-                <span className="monitor-title font-mono">synthetic volatility indices</span>
-                <span className="monitor-badge font-mono">1s tick</span>
-              </div>
+          {/* Right: Hero Visual */}
+          <div className="lp-hero-visual">
+            <img
+              src="/apex-hero-visual.png"
+              alt="APEX Trading Platform"
+              className="lp-hero-img"
+            />
+          </div>
+        </div>
 
-              <div className="monitor-table">
-                <div className="monitor-thead font-mono">
-                  <span className="col-symbol">symbol</span>
-                  <span className="col-price">price</span>
-                  <span className="col-trend">trend</span>
-                  <span className="col-chg">chg</span>
-                </div>
-
-                <div className="monitor-tbody">
-                  {markets.map((m) => (
-                    <div className="monitor-row" key={m.symbol}>
-                      <div className="col-symbol">
-                        <strong className="symbol-code font-mono">{m.symbol}</strong>
-                        <span className="symbol-name">{m.name}</span>
-                      </div>
-                      <div className="col-price font-mono">
-                        {m.price.toFixed(2)}
-                      </div>
-                      <div className="col-trend">
-                        {renderSparkline(m.history, m.trend)}
-                      </div>
-                      <div className={`col-chg font-mono ${m.change >= 0 ? 'text-pos' : 'text-neg'}`}>
-                        {m.change >= 0 ? `▲ ${m.change.toFixed(2)}%` : `▼ ${Math.abs(m.change).toFixed(2)}%`}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+        {/* Feature strip */}
+        <div className="lp-features" id="features">
+          {FEATURES.map((f) => (
+            <div className="lp-feature-item" key={f.label}>
+              <span className="lp-feature-icon">{f.icon}</span>
+              <div className="lp-feature-text">
+                <strong>{f.label}</strong>
+                <span>{f.desc}</span>
               </div>
             </div>
-          </div>
+          ))}
         </div>
       </section>
 
-      {/* Section Divider Bar */}
-      <div className="section-divider-bar">
-        <div className="divider-label font-mono">SYSTEM COMPONENTS</div>
-      </div>
-
-      {/* Six Modules Section (Matching Image Layout) */}
-      <section className="modules-section" id="modules">
-        <div className="modules-container">
-          <div className="modules-lead">
-            <h2 className="modules-lead-title">Six modules. One synthetic index feed.</h2>
-            <p className="modules-lead-desc">
-              Everything below is scoped to Deriv’s synthetic volatility indices — trade the
-              scope by hand, hand it to a bot, or write your own entry logic without code.
-            </p>
-          </div>
-
-          <div className="modules-stack">
-            {MODULES_DATA.map((item) => (
-              <div className="module-item-row" key={item.mod}>
-                <div className="module-item-left">
-                  <span className="module-tag font-mono">{item.mod}</span>
-                  <h3 className="module-title">{item.title}</h3>
-                </div>
-
-                <div className="module-item-right">
-                  <p className="module-desc">{item.desc}</p>
-                  {item.bullets && item.bullets.length > 0 && (
-                    <ul className="module-bullets">
-                      {item.bullets.map((bullet, bIdx) => (
-                        <li key={bIdx}>
-                          <span className="bullet-dash font-mono">-</span>
-                          <span>{bullet}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* The Circuit Breaker Gauge Section (Matching Image Layout) */}
-      <section className="circuit-section" id="circuit-breaker">
-        <div className="circuit-container">
-          <div className="circuit-left">
-            <h2 className="circuit-title">
-              The circuit breaker is a component, not a setting you forgot to configure.
-            </h2>
-            <p className="circuit-desc">
-              In synthetic markets, risk management is what decides whether you’re still trading
-              next week. APEX ships with the breaker wired in by default.
-            </p>
-
-            <ul className="circuit-bullets">
-              <li>
-                <span className="bullet-dash font-mono">-</span>
-                <span>Every session boots with live execution disarmed until you explicitly arm it</span>
-              </li>
-              <li>
-                <span className="bullet-dash font-mono">-</span>
-                <span>Switching from Demo to Real disarms execution again automatically</span>
-              </li>
-              <li>
-                <span className="bullet-dash font-mono">-</span>
-                <span>A 25-second keep-alive ping keeps your terminal in sync with Deriv without gateway timeouts</span>
-              </li>
-            </ul>
-          </div>
-
-          <div className="circuit-right">
-            <div className="gauge-card">
-              <div className="gauge-header font-mono">
-                <span>CIRCUIT_BREAKER // LIVE</span>
-              </div>
-
-              {/* Speedometer Curved Gauge */}
-              <div className="gauge-visual">
-                <svg viewBox="0 0 200 120" className="gauge-svg">
-                  {/* Inactive background arc */}
-                  <path
-                    d="M 25 105 A 75 75 0 0 1 175 105"
-                    fill="none"
-                    stroke="#162925"
-                    strokeWidth="12"
-                    strokeLinecap="round"
-                  />
-                  {/* Active drawdown arc (28% of 180 deg) */}
-                  <path
-                    d="M 25 105 A 75 75 0 0 1 58 45"
-                    fill="none"
-                    stroke="#2dd4bf"
-                    strokeWidth="12"
-                    strokeLinecap="round"
-                  />
-                  {/* Needle Center & Line pointing to 28% */}
-                  <line
-                    x1="100"
-                    y1="105"
-                    x2="68"
-                    y2="55"
-                    stroke="#f8fafc"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                  />
-                  <circle cx="100" cy="105" r="5" fill="#f8fafc" />
-                </svg>
-              </div>
-
-              {/* Gauge Metrics Row */}
-              <div className="gauge-metrics-row">
-                <div className="gauge-metric-item left">
-                  <span className="metric-label">Loss limit threshold</span>
-                  <strong className="metric-val font-mono">$50.00</strong>
-                </div>
-                <div className="gauge-metric-item right">
-                  <span className="metric-label">Session drawdown</span>
-                  <strong className="metric-val font-mono text-neg">-$12.40</strong>
-                </div>
-              </div>
-
-              {/* Gauge Armed Status Pill */}
-              <div className="gauge-status-bar">
-                <div className="gauge-status-pill font-mono">
-                  <span className="live-dot connected" />
-                  <span>active · armed</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Frequently Asked Questions (Matching Image Layout) */}
-      <section className="faq-section" id="faq">
-        <div className="faq-container">
-          <div className="faq-lead">
-            <h2 className="faq-title">Frequently asked questions</h2>
-            <p className="faq-desc">
-              Everything on Deriv API tokens, synthetic indices, and how the loss guardrail actually works.
-            </p>
-          </div>
-
-          <div className="faq-rows-stack">
-            {FAQ_DATA.map((item, idx) => {
-              const isOpen = openFaq === idx;
-              return (
-                <div
-                  key={item.num}
-                  className={`faq-row-item ${isOpen ? 'open' : ''}`}
-                  onClick={() => setOpenFaq(isOpen ? null : idx)}
-                >
-                  <div className="faq-row-header">
-                    <div className="faq-row-left">
-                      <span className="faq-num font-mono">{item.num}</span>
-                      <span className="faq-question-text">{item.q}</span>
-                    </div>
-                    <span className="faq-toggle-icon font-mono">{isOpen ? '−' : '+'}</span>
-                  </div>
-
-                  {isOpen && (
-                    <div className="faq-row-body">
-                      <p>{item.a}</p>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* Bottom CTA Strip (Matching Image Layout) */}
-      <section className="bottom-cta-strip">
-        <div className="bottom-cta-container">
-          <div className="bottom-cta-text">
-            Test a free bot in Demo mode, or connect your token and go live.
-          </div>
-          <div className="bottom-cta-actions">
-            <button
-              type="button"
-              className="bottom-cta-btn"
-              onClick={onOpenAuth}
-            >
-              Launch APEX Terminal
-            </button>
-            <a
-              href="https://home.deriv.com/dashboard/profile/api-tokens"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bottom-cta-link"
-            >
-              Get Deriv API token &rarr;
-            </a>
-          </div>
-        </div>
-      </section>
-
-      {/* Footer (Matching Image Layout) */}
-      <footer className="blueprint-footer">
-        <div className="footer-container">
-          <div className="footer-top-row">
-            <div className="footer-brand-col">
-              <img
-                src="/apex-logo.png"
-                alt="APEX Trading Lab"
-                className="landing-footer-logo"
-              />
-              <p className="footer-desc">
-                Algorithmic execution interface for synthetic volatility indices. Direct
-                client-side Deriv WebSocket connection.
-              </p>
-            </div>
-
-            <div className="footer-columns-group">
-              <div className="footer-col">
-                <span className="col-header font-mono">PLATFORM</span>
-                <a href="#modules">Automation bots</a>
-                <a href="#markets">Synthetic markets</a>
-                <a href="#circuit-breaker">Loss guardrails</a>
-                <a href="#faq">FAQ</a>
-              </div>
-
-              <div className="footer-col">
-                <span className="col-header font-mono">DERIV RESOURCES</span>
-                <a
-                  href="https://home.deriv.com/dashboard/profile/api-tokens"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  API tokens portal
-                </a>
-                <a href="https://deriv.com" target="_blank" rel="noopener noreferrer">
-                  Deriv official site
-                </a>
-              </div>
-
-              <div className="footer-col">
-                <span className="col-header font-mono">CONTACT</span>
-                <a href="mailto:support@apextradinglab.app" onClick={(event) => { event.stopPropagation(); }}>Email support</a>
-                <button type="button" onClick={() => { setContactOpen(true); setContactStatus('idle'); setContactError(''); }}>Feedback / contact form</button>
-              </div>
-
-              <div className="footer-col">
-                <span className="col-header font-mono">LEGAL &amp; RISK</span>
-                <button type="button" onClick={() => setPolicyTab('privacy')}>
-                  Privacy policy
-                </button>
-                <button type="button" onClick={() => setPolicyTab('terms')}>
-                  Terms of service
-                </button>
-                <button type="button" onClick={() => setPolicyTab('risk')}>
-                  Risk disclosure
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="footer-bottom-disclaimer">
-            <p>
-              <b>Risk warning:</b> Trading synthetic volatility indices and digital options involves substantial risk of loss and is not suitable for all investors. Make sure you understand the risks fully before trading with real capital. APEX is an analytical and execution tool — it does not provide financial or investment advice.
-            </p>
-            <span className="footer-copy font-mono">
-              © 2026 APEX Trading Lab. All rights reserved.
-            </span>
+      {/* Minimal Footer */}
+      <footer className="lp-footer">
+        <div className="lp-footer-inner">
+          <span className="lp-footer-copy">© 2026 APEX Trading Lab</span>
+          <div className="lp-footer-links">
+            <button type="button" onClick={() => setPolicyTab('privacy')}>Privacy</button>
+            <button type="button" onClick={() => setPolicyTab('terms')}>Terms</button>
+            <button type="button" onClick={() => setPolicyTab('risk')}>Risk Disclosure</button>
+            <button type="button" onClick={openContact}>Support</button>
           </div>
         </div>
       </footer>
 
+      {/* Contact Modal */}
       {contactOpen && (
-        <div className="contact-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContactOpen(false); }}>
-          <section className="contact-modal" role="dialog" aria-modal="true" aria-labelledby="contact-title">
-            <button type="button" className="contact-close" aria-label="Close contact form" onClick={() => setContactOpen(false)}>×</button>
-            <span className="eyebrow font-mono">GET IN TOUCH</span>
-            <h2 id="contact-title">Contact APEX support</h2>
-            <p>Send feedback or a support request to our team.</p>
-            {contactStatus === 'sent' ? <div className="contact-success">Thanks — your message has been sent.</div> : (
-              <form onSubmit={submitContact} className="contact-form">
-                <label>Name<input name="name" required autoComplete="name" /></label>
-                <label>Email<input name="email" type="email" required autoComplete="email" /></label>
-                <label>Subject<input name="subject" maxLength={150} /></label>
-                <label>Message<textarea name="message" required maxLength={10000} rows={5} /></label>
-                <button className="hero-primary-btn" type="submit" disabled={contactStatus === 'sending'}>{contactStatus === 'sending' ? 'Sending…' : 'Send message'}</button>
-                {contactStatus === 'error' && <small className="contact-error">{contactError || 'Unable to send your message. Please try again.'} If this continues, email <a href="mailto:support@apextradinglab.app">support@apextradinglab.app</a>.</small>}
+        <div
+          className="lp-modal-overlay"
+          role="presentation"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setContactOpen(false); }}
+        >
+          <section className="lp-modal" role="dialog" aria-modal="true" aria-labelledby="lp-contact-title">
+            <button type="button" className="lp-modal-close" aria-label="Close" onClick={() => setContactOpen(false)}>×</button>
+            <p className="lp-modal-eyebrow">GET IN TOUCH</p>
+            <h2 id="lp-contact-title">Contact Support</h2>
+            <p className="lp-modal-sub">Send us a message and we'll reply to your email directly.</p>
+
+            {contactStatus === 'sent' ? (
+              <div className="lp-contact-success">
+                ✓ Message sent — we'll get back to you shortly.
+              </div>
+            ) : (
+              <form onSubmit={submitContact} className="lp-contact-form">
+                <label>
+                  Name
+                  <input name="name" required autoComplete="name" placeholder="Your name" />
+                </label>
+                <label>
+                  Email
+                  <input name="email" type="email" required autoComplete="email" placeholder="you@example.com" />
+                </label>
+                <label>
+                  Subject
+                  <input name="subject" maxLength={150} placeholder="How can we help?" />
+                </label>
+                <label>
+                  Message
+                  <textarea name="message" required maxLength={10000} rows={5} placeholder="Describe your issue or feedback…" />
+                </label>
+                <button
+                  className="lp-start-btn"
+                  type="submit"
+                  disabled={contactStatus === 'sending'}
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  {contactStatus === 'sending' ? 'Sending…' : 'Send message'}
+                </button>
+                {contactStatus === 'error' && (
+                  <small className="lp-contact-error">
+                    {contactError || 'Unable to send your message. Please try again.'}{' '}
+                    If this continues, email{' '}
+                    <a href="mailto:support@apextradinglab.app">support@apextradinglab.app</a>.
+                  </small>
+                )}
               </form>
             )}
           </section>
         </div>
       )}
 
-      {/* Policy Modal Overlay */}
       {policyTab && (
         <PolicyModal
           initialTab={policyTab}
