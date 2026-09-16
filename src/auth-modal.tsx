@@ -208,7 +208,7 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
     }
   };
 
-  // ── Verify OTP → then create Supabase account ───────────────────────────
+  // ── Verify OTP → then sign in Supabase account ──────────────────────────
   const handleVerifyOtp = async () => {
     if (otpCode.length !== 6) {
       setError('Enter the full 6-digit code.');
@@ -217,49 +217,41 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
     setLoading(true);
     setError(null);
     try {
-      // 1. Verify the OTP code first
-      const result = await verifyOtp(email.trim().toLowerCase(), otpCode, 'verify_email');
+      const cleanEmail = email.trim().toLowerCase();
+      const pwd = pendingPasswordRef.current ?? password;
+
+      // 1. Verify the OTP code and provision the confirmed user on the server
+      const result = await verifyOtp(cleanEmail, otpCode, 'verify_email', pwd);
       if (!result.ok) {
         setError(result.error ?? 'Incorrect code. Please try again.');
         return;
       }
 
-      // 2. OTP verified — now create the Supabase account (no email sent by Supabase)
-      const cleanEmail = email.trim().toLowerCase();
-      const pwd = pendingPasswordRef.current ?? password;
-
-      if (pendingUserRef.current) {
-        // Account was already created (shouldn't happen in new flow, but safe fallback)
-        onAuthSuccess(pendingUserRef.current);
-        return;
-      }
-
-      const { data, error: signUpErr } = await supabase.auth.signUp({
+      // 2. Account is confirmed — sign in directly with password
+      const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password: pwd,
-        options: {
-          // emailRedirectTo to a dead path — email confirmations should be OFF
-          // in Supabase dashboard (Auth → Settings → Enable email confirmations → OFF)
-          emailRedirectTo: `${window.location.origin}/auth/noop`,
-        },
       });
 
-      if (signUpErr) throw signUpErr;
-
-      if (data.session) {
-        // Confirmation disabled — signed in immediately
-        onAuthSuccess(data.user!);
-      } else if (data.user) {
-        // Confirmation still enabled in dashboard — sign them in with password
-        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+      if (signInErr) {
+        // Fallback: If signInWithPassword fails, try signUp as fallback
+        const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
           email: cleanEmail,
           password: pwd,
         });
-        if (signInErr) throw signInErr;
-        if (signInData.user) onAuthSuccess(signInData.user);
+        if (signUpErr) throw signInErr;
+        if (signUpData.session && signUpData.user) {
+          onAuthSuccess(signUpData.user);
+          return;
+        }
+        throw signInErr;
+      }
+
+      if (signInData.user) {
+        onAuthSuccess(signInData.user);
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Account creation failed. Please try again.');
+      setError(err instanceof Error ? err.message : 'Account activation failed. Please try again.');
     } finally {
       setLoading(false);
     }

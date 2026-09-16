@@ -50,12 +50,13 @@ export async function verifyOtp(
   email: string,
   code: string,
   purpose: 'login' | 'verify_email' = 'login',
+  password?: string,
 ): Promise<OtpResult> {
   try {
     const res = await fetch(`${BASE}/verify-otp`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ email, code, purpose }),
+      body:    JSON.stringify({ email, code, purpose, password }),
     });
     return (await res.json()) as OtpResult;
   } catch (e) {

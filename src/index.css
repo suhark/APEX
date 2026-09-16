@@ -1625,15 +1625,19 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 }
 
 @media (max-width: 640px) {
+  .dtrader-container { gap: 6px; padding: 0; }
   .dtrader-topbar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-    padding: 10px 12px;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
   }
   .dtrader-topbar-left {
-    width: 100%;
-    justify-content: space-between;
+    flex: 1;
+    min-width: 0;
   }
   .dtrader-topbar-left .dtrader-asset-picker {
     flex: 1;
@@ -1643,18 +1647,27 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
     justify-content: space-between;
   }
   .dtrader-topbar-right {
-    width: 100%;
-    justify-content: space-between;
-    border-top: 1px solid #162925;
-    padding-top: 8px;
+    flex-shrink: 0;
   }
   .dtrader-account-card {
-    align-items: flex-start;
+    align-items: flex-end;
   }
   .dtrader-dropdown-menu {
     width: 100%;
     left: 0;
     right: 0;
+  }
+  .dtrader-chart-panel {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+  .dtrader-ticket-panel {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    padding: 10px 12px 14px;
+    gap: 8px;
   }
 }
 
@@ -1675,7 +1688,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 7px 12px;
   border-bottom: 1px solid #132724;
   background: rgba(10, 20, 19, 0.7);
   backdrop-filter: blur(6px);
@@ -2423,6 +2436,57 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   line-height: 1.4;
   border-top: 1px solid #162925;
   padding-top: 12px;
+}
+
+/* ── Compact params row (Duration · Stake · Allow =) ────────────────── */
+.dtrader-params-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.dtrader-param-cell {
+  background: #0c1917;
+  border: 1px solid #1a2e2b;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.param-label {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.param-value-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.param-currency {
+  font-size: 13px;
+  color: #94a3b8;
+  font-family: 'DM Mono', monospace;
+  flex-shrink: 0;
+}
+.param-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f1f5f9;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: 'DM Mono', monospace;
+  width: 100%;
+  padding: 0;
+  min-width: 0;
+}
+.param-unit {
+  font-size: 12px;
+  color: #64748b;
+  flex-shrink: 0;
 }
 
 /* ── Chart header actions ─────────────────────────────────────────────────── */

@@ -45,8 +45,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (setCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
-  const { email, code, purpose = 'login' } = req.body as {
-    email?: string; code?: string; purpose?: string;
+  const { email, code, purpose = 'login', password } = req.body as {
+    email?: string; code?: string; purpose?: string; password?: string;
   };
 
   if (!email || !code) {
@@ -125,6 +125,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .delete()
     .eq('email', normalised)
     .lt('expires_at', new Date().toISOString());
+
+  // ── Provision / confirm user in Supabase Auth ─────────────────────────────
+  if (purpose === 'verify_email' && password) {
+    try {
+      const { error: createErr } = await supabase.auth.admin.createUser({
+        email: normalised,
+        password,
+        email_confirm: true,
+      });
+
+      if (createErr) {
+        // User may already exist in auth.users (e.g. from an earlier attempt with unconfirmed email)
+        // Confirm the existing account and sync password.
+        const { data: usersData, error: listErr } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+        if (!listErr && usersData?.users) {
+          const existing = usersData.users.find((u) => u.email?.toLowerCase() === normalised);
+          if (existing) {
+            await supabase.auth.admin.updateUserById(existing.id, {
+              email_confirm: true,
+              password,
+            });
+          }
+        }
+      }
+    } catch (adminErr) {
+      console.error('[verify-otp] Admin user provisioning error:', adminErr);
+    }
+  }
 
   return res.status(200).json({ ok: true, message: 'Code verified successfully.' });
 }

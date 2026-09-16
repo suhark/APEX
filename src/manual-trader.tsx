@@ -8,8 +8,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Crosshair,
-  HelpCircle,
-  Info,
   Layers,
   LineChart as LineChartIcon,
   Minus,
@@ -742,11 +740,6 @@ export function ManualTrader({
         <div className="dtrader-chart-panel">
           {/* Chart Header Overlay */}
           <div className="dtrader-chart-header">
-            <div className="dtrader-chart-title">
-              <span className="market-live-dot" />
-              <span>Tick Feed</span>
-              <b>1 tick = 1.5s</b>
-            </div>
             <div className="dtrader-chart-header-actions">
               <button
                 type="button"
@@ -1140,18 +1133,6 @@ export function ManualTrader({
 
         {/* Right Execution Ticket Panel */}
         <div className="dtrader-ticket-panel">
-          {/* Header Link */}
-          <div className="dtrader-ticket-top">
-            <button
-              type="button"
-              className="dtrader-help-link"
-              onClick={() => setShowHowToModal(true)}
-            >
-              <span>How to trade Rise/Fall?</span>
-              <HelpCircle size={14} />
-            </button>
-          </div>
-
           {/* ── Trade Type Dropdown ── */}
           <div className="dtrader-type-selector" ref={(el) => {
             // close on outside click
@@ -1417,83 +1398,57 @@ export function ManualTrader({
             </div>
           )}
 
-          {/* Duration Card — hidden for Accumulators */}
-          {tradeCategory !== 'growth' && (
-          <div className="dtrader-card-field">
-            <div className="field-header-row">
-              <span className="field-label">Duration</span>
-              <div className="field-input-row">
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={durationTicks}
-                  onChange={(e) => setDurationTicks(Math.max(1, Number(e.target.value)))}
-                />
-                <span className="field-unit">ticks</span>
+          {/* Compact params row: Duration · Stake · Allow Equals */}
+          <div className="dtrader-params-row">
+            {/* Duration — hidden for growth/accumulator */}
+            {tradeCategory !== 'growth' && (
+              <div className="dtrader-param-cell">
+                <span className="param-label">Duration</span>
+                <div className="param-value-row">
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={durationTicks}
+                    onChange={(e) => setDurationTicks(Math.max(1, Number(e.target.value)))}
+                    className="param-input"
+                  />
+                  <span className="param-unit">t</span>
+                </div>
               </div>
-            </div>
-            <div className="quick-ticks-row">
-              {[5, 10, 15].map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={`mini-pill ${durationTicks === t ? 'active' : ''}`}
-                  onClick={() => setDurationTicks(t)}
-                >
-                  {t}t
-                </button>
-              ))}
-            </div>
-          </div>
-          )}
+            )}
 
-          {/* Stake Card */}
-          <div className="dtrader-card-field">
-            <div className="field-header-row">
-              <span className="field-label">Stake</span>
-              <div className="field-input-row">
-                <span className="field-currency">$</span>
+            {/* Stake */}
+            <div className="dtrader-param-cell">
+              <span className="param-label">Stake</span>
+              <div className="param-value-row">
+                <span className="param-currency">$</span>
                 <input
                   type="number"
                   min="0.35"
                   step="1"
                   value={stake}
                   onChange={(e) => setStake(Math.max(0.35, Number(e.target.value)))}
+                  className="param-input"
                 />
               </div>
             </div>
-            <div className="quick-stake-row">
-              {[1, 2, 5, 10, 25].map((amt) => (
-                <button
-                  key={amt}
-                  type="button"
-                  className={`mini-pill ${stake === amt ? 'active' : ''}`}
-                  onClick={() => setStake(amt)}
-                >
-                  ${amt}
-                </button>
-              ))}
-            </div>
-          </div>
 
-          {/* Allow Equals Toggle — directional only */}
-          {tradeCategory === 'directional' && (
-          <div className="dtrader-toggle-field">
-            <div className="toggle-label-wrap">
-              <span className="toggle-title">Allow equals</span>
-              <small>Win even if exit spot equals entry spot</small>
-            </div>
-            <label className="dtrader-switch">
-              <input
-                type="checkbox"
-                checked={allowEquals}
-                onChange={(e) => setAllowEquals(e.target.checked)}
-              />
-              <span className="slider" />
-            </label>
+            {/* Allow Equals — directional only */}
+            {tradeCategory === 'directional' && (
+              <div className="dtrader-param-cell">
+                <span className="param-label">Allow =</span>
+                <label className="dtrader-switch" style={{ marginTop: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={allowEquals}
+                    onChange={(e) => setAllowEquals(e.target.checked)}
+                  />
+                  <span className="slider" />
+                </label>
+              </div>
+            )}
           </div>
-          )}
 
           {/* Big Buy Action Button */}
           <button
@@ -1553,14 +1508,7 @@ export function ManualTrader({
             </div>
           )}
 
-          <div className="dtrader-ticket-footer">
-            <Info size={13} />
-            <span>
-              {derivConnected
-                ? `Trades execute live on Deriv (${derivAccount?.loginid || 'Deriv'}).`
-                : 'Demo simulation mode active. Connect Deriv for broker execution.'}
-            </span>
-          </div>
+
         </div>
       </div>
 
