@@ -360,7 +360,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 }
 
 @media (max-width: 440px) {
-  .stats-grid { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .top-actions { gap: 4px; }
   .balance strong { font-size: 12px; }
   .balance span { display: none; }
