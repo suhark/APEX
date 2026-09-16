@@ -4406,30 +4406,22 @@ function Settings({
             </div>
           )}
           <div className="mode-toggle">
-            <button
-              type="button"
-              className={!liveArmed ? 'selected' : ''}
-              onClick={disarmLiveTrading}
-            >
-              <div>
-                <strong>Disarmed (Safe / Demo Mode)</strong>
-                <span>Real funds are protected. Virtual or demo execution only.</span>
+            <div className={`toggle-row ${liveArmed ? 'active' : ''}`}>
+              <div className="toggle-info">
+                <strong>{liveArmed ? 'LIVE EXECUTION ARMED' : 'Arm Live Trading'}</strong>
+                <span>{liveArmed ? `Real orders execute on ${deriv.account?.loginid}` : (isDerivReal ? `Click to arm live trading on ${deriv.account?.loginid}` : (deriv.accounts.find((a) => !a.is_virtual) ? `Switch to ${deriv.accounts.find((a) => !a.is_virtual)?.loginid} to arm` : 'Connect a real account to arm live trading'))}</span>
               </div>
-              {!liveArmed && <Check size={17} />}
-            </button>
-            <button
-              type="button"
-              className={liveArmed ? 'selected' : ''}
-              onClick={() => {
-                armLiveTrading();
-              }}
-            >
-              <div>
-                <strong>{liveArmed ? 'LIVE EXECUTION ARMED' : isDerivReal ? 'Arm Live Trading' : 'Arm Live (Switch to Real)'}</strong>
-                <span>{isDerivReal ? `Real orders execute on ${deriv.account?.loginid}` : (deriv.accounts.find((a) => !a.is_virtual) ? `Click to switch to ${deriv.accounts.find((a) => !a.is_virtual)?.loginid} & arm` : 'Connect a token with real account access')}</span>
-              </div>
-              {liveArmed && <Check size={17} />}
-            </button>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={liveArmed} onChange={(e) => {
+                  if (e.target.checked) {
+                    armLiveTrading();
+                  } else {
+                    disarmLiveTrading();
+                  }
+                }} />
+                <span className="toggle-slider"></span>
+              </label>
+            </div>
           </div>
         </section>
 
@@ -4442,36 +4434,26 @@ function Settings({
             Automated live trading is blocked by default. Keep blocked so active bots only trade on Demo without risking real funds.
           </p>
           <div className="mode-toggle">
-            <button
-              type="button"
-              className={!allowBotLiveTrading ? 'selected' : ''}
-              onClick={() => {
-                setAllowBotLiveTrading(false);
-                setNotice('Automated bot live trading blocked. Bots will not trade real funds.');
-              }}
-            >
-              <div>
-                <strong>Blocked (Default / Recommended)</strong>
-                <span>Active bots will never touch real money.</span>
-              </div>
-              {!allowBotLiveTrading && <Check size={17} />}
-            </button>
-            <button
-              type="button"
-              className={allowBotLiveTrading ? 'selected' : ''}
-              onClick={() => {
-                onRequestBotLiveConfirm(() => {
-                  setAllowBotLiveTrading(true);
-                  setNotice('Automated bot live trading enabled. Bots can place live trades when armed.');
-                });
-              }}
-            >
-              <div>
+            <div className={`toggle-row ${!allowBotLiveTrading ? 'active' : ''}`}>
+              <div className="toggle-info">
                 <strong>Allow Bot Live Trading</strong>
                 <span>Active bots can place live trades when armed.</span>
               </div>
-              {allowBotLiveTrading && <Check size={17} />}
-            </button>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={allowBotLiveTrading} onChange={(e) => {
+                  if (e.target.checked) {
+                    onRequestBotLiveConfirm(() => {
+                      setAllowBotLiveTrading(true);
+                      setNotice('Automated bot live trading enabled. Bots can place live trades when armed.');
+                    });
+                  } else {
+                    setAllowBotLiveTrading(false);
+                    setNotice('Automated bot live trading blocked. Bots will not trade real funds.');
+                  }
+                }} />
+                <span className="toggle-slider"></span>
+              </label>
+            </div>
           </div>
         </section>
 
@@ -4481,20 +4463,38 @@ function Settings({
           <p className="muted">
             Live trade stakes are strictly capped at this percentage of your active account balance.
           </p>
-          <div className="stake-row" style={{ marginTop: '12px' }}>
-            {[1, 2, 3, 5].map((pct) => (
-              <button
-                key={pct}
-                type="button"
-                className={maxBalancePercent === pct ? 'selected' : ''}
-                onClick={() => {
-                  setMaxBalancePercent(pct);
-                  setNotice(`Risk cap set to ${pct}% of balance (${money((activeBalance * pct) / 100)} max stake).`);
+          <div className="stake-input-group" style={{ marginTop: '12px' }}>
+            <div className="input-prefix">
+              <span>%</span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                step={0.5}
+                value={maxBalancePercent}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setMaxBalancePercent(val);
+                  setNotice(`Risk cap set to ${val}% of balance (${money((activeBalance * val) / 100)} max stake).`);
                 }}
-              >
-                {pct}% {pct === 2 ? '(Safe)' : ''}
-              </button>
-            ))}
+              />
+            </div>
+            <select
+              className="stake-dropdown"
+              value={maxBalancePercent}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                setMaxBalancePercent(val);
+                setNotice(`Risk cap set to ${val}% of balance (${money((activeBalance * val) / 100)} max stake).`);
+              }}
+            >
+              <option value={1}>1%</option>
+              <option value={2}>2% (Safe)</option>
+              <option value={3}>3%</option>
+              <option value={5}>5%</option>
+              <option value={7}>7%</option>
+              <option value={10}>10%</option>
+            </select>
           </div>
           <div className="guard-note" style={{ marginTop: '14px' }}>
             Current maximum live stake allowed: <b>{money((activeBalance * maxBalancePercent) / 100)}</b> ({maxBalancePercent}% of {money(activeBalance)}).
@@ -4515,32 +4515,39 @@ function Settings({
           />
           <div className="loss-limit-controls">
             <label className="field-label" htmlFor="loss-limit-input">Set session loss limit</label>
-            <div className="loss-limit-presets">
-              {[50, 100, 250, 500, 1000].map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  className={parsedLimit === preset ? 'selected' : ''}
-                  onClick={() => saveLossLimit(preset)}
-                >
-                  ${preset.toLocaleString()}
-                </button>
-              ))}
-            </div>
-            <div className="input-prefix big">
-              <span>$</span>
-              <input
-                id="loss-limit-input"
-                type="number"
-                min={1}
-                max={100000}
-                step={1}
-                value={limitInput}
-                onChange={(event) => setLimitInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') saveLossLimit(parsedLimit);
+            <div className="loss-limit-input-group">
+              <div className="input-prefix big">
+                <span>$</span>
+                <input
+                  id="loss-limit-input"
+                  type="number"
+                  min={1}
+                  max={100000}
+                  step={1}
+                  value={limitInput}
+                  onChange={(event) => setLimitInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') saveLossLimit(parsedLimit);
+                  }}
+                />
+              </div>
+              <select
+                className="loss-limit-dropdown"
+                value={parsedLimit}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setLimitInput(String(val));
+                  saveLossLimit(val);
                 }}
-              />
+              >
+                <option value={50}>$50</option>
+                <option value={100}>$100</option>
+                <option value={250}>$250</option>
+                <option value={500}>$500</option>
+                <option value={1000}>$1,000</option>
+                <option value={2500}>$2,500</option>
+                <option value={5000}>$5,000</option>
+              </select>
             </div>
             <div className="loss-limit-actions">
               <button
@@ -4561,20 +4568,6 @@ function Settings({
           </div>
         </section>
 
-        <section className="panel reset-panel">
-          <span className="eyebrow">Reset controls</span>
-          <h2>Reset session baseline</h2>
-          <p className="muted">Resets the session loss counter to your current Deriv balance. Use this after funding your account or starting a new trading session.</p>
-          <button
-            className="secondary"
-            onClick={() => {
-              resetSessionBaseline();
-              setNotice('Session baseline reset. Loss counter cleared.');
-            }}
-          >
-            <RefreshCw size={16} /> Reset session baseline
-          </button>
-        </section>
       </div>
     </>
   );
