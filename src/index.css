@@ -361,6 +361,10 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 
 @media (max-width: 440px) {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .stat { min-height: unset; padding: 10px 10px; gap: 8px; }
+  .stat-icon { width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0; }
+  .stat strong { font-size: 14px; margin: 3px 0 2px; }
+  .stat span, .stat small { font-size: 9px; }
   .top-actions { gap: 4px; }
   .balance strong { font-size: 12px; }
   .balance span { display: none; }
