@@ -3844,7 +3844,6 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   background: rgba(255,255,255,0.05);
 }
 .lp-cta-btn {
-  margin-left: auto;
   background: transparent;
   border: 1.5px solid #e2e8f0;
   color: #e2e8f0;
@@ -4191,8 +4190,17 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 }
 @media (max-width: 600px) {
   .lp-nav-inner {
-    padding: 0 20px;
+    padding: 0 16px;
     gap: 0;
+  }
+  .lp-cta-btn {
+    padding: 7px 14px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .lp-contact-btn {
+    padding: 7px 10px;
+    font-size: 13px;
   }
   .lp-hero-inner {
     padding: 56px 20px 24px;
