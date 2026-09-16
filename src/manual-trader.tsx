@@ -33,6 +33,7 @@ export interface ManualTraderProps {
   linkedRealAccount?: { loginid: string; balance: number; currency: string };
   linkedDemoAccount?: { loginid: string; balance: number; currency: string };
   onGoToSettings?: () => void;
+  onBack?: () => void;
 }
 
 interface TickPoint {
@@ -126,6 +127,7 @@ export function ManualTrader({
   linkedRealAccount,
   linkedDemoAccount,
   onGoToSettings,
+  onBack,
 }: ManualTraderProps) {
   const [selectedInstrument, setSelectedInstrument] = useState<string>('Volatility 100 (1s) Index');
   // The actual Deriv symbol code (e.g. 'R_100') — set when user picks from DerivInstruments
@@ -655,6 +657,16 @@ export function ManualTrader({
       {/* Top Asset & Account Bar */}
       <div className="dtrader-topbar">
         <div className="dtrader-topbar-left">
+          {onBack && (
+            <button
+              type="button"
+              className="dtrader-back-btn"
+              onClick={onBack}
+              aria-label="Back"
+            >
+              <ChevronLeft size={18} />
+            </button>
+          )}
           <button
             type="button"
             className="dtrader-add-btn"

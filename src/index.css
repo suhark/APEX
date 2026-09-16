@@ -1371,6 +1371,29 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   gap: 10px;
 }
 
+.dtrader-back-btn {
+  display: none;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  background: #112421;
+  border: 1px solid #1f3c36;
+  border-radius: 8px;
+  color: #f1f5f9;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.dtrader-back-btn:hover {
+  background: #163630;
+  border-color: #2dd4bf;
+  color: #2dd4bf;
+}
+@media (max-width: 760px) {
+  .dtrader-back-btn { display: flex; }
+}
+
 .dtrader-add-btn {
   width: 36px;
   height: 36px;

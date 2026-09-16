@@ -2196,6 +2196,7 @@ function PageView({
         linkedRealAccount={deriv.accounts.find((a) => !a.is_virtual)}
         linkedDemoAccount={deriv.accounts.find((a) => a.is_virtual)}
         onGoToSettings={() => setPage('settings')}
+        onBack={() => setPage('dashboard')}
       />
     );
   }
