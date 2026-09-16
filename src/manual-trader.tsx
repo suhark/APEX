@@ -8,6 +8,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Crosshair,
+  Hash,
+  HelpCircle,
   Layers,
   LineChart as LineChartIcon,
   Minus,
@@ -44,6 +46,8 @@ interface TickPoint {
 interface ActiveContract {
   id: string;
   direction: 'CALL' | 'PUT';
+  contractType?: string;
+  digitBarrier?: number;
   entryQuote: number;
   entryTickIndex: number;
   currentTickCount: number;
@@ -68,11 +72,14 @@ const INSTRUMENT_CONFIGS: Record<string, { badge: string; basePrice: number; vol
 };
 
 // ─── Trade type definitions ────────────────────────────────────────────────────
-type TradeCategory = 'directional' | 'growth' | 'digits';
+export type TradeCategory = 'directional' | 'growth' | 'digits';
+
+// Digits subtypes
+export type DigitSubtype = 'over_under' | 'match_diff' | 'even_odd';
 
 // Directional subtypes
-type DirectionalType = 'rise_fall' | 'higher_lower' | 'touch_no_touch' | 'in_out' | 'asians' | 'reset' | 'ticks_hl' | 'runs';
-const DIRECTIONAL_TYPES: { key: DirectionalType; label: string; desc: string }[] = [
+export type DirectionalType = 'rise_fall' | 'higher_lower' | 'touch_no_touch' | 'in_out' | 'asians' | 'reset' | 'ticks_hl' | 'runs';
+export const DIRECTIONAL_TYPES: { key: DirectionalType; label: string; desc: string }[] = [
   { key: 'rise_fall',      label: 'Rise/Fall',          desc: 'Win if exit price is higher/lower than entry' },
   { key: 'higher_lower',   label: 'Higher/Lower',       desc: 'Win if price is higher/lower than a set barrier' },
   { key: 'touch_no_touch', label: 'Touch/No Touch',     desc: 'Win if price touches or never touches a barrier' },
@@ -84,21 +91,21 @@ const DIRECTIONAL_TYPES: { key: DirectionalType; label: string; desc: string }[]
 ];
 
 // Growth subtypes
-type GrowthType = 'accumulator' | 'multiplier';
-const GROWTH_TYPES: { key: GrowthType; label: string; desc: string }[] = [
+export type GrowthType = 'accumulator' | 'multiplier';
+export const GROWTH_TYPES: { key: GrowthType; label: string; desc: string }[] = [
   { key: 'accumulator', label: 'Accumulators', desc: 'Stake grows each tick if price stays within range' },
   { key: 'multiplier',  label: 'Multipliers',  desc: 'Multiply profit/loss with leverage, stop loss/take profit' },
 ];
 
-const TRADE_CATEGORIES: { key: TradeCategory; label: string; icon: string }[] = [
+export const TRADE_CATEGORIES: { key: TradeCategory; label: string; icon: string }[] = [
   { key: 'directional', label: 'Directional', icon: '📈' },
   { key: 'growth',      label: 'Growth',      icon: '🌱' },
   { key: 'digits',      label: 'Digits',      icon: '🔢' },
 ];
 
-type DigitContractType = 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
+export type DigitContractType = 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
 
-const DIGIT_TYPES: { type: DigitContractType; label: string; needsBarrier: boolean; color: string }[] = [
+export const DIGIT_TYPES: { type: DigitContractType; label: string; needsBarrier: boolean; color: string }[] = [
   { type: 'DIGITEVEN',  label: 'Even',    needsBarrier: false, color: '#2dd4bf' },
   { type: 'DIGITODD',   label: 'Odd',     needsBarrier: false, color: '#f87171' },
   { type: 'DIGITOVER',  label: 'Over',    needsBarrier: true,  color: '#f97316' },
@@ -106,6 +113,51 @@ const DIGIT_TYPES: { type: DigitContractType; label: string; needsBarrier: boole
   { type: 'DIGITMATCH', label: 'Matches', needsBarrier: true,  color: '#a78bfa' },
   { type: 'DIGITDIFF',  label: 'Differs', needsBarrier: true,  color: '#fbbf24' },
 ];
+
+export function getQuoteLastDigit(quote: number): number {
+  const s = quote.toFixed(2);
+  const d = parseInt(s.charAt(s.length - 1), 10);
+  return isNaN(d) ? 0 : d;
+}
+
+export function evaluateContractResult(contract: ActiveContract, finalQuote: number, allowEq: boolean): boolean {
+  const finalLastDigit = getQuoteLastDigit(finalQuote);
+  const type = contract.contractType || contract.direction;
+  const b = contract.digitBarrier ?? 5;
+
+  switch (type) {
+    case 'DIGITOVER':
+      return finalLastDigit > b;
+    case 'DIGITUNDER':
+      return finalLastDigit < b;
+    case 'DIGITMATCH':
+      return finalLastDigit === b;
+    case 'DIGITDIFF':
+      return finalLastDigit !== b;
+    case 'DIGITEVEN':
+      return finalLastDigit % 2 === 0;
+    case 'DIGITODD':
+      return finalLastDigit % 2 === 1;
+    case 'CALL':
+    case 'RISE':
+      return allowEq ? finalQuote >= contract.entryQuote : finalQuote > contract.entryQuote;
+    case 'PUT':
+    case 'FALL':
+      return allowEq ? finalQuote <= contract.entryQuote : finalQuote < contract.entryQuote;
+    case 'HIGHER':
+      return finalQuote > contract.entryQuote;
+    case 'LOWER':
+      return finalQuote < contract.entryQuote;
+    case 'ACCU':
+      return true;
+    case 'MULTUP':
+      return finalQuote > contract.entryQuote;
+    case 'MULTDOWN':
+      return finalQuote < contract.entryQuote;
+    default:
+      return finalQuote > contract.entryQuote;
+  }
+}
 
 const INSTRUMENT_LIST = Object.keys(INSTRUMENT_CONFIGS);
 
@@ -128,32 +180,32 @@ export function ManualTrader({
   onBack,
 }: ManualTraderProps) {
   const [selectedInstrument, setSelectedInstrument] = useState<string>('Volatility 100 (1s) Index');
-  // The actual Deriv symbol code (e.g. 'R_100') — set when user picks from DerivInstruments
-  // Falls back to symbolMap lookup for the display name when null
   const [selectedSymbolCode, setSelectedSymbolCode] = useState<string | null>('R_100');
-  const [direction, setDirection] = useState<'CALL' | 'PUT'>('CALL'); // CALL = Rise, PUT = Fall
+  const [direction, setDirection] = useState<'CALL' | 'PUT'>('CALL');
   const [stake, setStake] = useState<number>(2);
   const [durationTicks, setDurationTicks] = useState<number>(5);
   const [allowEquals, setAllowEquals] = useState<boolean>(false);
 
   // Trade type state
-  const [tradeCategory, setTradeCategory] = useState<TradeCategory>('directional');
+  const [tradeCategory, setTradeCategory] = useState<TradeCategory>('digits');
+  const [digitSubtype, setDigitSubtype] = useState<DigitSubtype>('over_under');
   const [directionalType, setDirectionalType] = useState<DirectionalType>('rise_fall');
   const [growthType, setGrowthType] = useState<GrowthType>('accumulator');
-  const [digitType, setDigitType] = useState<DigitContractType>('DIGITEVEN');
+  const [digitType, setDigitType] = useState<DigitContractType>('DIGITOVER');
   const [digitBarrier, setDigitBarrier] = useState<number>(5);
   const [growthRate, setGrowthRate] = useState<number>(0.01);
   const [multiplier, setMultiplier] = useState<number>(10);
   const [stopLoss, setStopLoss] = useState<number>(10);
   const [takeProfit, setTakeProfit] = useState<number>(10);
-  const [barrier, setBarrier] = useState<string>('1234.56'); // Higher/Lower / Touch barrier
+  const [barrier, setBarrier] = useState<string>('1234.56');
   const [showHowToModal, setShowHowToModal] = useState<boolean>(false);
   const [showInstrumentDropdown, setShowInstrumentDropdown] = useState<boolean>(false);
   const [showTradeTypeDropdown, setShowTradeTypeDropdown] = useState<boolean>(false);
   const [activeParamPopover, setActiveParamPopover] = useState<'duration' | 'stake' | 'barrier' | null>(null);
   const [showPositionsPanel, setShowPositionsPanel] = useState<boolean>(false);
   const [chartType, setChartType] = useState<'area' | 'line'>('area');
-  const [zoomLevel, setZoomLevel] = useState<number>(35); // number of visible ticks
+  const [chartViewOverride, setChartViewOverride] = useState<'auto' | 'chart' | 'digits'>('auto');
+  const [zoomLevel, setZoomLevel] = useState<number>(35);
   const [showZoomPill, setShowZoomPill] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -400,9 +452,7 @@ export function ManualTrader({
           if (!prevAc || prevAc.status !== 'running') return prevAc;
           const nextTicks = [...prevAc.ticks, { quote: t.quote, tickIndex: nextTick.index }];
           if (nextTicks.length >= prevAc.totalTicks) {
-            const won = prevAc.direction === 'CALL'
-              ? (allowEquals ? t.quote >= prevAc.entryQuote : t.quote > prevAc.entryQuote)
-              : (allowEquals ? t.quote <= prevAc.entryQuote : t.quote < prevAc.entryQuote);
+            const won = evaluateContractResult(prevAc, t.quote, allowEquals);
             return { ...prevAc, currentTickCount: prevAc.totalTicks, ticks: nextTicks, status: won ? 'won' : 'lost' };
           }
           return { ...prevAc, currentTickCount: nextTicks.length, ticks: nextTicks };
@@ -459,15 +509,7 @@ export function ManualTrader({
 
         if (count >= activeContract.totalTicks) {
           // Settle contract
-          const finalSpot = nextQuote;
-          const won =
-            activeContract.direction === 'CALL'
-              ? allowEquals
-                ? finalSpot >= activeContract.entryQuote
-                : finalSpot > activeContract.entryQuote
-              : allowEquals
-              ? finalSpot <= activeContract.entryQuote
-              : finalSpot < activeContract.entryQuote;
+          const won = evaluateContractResult(activeContract, nextQuote, allowEquals);
 
           setActiveContract({
             ...activeContract,
@@ -591,127 +633,317 @@ export function ManualTrader({
     };
   }, [activeContract, chartMath]);
 
-  const payoutRate = allowEquals ? 1.74 : 1.9;
+  const payoutRate = allowEquals ? 1.74 : 1.95;
   const potentialPayout = Number((stake * payoutRate).toFixed(2));
 
+  // Over/Under payouts matching Deriv DTrader
+  const payoutOver = useMemo(() => {
+    const winningDigits = Math.max(1, 9 - digitBarrier);
+    const winProb = winningDigits / 10;
+    return Number(((stake * 0.8888) / winProb).toFixed(2));
+  }, [stake, digitBarrier]);
+
+  const payoutUnder = useMemo(() => {
+    const winningDigits = Math.max(1, digitBarrier);
+    const winProb = winningDigits / 10;
+    return Number(((stake * 0.909) / winProb).toFixed(2));
+  }, [stake, digitBarrier]);
+
+  // Matches/Differs payouts
+  const payoutMatch = Number((stake * 9.0).toFixed(2));
+  const payoutDiff = Number((stake * 1.098).toFixed(2));
+
+  // Even/Odd payouts
+  const payoutEven = Number((stake * 1.95).toFixed(2));
+  const payoutOdd = Number((stake * 1.95).toFixed(2));
+
+  // Rise/Fall payouts
+  const payoutRise = Number((stake * (allowEquals ? 1.74 : 1.95)).toFixed(2));
+  const payoutFall = Number((stake * (allowEquals ? 1.74 : 1.95)).toFixed(2));
+
+  // Accumulator live payout
+  const liveAccuPayout = activeContract && activeContract.contractType === 'ACCU'
+    ? Number((stake * Math.pow(1 + growthRate, activeContract.currentTickCount)).toFixed(2))
+    : Number((stake * (1 + growthRate)).toFixed(2));
+
   const digitMeta = DIGIT_TYPES.find(d => d.type === digitType)!;
-  const tradeLabel = tradeCategory === 'digits'
-    ? `${digitMeta.label}${digitMeta.needsBarrier ? ` ${digitBarrier}` : ''}`
+
+  const tradeLabelCurrent = tradeCategory === 'digits'
+    ? (digitSubtype === 'over_under' ? 'Over/Under' : digitSubtype === 'match_diff' ? 'Matches/Differs' : 'Even/Odd')
     : tradeCategory === 'growth'
-    ? growthType === 'accumulator' ? 'Accumulate' : `Multiply ×${multiplier}`
-    : directionalType === 'touch_no_touch' ? (direction === 'CALL' ? 'Touch' : 'No Touch')
-    : directionalType === 'higher_lower'   ? (direction === 'CALL' ? 'Higher' : 'Lower')
-    : directionalType === 'in_out'         ? (direction === 'CALL' ? 'Ends Between' : 'Ends Outside')
-    : directionalType === 'asians'         ? (direction === 'CALL' ? 'Asian Up' : 'Asian Down')
-    : directionalType === 'reset'          ? (direction === 'CALL' ? 'Reset Call' : 'Reset Put')
-    : directionalType === 'ticks_hl'       ? (direction === 'CALL' ? 'High Tick' : 'Low Tick')
-    : directionalType === 'runs'           ? (direction === 'CALL' ? 'Only Ups' : 'Only Downs')
-    : direction === 'CALL' ? 'Rise' : 'Fall';
+    ? (growthType === 'accumulator' ? 'Accumulators' : 'Multipliers')
+    : (DIRECTIONAL_TYPES.find((d) => d.key === directionalType)?.label ?? 'Rise/Fall');
 
-  const tradeBtnColor = tradeCategory === 'digits' ? 'digit'
-    : tradeCategory === 'growth' ? 'accu'
-    : direction === 'CALL' ? 'rise' : 'fall';
-
-  const tradeLabelCurrent = tradeCategory === 'directional'
-    ? (DIRECTIONAL_TYPES.find((d) => d.key === directionalType)?.label ?? 'Rise/Fall')
-    : tradeCategory === 'growth'
-    ? (GROWTH_TYPES.find((g) => g.key === growthType)?.label ?? 'Accumulators')
-    : (DIGIT_TYPES.find((d) => d.type === digitType)?.label ?? 'Even');
-
-  const getDirectionTabs = () => {
-    if (tradeCategory === 'directional') {
-      switch (directionalType) {
-        case 'higher_lower':
-          return { call: 'Higher', put: 'Lower' };
-        case 'touch_no_touch':
-          return { call: 'Touch', put: 'No Touch' };
-        case 'in_out':
-          return { call: 'Ends Between', put: 'Ends Outside' };
-        case 'asians':
-          return { call: 'Asian Up', put: 'Asian Down' };
-        case 'reset':
-          return { call: 'Reset Call', put: 'Reset Put' };
-        case 'ticks_hl':
-          return { call: 'High Tick', put: 'Low Tick' };
-        case 'runs':
-          return { call: 'Only Ups', put: 'Only Downs' };
-        case 'rise_fall':
-        default:
-          return { call: 'Rise', put: 'Fall' };
-      }
+  const getTradeTypeIcon = () => {
+    if (tradeCategory === 'digits') {
+      if (digitSubtype === 'over_under') return '↗ ↘';
+      if (digitSubtype === 'match_diff') return '≑ ≠';
+      return '2 | 3';
     }
-    if (tradeCategory === 'growth' && growthType === 'multiplier') {
-      return { call: 'Up', put: 'Down' };
+    if (tradeCategory === 'growth') {
+      return growthType === 'accumulator' ? '🌱' : '⚡';
     }
-    return null;
+    if (directionalType === 'higher_lower') return '↑ ↓';
+    if (directionalType === 'touch_no_touch') return '⊙';
+    return '↗ ↘';
   };
 
-  const handleBuy = async () => {
+  const activeChartView = useMemo(() => {
+    if (chartViewOverride !== 'auto') return chartViewOverride;
+    if (tradeCategory === 'digits') return 'digits';
+    return 'chart';
+  }, [chartViewOverride, tradeCategory]);
+
+  const digitStats = useMemo(() => {
+    const sample = tickHistory.length > 0 ? tickHistory.slice(-100) : [];
+    const counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    if (sample.length === 0) {
+      return {
+        percentages: [8.1, 9.6, 11.2, 11.5, 9.5, 8.9, 10.7, 11.0, 9.3, 10.2],
+        maxIdx: 3,
+        minIdx: 0,
+        currentLastDigit: currentTick ? getQuoteLastDigit(currentTick.quote) : 7,
+        sampleSize: 0,
+      };
+    }
+    sample.forEach((t) => {
+      const d = getQuoteLastDigit(t.quote);
+      counts[d] = (counts[d] || 0) + 1;
+    });
+    const total = sample.length;
+    const percentages = counts.map((c) => Number(((c / total) * 100).toFixed(1)));
+
+    let maxIdx = 0;
+    let minIdx = 0;
+    for (let i = 1; i < 10; i++) {
+      if (percentages[i] > percentages[maxIdx]) maxIdx = i;
+      if (percentages[i] < percentages[minIdx]) minIdx = i;
+    }
+
+    const currentLastDigit = currentTick ? getQuoteLastDigit(currentTick.quote) : null;
+
+    return {
+      percentages,
+      maxIdx,
+      minIdx,
+      currentLastDigit,
+      sampleSize: total,
+    };
+  }, [tickHistory, currentTick]);
+
+  const getInstrumentBadge = (inst: string) => {
+    const is1s = inst.includes('(1s)');
+    const numMatch = inst.match(/\d+/);
+    const num = numMatch ? numMatch[0] : inst.replace(' Index', '').substring(0, 4);
+    return { num, is1s };
+  };
+
+  const badgeInfo = getInstrumentBadge(selectedInstrument);
+
+  const handleExecuteTrade = async (action: 'CALL' | 'PUT' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF' | 'DIGITEVEN' | 'DIGITODD' | 'ACCU' | 'MULTUP' | 'MULTDOWN') => {
     if (isSubmitting) return;
     setIsSubmitting(true);
 
     try {
-      let contractDirection = direction;
+      let contractDirection: string = action;
       let contractBarrier: number | undefined;
       let growth_rate: number | undefined;
-      let duration: number | undefined;
+      let duration: number | undefined = durationTicks;
+      let calcPayout = potentialPayout;
 
-      if (tradeCategory === 'digits') {
-        contractDirection = digitType;
-        contractBarrier = digitMeta.needsBarrier ? digitBarrier : undefined;
-        duration = durationTicks;
-      } else if (tradeCategory === 'growth') {
-        if (growthType === 'accumulator') {
-          contractDirection = 'ACCU';
-          growth_rate = growthRate;
-          duration = undefined;
-        } else {
-          contractDirection = direction === 'CALL' ? 'MULTUP' : 'MULTDOWN';
-          duration = undefined;
-        }
-      } else {
-        // Directional — map subtype to contract code
-        const dirMap: Record<DirectionalType, [string, string]> = {
-          rise_fall:      ['CALL',      'PUT'],
-          higher_lower:   ['CALL',      'PUT'],
-          touch_no_touch: ['ONETOUCH',  'NOTOUCH'],
-          in_out:         ['EXPIRYRANGE','EXPIRYMISS'],
-          asians:         ['ASIANU',    'ASIAND'],
-          reset:          ['RESETCALL', 'RESETPUT'],
-          ticks_hl:       ['TICKHIGH',  'TICKLOW'],
-          runs:           ['RUNHIGH',   'RUNLOW'],
-        };
-        contractDirection = direction === 'CALL'
-          ? dirMap[directionalType][0]
-          : dirMap[directionalType][1];
-        duration = durationTicks;
+      if (action === 'DIGITOVER') {
+        contractBarrier = digitBarrier;
+        calcPayout = payoutOver;
+      } else if (action === 'DIGITUNDER') {
+        contractBarrier = digitBarrier;
+        calcPayout = payoutUnder;
+      } else if (action === 'DIGITMATCH') {
+        contractBarrier = digitBarrier;
+        calcPayout = payoutMatch;
+      } else if (action === 'DIGITDIFF') {
+        contractBarrier = digitBarrier;
+        calcPayout = payoutDiff;
+      } else if (action === 'DIGITEVEN') {
+        calcPayout = payoutEven;
+      } else if (action === 'DIGITODD') {
+        calcPayout = payoutOdd;
+      } else if (action === 'CALL') {
+        calcPayout = payoutRise;
+      } else if (action === 'PUT') {
+        calcPayout = payoutFall;
+      } else if (action === 'ACCU') {
+        growth_rate = growthRate;
+        duration = undefined;
+        calcPayout = liveAccuPayout;
+      } else if (action === 'MULTUP' || action === 'MULTDOWN') {
+        duration = undefined;
+        calcPayout = Number((stake * multiplier).toFixed(2));
       }
 
       setActiveContract({
         id: String(Date.now()),
-        direction: (contractDirection === 'CALL' || contractDirection === 'PUT') ? contractDirection : 'CALL',
+        direction: (action === 'CALL' || action === 'PUT') ? action : (action === 'DIGITOVER' || action === 'DIGITMATCH' || action === 'DIGITEVEN' || action === 'MULTUP' || action === 'ACCU') ? 'CALL' : 'PUT',
+        contractType: action,
+        digitBarrier: (action === 'DIGITOVER' || action === 'DIGITUNDER' || action === 'DIGITMATCH' || action === 'DIGITDIFF') ? digitBarrier : undefined,
         entryQuote: currentTick?.quote ?? 0,
         entryTickIndex: currentTick?.index ?? 0,
         currentTickCount: 1,
         totalTicks: tradeCategory === 'growth' ? 999 : durationTicks,
         stake,
-        payout: potentialPayout,
+        payout: calcPayout,
         ticks: [{ quote: currentTick?.quote ?? 0, tickIndex: currentTick?.index ?? 0 }],
         status: 'running',
       });
 
-      await runTrade({
-        instrument: selectedInstrument,
-        direction: contractDirection,
-        stake,
-        source: 'manual',
-        barrier: contractBarrier,
-        growth_rate,
-        duration,
-      });
+      if (derivConnected) {
+        try {
+          await runTrade({
+            instrument: selectedInstrument,
+            direction: contractDirection,
+            stake,
+            source: 'manual',
+            barrier: contractBarrier,
+            growth_rate,
+            duration,
+          });
+        } catch (err) {
+          console.warn('[ManualTrader] live runTrade warning:', err);
+        }
+      }
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCloseAccumulator = () => {
+    if (!activeContract) return;
+    setActiveContract({
+      ...activeContract,
+      status: 'won',
+      payout: liveAccuPayout,
+    });
+  };
+
+  const renderDigitDial = (d: number) => {
+    const pct = digitStats.percentages[d];
+    const isMax = d === digitStats.maxIdx;
+    const isMin = d === digitStats.minIdx;
+    const isSelected = digitBarrier === d;
+    const isCurrent = digitStats.currentLastDigit === d;
+
+    // Arc math: circumference for r=22 is ~138.23
+    const radius = 22;
+    const circumference = 2 * Math.PI * radius;
+    const arcLength = Math.max(3, (pct / 100) * circumference);
+    const strokeColor = isMax ? '#00e5bf' : isMin ? '#f43f5e' : '#2dd4bf';
+
+    return (
+      <div
+        key={d}
+        className={`digit-dial-wrapper ${isSelected ? 'selected' : ''} ${isCurrent ? 'current' : ''}`}
+        onClick={() => setDigitBarrier(d)}
+        title={`Digit ${d}: ${pct}% (Click to select barrier)`}
+      >
+        <svg viewBox="0 0 56 56" className="digit-dial-svg">
+          {isSelected ? (
+            /* Selected Prediction Dial: Traderscheme / Deriv blue highlight with crisp white text */
+            <>
+              <circle
+                cx="28"
+                cy="28"
+                r={radius}
+                fill="#1e293b"
+                stroke="#3b82f6"
+                strokeWidth="4.5"
+              />
+              <circle
+                cx="28"
+                cy="28"
+                r={radius}
+                fill="none"
+                stroke="#60a5fa"
+                strokeWidth="4.5"
+                strokeDasharray={`${arcLength.toFixed(1)} ${circumference.toFixed(1)}`}
+                strokeDashoffset="0"
+                strokeLinecap="round"
+                transform="rotate(-90 28 28)"
+              />
+              <text
+                x="28"
+                y="25"
+                textAnchor="middle"
+                fill="#ffffff"
+                fontSize="15"
+                fontWeight="800"
+                fontFamily="'DM Mono', monospace"
+              >
+                {d}
+              </text>
+              <text
+                x="28"
+                y="38"
+                textAnchor="middle"
+                fill="#ffffff"
+                fontSize="10"
+                fontWeight="700"
+                fontFamily="'DM Mono', monospace"
+              >
+                {pct}%
+              </text>
+            </>
+          ) : (
+            /* Standard Digits Dial with circular percentage arc */
+            <>
+              <circle
+                cx="28"
+                cy="28"
+                r={radius}
+                fill="#0b1413"
+                stroke="#162c28"
+                strokeWidth="5.5"
+              />
+              <circle
+                cx="28"
+                cy="28"
+                r={radius}
+                fill="none"
+                stroke={strokeColor}
+                strokeWidth="5.5"
+                strokeDasharray={`${arcLength.toFixed(1)} ${circumference.toFixed(1)}`}
+                strokeDashoffset="0"
+                strokeLinecap="round"
+                transform="rotate(-90 28 28)"
+              />
+              <text
+                x="28"
+                y="25"
+                textAnchor="middle"
+                fill="#ffffff"
+                fontSize="15"
+                fontWeight="800"
+                fontFamily="'DM Mono', monospace"
+              >
+                {d}
+              </text>
+              <text
+                x="28"
+                y="38"
+                textAnchor="middle"
+                fill={isMax ? '#00e5bf' : isMin ? '#f43f5e' : '#94a3b8'}
+                fontSize="10"
+                fontWeight="600"
+                fontFamily="'DM Mono', monospace"
+              >
+                {pct}%
+              </text>
+            </>
+          )}
+        </svg>
+        <div className="digit-indicator-slot">
+          {isCurrent && <span className="digit-current-arrow">▲</span>}
+        </div>
+      </div>
+    );
   };
 
   const activeBalance = derivConnected && derivAccount ? derivAccount.balance : null;
@@ -720,180 +952,85 @@ export function ManualTrader({
 
   return (
     <div className="dtrader-container">
-      {/* Top Asset & Account Bar */}
+      {/* Top Navigation & Account Bar */}
       <div className="dtrader-topbar">
-        <div className="dtrader-topbar-left">
-          {onBack && (
+        <div className="dtrader-topbar-account-row">
+          <div className="dtrader-topbar-left">
+            {onBack && (
+              <button
+                type="button"
+                className="dtrader-back-btn"
+                onClick={onBack}
+                aria-label="Back"
+              >
+                <ChevronLeft size={18} />
+              </button>
+            )}
+            <div className="dtrader-account-card">
+              <span className={`dtrader-acc-type ${isDemo ? 'demo' : 'real'}`}>
+                {derivConnected && derivAccount
+                  ? isDerivReal
+                    ? (liveArmed ? 'Real account · LIVE' : 'Real account · Safe')
+                    : 'Demo account'
+                  : 'Simulation Mode'}
+              </span>
+              <strong className="dtrader-acc-balance">
+                {derivConnected && derivAccount
+                  ? `${formatCurrency(activeBalance ?? 0).replace('$', '')} ${activeCurrency}`
+                  : 'Demo Trading'}
+              </strong>
+            </div>
+          </div>
+
+          <div className="dtrader-topbar-right">
+            {/* Positions Button in Topbar */}
             <button
               type="button"
-              className="dtrader-back-btn"
-              onClick={onBack}
-              aria-label="Back"
+              className={`dtrader-topbar-pos-btn ${showPositionsPanel ? 'active' : ''} ${activeContract ? 'has-active' : ''}`}
+              onClick={() => setShowPositionsPanel((v) => !v)}
+              title="Toggle Positions"
             >
-              <ChevronLeft size={18} />
+              <Layers size={13} />
+              <span>Positions{activeContract ? ' (1)' : ''}</span>
             </button>
-          )}
-          <button
-            type="button"
-            className="dtrader-add-btn"
-            onClick={() => setShowInstrumentPanel(!showInstrumentPanel)}
-            title="Choose Market / Asset"
-          >
-            <Plus size={16} />
-          </button>
 
-          <div className="dtrader-asset-picker" ref={tradeTypePickerRef}>
-            <div className="dtrader-asset-unified-pill">
-              <div
-                className="dtrader-asset-market-part"
-                onClick={() => setShowInstrumentPanel(!showInstrumentPanel)}
-                title="Choose Market / Asset"
-              >
-                <div className="dtrader-asset-badge">
-                  <span>{selectedInstrument.replace('Volatility ', '').replace(' Index', '').replace('(1s)', '1s').substring(0, 5)}</span>
-                  {selectedInstrument.includes('(1s)') && <span className="sub">1s</span>}
-                </div>
-                <div className="dtrader-asset-title-wrap">
-                  <strong className="dtrader-asset-title">{selectedInstrument}</strong>
-                  <div
-                    className="dtrader-trade-type-trigger"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowTradeTypeDropdown((v) => !v);
-                    }}
-                    title="Select Contract Type"
-                  >
-                    <span>{tradeLabelCurrent}</span>
-                    <ChevronDown size={12} className={showTradeTypeDropdown ? 'rotated' : ''} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {showTradeTypeDropdown && (
-              <div className="dtrader-type-dropdown">
-                {/* Directional */}
-                <div className="type-dropdown-group">
-                  <span className="type-dropdown-group-label">Directional</span>
-                  {DIRECTIONAL_TYPES.map((dt) => (
-                    <button
-                      key={dt.key}
-                      type="button"
-                      className={`type-dropdown-item ${tradeCategory === 'directional' && directionalType === dt.key ? 'active' : ''}`}
-                      onClick={() => {
-                        setTradeCategory('directional');
-                        setDirectionalType(dt.key);
-                        setShowTradeTypeDropdown(false);
-                      }}
-                    >
-                      <span className="type-item-label">{dt.label}</span>
-                      <span className="type-item-desc">{dt.desc}</span>
-                    </button>
-                  ))}
-                </div>
-                {/* Growth */}
-                <div className="type-dropdown-group">
-                  <span className="type-dropdown-group-label">Growth based</span>
-                  {GROWTH_TYPES.map((gt) => (
-                    <button
-                      key={gt.key}
-                      type="button"
-                      className={`type-dropdown-item ${tradeCategory === 'growth' && growthType === gt.key ? 'active' : ''}`}
-                      onClick={() => {
-                        setTradeCategory('growth');
-                        setGrowthType(gt.key);
-                        setShowTradeTypeDropdown(false);
-                      }}
-                    >
-                      <span className="type-item-label">{gt.label}</span>
-                      <span className="type-item-desc">{gt.desc}</span>
-                    </button>
-                  ))}
-                </div>
-                {/* Digits */}
-                <div className="type-dropdown-group">
-                  <span className="type-dropdown-group-label">Digit based</span>
-                  {DIGIT_TYPES.map((dt) => (
-                    <button
-                      key={dt.type}
-                      type="button"
-                      className={`type-dropdown-item ${tradeCategory === 'digits' && digitType === dt.type ? 'active' : ''}`}
-                      style={{ '--type-color': dt.color } as React.CSSProperties}
-                      onClick={() => {
-                        setTradeCategory('digits');
-                        setDigitType(dt.type);
-                        setShowTradeTypeDropdown(false);
-                      }}
-                    >
-                      <span
-                        className="type-item-label"
-                        style={{ color: tradeCategory === 'digits' && digitType === dt.type ? dt.color : undefined }}
-                      >
-                        {dt.label}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="dtrader-topbar-right">
-          {derivConnected && derivAccount ? (
-            <>
-              <div className="dtrader-account-card">
-                <span className={`dtrader-acc-type ${isDemo ? 'demo' : 'real'}`}>
-                  {isDerivReal
-                    ? (liveArmed ? 'Real account · LIVE' : 'Real account · Safe')
-                    : 'Demo account'}
-                </span>
-                <strong className="dtrader-acc-balance">
-                  {formatCurrency(activeBalance ?? 0).replace('$', '')} {activeCurrency}
-                </strong>
-              </div>
-              {isDemo && linkedRealAccount && onSwitchAccount && (
-                <button type="button" className="dtrader-switch-real-btn"
+            {derivConnected && derivAccount ? (
+              isDemo && linkedRealAccount && onSwitchAccount ? (
+                <button
+                  type="button"
+                  className="dtrader-switch-real-btn"
                   onClick={() => onSwitchAccount(linkedRealAccount.loginid)}
-                  title="Switch to Real Account">
+                  title="Switch to Real Account"
+                >
                   Try real
                 </button>
-              )}
-              {!isDemo && linkedDemoAccount && onSwitchAccount && (
-                <button type="button" className="dtrader-switch-demo-btn"
+              ) : !isDemo && linkedDemoAccount && onSwitchAccount ? (
+                <button
+                  type="button"
+                  className="dtrader-switch-demo-btn"
                   onClick={() => onSwitchAccount(linkedDemoAccount.loginid)}
-                  title="Switch to Demo Account">
+                  title="Switch to Demo Account"
+                >
                   Use demo
                 </button>
-              )}
-            </>
-          ) : (
-            <button
-              type="button"
-              className="connect-deriv-topbar-btn"
-              onClick={() => onGoToSettings?.()}
-            >
-              Connect Deriv
-            </button>
-          )}
+              ) : null
+            ) : (
+              <button
+                type="button"
+                className="connect-deriv-topbar-btn"
+                onClick={() => onGoToSettings?.()}
+              >
+                Connect Deriv
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Main Terminal Body: Chart + Ticket */}
       <div className="dtrader-grid">
-        {/* Left / Center Financial Chart */}
+        {/* Left / Center Financial Chart / Digits Panel */}
         <div className="dtrader-chart-panel">
-          {/* Floating Positions Button on Chart */}
-          <button
-            type="button"
-            className={`dtrader-floating-positions-btn ${showPositionsPanel ? 'active' : ''} ${activeContract ? 'has-active' : ''}`}
-            onClick={() => setShowPositionsPanel((v) => !v)}
-            title="Toggle Positions"
-          >
-            <Layers size={13} />
-            <span>Positions{activeContract ? ' (1)' : ''}</span>
-          </button>
-
           {/* Collapsible Positions Panel */}
           {showPositionsPanel && (
             <div className="dtrader-positions-panel">
@@ -941,320 +1078,491 @@ export function ManualTrader({
             </div>
           )}
 
-          {/* Floating Left Toolbar */}
-          <div className="dtrader-left-toolbar">
-            <div className="dtrader-tool-btn interval" title="1-tick interval">
-              1t
+          {/* Market Selector Card positioned directly above digits/chart matching Traderscheme / Deriv */}
+          <div
+            className="dtrader-market-card"
+            onClick={() => setShowInstrumentPanel(true)}
+            title="Click to select market"
+          >
+            <div className="dtrader-market-card-left">
+              <div className="dtrader-asset-badge">
+                <span>{badgeInfo.num}</span>
+                {badgeInfo.is1s && <span className="sub">1s</span>}
+              </div>
+              <div className="dtrader-market-meta">
+                <div className="dtrader-market-name-row">
+                  <strong className="dtrader-market-name">{selectedInstrument}</strong>
+                  <ChevronDown size={14} className={showInstrumentPanel ? 'rotated' : ''} />
+                </div>
+                <div className="dtrader-market-price-row">
+                  <span className="dtrader-market-price">
+                    {currentTick ? currentTick.quote.toFixed(2) : '—'}
+                  </span>
+                  <span className={`dtrader-market-delta ${(currentTick?.changePct ?? 0) >= 0 ? 'pos' : 'neg'}`}>
+                    {(currentTick?.changePct ?? 0) >= 0 ? '+' : ''}{(currentTick?.changePct ?? 0).toFixed(2)}%
+                    {(currentTick?.changePct ?? 0) >= 0 ? ' ▲' : ' ▼'}
+                  </span>
+                </div>
+              </div>
             </div>
-            <button
-              type="button"
-              className={`dtrader-tool-btn ${chartType === 'area' ? 'active' : ''}`}
-              onClick={() => setChartType(chartType === 'area' ? 'line' : 'area')}
-              title="Toggle Area / Line Chart"
-            >
-              <LineChartIcon size={16} />
-            </button>
-            <button
-              type="button"
-              className="dtrader-tool-btn"
-              onClick={() => updateZoomLevel((prev) => Math.max(15, prev - 6))}
-              title="Zoom In (Spread ticks)"
-            >
-              <ZoomIn size={15} />
-            </button>
-            <button
-              type="button"
-              className="dtrader-tool-btn"
-              onClick={() => updateZoomLevel((prev) => Math.min(90, prev + 6))}
-              title="Zoom Out (More ticks)"
-            >
-              <ZoomOut size={15} />
-            </button>
-            <button type="button" className="dtrader-tool-btn" title="Drawing Tools">
-              <Pencil size={15} />
-            </button>
-            <button type="button" className="dtrader-tool-btn" title="Technical Indicators">
-              <Layers size={15} />
-            </button>
+
+            <div className="dtrader-market-card-right">
+              {tradeCategory === 'digits' && (
+                <button
+                  type="button"
+                  className="dtrader-view-toggle-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setChartViewOverride(activeChartView === 'digits' ? 'chart' : 'digits');
+                  }}
+                  title={activeChartView === 'digits' ? 'Switch to Price Line Chart' : 'Switch to Digits Analysis'}
+                >
+                  {activeChartView === 'digits' ? (
+                    <>
+                      <LineChartIcon size={13} />
+                      <span>Price Chart</span>
+                    </>
+                  ) : (
+                    <>
+                      <Hash size={13} />
+                      <span>Digit Stats</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* Floating Zoom Level Pill */}
-          {showZoomPill && (
-            <div className="dtrader-zoom-pill">
-              <span>Zoom: {zoomLevel} ticks</span>
-              <button
-                type="button"
-                onClick={() => updateZoomLevel(35)}
-                title="Reset zoom"
-              >
-                Reset
-              </button>
-            </div>
-          )}
-
-          {/* Historical Inspection Floating Banner */}
-          {scrollOffset > 0 && (
-            <div className="dtrader-past-banner">
-              <span className="past-info">
-                Viewing past trend (<b>-{scrollOffset}</b> ticks · {visibleTicks[visibleTicks.length - 1]?.time})
-              </span>
-              <button
-                type="button"
-                className="dtrader-return-live-btn"
-                onClick={() => setScrollOffset(0)}
-              >
-                <span className="live-dot-pulse" />
-                Return to Live ⏺
-              </button>
-            </div>
-          )}
-
-          {/* SVG Price Chart */}
-          <div
-            className={`dtrader-svg-wrapper ${isDragging ? 'dragging' : ''} ${scrollOffset > 0 ? 'inspecting-past' : ''}`}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            onTouchCancel={handleTouchEnd}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onWheel={handleWheelZoom}
-          >
-            {/* Chart loading overlay */}
-            {isChartLoading && (
-              <div className="chart-loading-overlay">
-                <span className="chart-loading-dot" />
-                <span>Connecting to live feed…</span>
+          {/* Digits Statistics Analysis Gauge (10 circular dials matching Deriv) */}
+          {activeChartView === 'digits' ? (
+            <div className="dtrader-digit-stats-container">
+              <div className="dtrader-digit-dials-grid">
+                <div className="digit-dial-row">
+                  {[0, 1, 2, 3, 4].map((d) => renderDigitDial(d))}
+                </div>
+                <div className="digit-dial-row with-arrows">
+                  <span className="digit-nav-chevron left">«</span>
+                  {[5, 6, 7, 8, 9].map((d) => renderDigitDial(d))}
+                  <span className="digit-nav-chevron right">»</span>
+                </div>
               </div>
-            )}
-            <svg viewBox="0 0 100 65" preserveAspectRatio="none" className="dtrader-svg">
-              <defs>
-                <linearGradient id="dtraderAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"   stopColor="#2dd4bf" stopOpacity="0.18" />
-                  <stop offset="55%"  stopColor="#2dd4bf" stopOpacity="0.05" />
-                  <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0" />
-                </linearGradient>
-                <filter id="lineGlow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feDropShadow dx="0" dy="0" stdDeviation="0.35" floodColor="#2dd4bf" floodOpacity="0.35" />
-                </filter>
-              </defs>
+            </div>
+          ) : (
+            <>
+              {/* Floating Left Toolbar */}
+              <div className="dtrader-left-toolbar">
+                <div className="dtrader-tool-btn interval" title="1-tick interval">
+                  1t
+                </div>
+                <button
+                  type="button"
+                  className={`dtrader-tool-btn ${chartType === 'area' ? 'active' : ''}`}
+                  onClick={() => setChartType(chartType === 'area' ? 'line' : 'area')}
+                  title="Toggle Area / Line Chart"
+                >
+                  <LineChartIcon size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="dtrader-tool-btn"
+                  onClick={() => updateZoomLevel((prev) => Math.max(15, prev - 6))}
+                  title="Zoom In (Spread ticks)"
+                >
+                  <ZoomIn size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="dtrader-tool-btn"
+                  onClick={() => updateZoomLevel((prev) => Math.min(90, prev + 6))}
+                  title="Zoom Out (More ticks)"
+                >
+                  <ZoomOut size={15} />
+                </button>
+                <button type="button" className="dtrader-tool-btn" title="Drawing Tools">
+                  <Pencil size={15} />
+                </button>
+                <button type="button" className="dtrader-tool-btn" title="Technical Indicators">
+                  <Layers size={15} />
+                </button>
+              </div>
 
-              {/* Clean subtle horizontal guides — only 3, very faint */}
-              {chartMath.yLabels.filter((_, i) => i === 1 || i === 2 || i === 3).map((yl, i) => (
-                <line
-                  key={i}
-                  x1="0" y1={yl.yPos} x2="100" y2={yl.yPos}
-                  stroke="#1a2e2a"
-                  strokeWidth="0.5"
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-
-              {/* Area Fill */}
-              {chartType === 'area' && chartMath.fillStr && (
-                <path d={chartMath.fillStr} fill="url(#dtraderAreaGrad)" />
+              {/* Floating Zoom Level Pill */}
+              {showZoomPill && (
+                <div className="dtrader-zoom-pill">
+                  <span>Zoom: {zoomLevel} ticks</span>
+                  <button
+                    type="button"
+                    onClick={() => updateZoomLevel(35)}
+                    title="Reset zoom"
+                  >
+                    Reset
+                  </button>
+                </div>
               )}
 
-              {/* Main Price Line - Ultra smooth financial spline */}
-              {chartMath.pathStr && (
-                <path
-                  d={chartMath.pathStr}
-                  fill="none"
-                  stroke="#f8fafc"
-                  strokeWidth="1.15"
-                  filter="url(#lineGlow)"
-                  vectorEffect="non-scaling-stroke"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
+              {/* Historical Inspection Floating Banner */}
+              {scrollOffset > 0 && (
+                <div className="dtrader-past-banner">
+                  <span className="past-info">
+                    Viewing past trend (<b>-{scrollOffset}</b> ticks · {visibleTicks[visibleTicks.length - 1]?.time})
+                  </span>
+                  <button
+                    type="button"
+                    className="dtrader-return-live-btn"
+                    onClick={() => setScrollOffset(0)}
+                  >
+                    <span className="live-dot-pulse" />
+                    Return to Live ⏺
+                  </button>
+                </div>
               )}
 
-              {/* Active Contract Overlay (5 ticks progress) */}
-              {contractOverlay && (
-                <g className="contract-visualization-group">
-                  <path
-                    d={contractOverlay.path}
-                    fill="none"
-                    stroke={
-                      activeContract?.status === 'won'
-                        ? '#34d399'
-                        : activeContract?.status === 'lost'
-                        ? '#f87171'
-                        : '#38bdf8'
-                    }
-                    strokeWidth="2.2"
-                    vectorEffect="non-scaling-stroke"
-                    strokeLinecap="round"
-                  />
-                  {contractOverlay.points.map((pt, i) => (
-                    <circle
+              {/* SVG Price Chart */}
+              <div
+                className={`dtrader-svg-wrapper ${isDragging ? 'dragging' : ''} ${scrollOffset > 0 ? 'inspecting-past' : ''}`}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onTouchCancel={handleTouchEnd}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                onWheel={handleWheelZoom}
+              >
+                {/* Chart loading overlay */}
+                {isChartLoading && (
+                  <div className="chart-loading-overlay">
+                    <span className="chart-loading-dot" />
+                    <span>Connecting to live feed…</span>
+                  </div>
+                )}
+                <svg viewBox="0 0 100 65" preserveAspectRatio="none" className="dtrader-svg">
+                  <defs>
+                    <linearGradient id="dtraderAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%"   stopColor="#2dd4bf" stopOpacity="0.18" />
+                      <stop offset="55%"  stopColor="#2dd4bf" stopOpacity="0.05" />
+                      <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0" />
+                    </linearGradient>
+                    <filter id="lineGlow" x="-20%" y="-20%" width="140%" height="140%">
+                      <feDropShadow dx="0" dy="0" stdDeviation="0.35" floodColor="#2dd4bf" floodOpacity="0.35" />
+                    </filter>
+                  </defs>
+
+                  {/* Clean subtle horizontal guides — only 3, very faint */}
+                  {chartMath.yLabels.filter((_, i) => i === 1 || i === 2 || i === 3).map((yl, i) => (
+                    <line
                       key={i}
-                      cx={pt.x}
-                      cy={pt.y}
-                      r="0.85"
-                      fill={activeContract?.status === 'won' ? '#34d399' : '#2dd4bf'}
-                      stroke="#07100f"
-                      strokeWidth="0.75"
+                      x1="0" y1={yl.yPos} x2="100" y2={yl.yPos}
+                      stroke="#1a2e2a"
+                      strokeWidth="0.5"
                       vectorEffect="non-scaling-stroke"
                     />
                   ))}
-                  {/* Contract Progress Text Badge (e.g. 5/5) like Deriv */}
-                  {contractOverlay.entryPt && (
-                    <text
-                      x={contractOverlay.entryPt.x}
-                      y={Math.max(6, contractOverlay.entryPt.y - 3)}
-                      fill="#f1f5f9"
-                      fontSize="3"
-                      fontWeight="800"
-                      textAnchor="middle"
-                      fontFamily="'DM Mono', monospace"
-                    >
-                      {activeContract?.currentTickCount}/{activeContract?.totalTicks}
-                    </text>
+
+                  {/* Accumulator dynamic survival corridor band */}
+                  {tradeCategory === 'growth' && growthType === 'accumulator' && (
+                    <g className="accumulator-corridor-group">
+                      <rect
+                        x="0"
+                        y={Math.max(4, chartMath.currentY - 11)}
+                        width="100"
+                        height="22"
+                        fill="rgba(45, 212, 191, 0.08)"
+                        stroke="rgba(45, 212, 191, 0.35)"
+                        strokeDasharray="2 3"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        x1="0"
+                        y1={Math.max(4, chartMath.currentY - 11)}
+                        x2="100"
+                        y2={Math.max(4, chartMath.currentY - 11)}
+                        stroke="#2dd4bf"
+                        strokeWidth="0.8"
+                        strokeDasharray="2 3"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        x1="0"
+                        y1={Math.min(61, chartMath.currentY + 11)}
+                        x2="100"
+                        y2={Math.min(61, chartMath.currentY + 11)}
+                        stroke="#f87171"
+                        strokeWidth="0.8"
+                        strokeDasharray="2 3"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
                   )}
-                </g>
-              )}
 
-              {/* Spot Vertical Crosshair dashed line */}
-              <line
-                x1={chartMath.currentX}
-                y1="0"
-                x2={chartMath.currentX}
-                y2="65"
-                stroke="#2dd4bf"
-                strokeWidth="0.75"
-                vectorEffect="non-scaling-stroke"
-                strokeDasharray="2 3"
-                opacity="0.4"
-              />
+                  {/* Multiplier TP & SL target lines */}
+                  {tradeCategory === 'growth' && growthType === 'multiplier' && (
+                    <g className="multiplier-guides-group">
+                      <line
+                        x1="0"
+                        y1={Math.max(4, chartMath.currentY - 14)}
+                        x2="100"
+                        y2={Math.max(4, chartMath.currentY - 14)}
+                        stroke="#34d399"
+                        strokeWidth="0.8"
+                        strokeDasharray="3 3"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        x1="0"
+                        y1={Math.min(61, chartMath.currentY + 14)}
+                        x2="100"
+                        y2={Math.min(61, chartMath.currentY + 14)}
+                        stroke="#f87171"
+                        strokeWidth="0.8"
+                        strokeDasharray="3 3"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
+                  )}
 
-              {/* Spot Horizontal Crosshair Line extending to axis */}
-              <line
-                x1="0"
-                y1={chartMath.currentY}
-                x2="100"
-                y2={chartMath.currentY}
-                stroke="#2dd4bf"
-                strokeWidth="0.75"
-                vectorEffect="non-scaling-stroke"
-                strokeDasharray="2 3"
-                opacity="0.55"
-              />
+                  {/* Barrier line for Higher/Lower or Touch/No Touch */}
+                  {tradeCategory === 'directional' && (directionalType === 'higher_lower' || directionalType === 'touch_no_touch') && (
+                    <g className="barrier-guide-group">
+                      <line
+                        x1="0"
+                        y1="32.5"
+                        x2="100"
+                        y2="32.5"
+                        stroke="#f59e0b"
+                        strokeWidth="0.8"
+                        strokeDasharray="3 3"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <text x="4" y="30" fill="#fbbf24" fontSize="2.8" fontWeight="700">Barrier: {barrier}</text>
+                    </g>
+                  )}
 
-              {/* Latest Spot Marker - Glowing pulsing multi-layer dot */}
-              <circle
-                cx={chartMath.currentX}
-                cy={chartMath.currentY}
-                r="2.2"
-                fill="#2dd4bf"
-                opacity="0.2"
-              />
-              <circle
-                cx={chartMath.currentX}
-                cy={chartMath.currentY}
-                r="1.4"
-                fill="#2dd4bf"
-                opacity="0.45"
-              />
-              <circle
-                cx={chartMath.currentX}
-                cy={chartMath.currentY}
-                r="0.85"
-                fill="#ffffff"
-                stroke="#0d9488"
-                strokeWidth="0.6"
-                vectorEffect="non-scaling-stroke"
-              />
-            </svg>
+                  {/* Area Fill */}
+                  {chartType === 'area' && chartMath.fillStr && (
+                    <path d={chartMath.fillStr} fill="url(#dtraderAreaGrad)" />
+                  )}
 
-            {/* Floating Live Price Callout (aligned neatly without covering chart waves) */}
-            <div className="dtrader-floating-callout">
-              <div className={`callout-pct ${(currentTick?.changePct ?? 0) >= 0 ? 'positive' : 'negative'}`}>
-                {scrollOffset > 0 ? `Past: -${scrollOffset}t` : (currentTick?.changePct ?? 0) >= 0 ? `+${currentTick?.changePct ?? 0}%` : `${currentTick?.changePct ?? 0}%`}
+                  {/* Main Price Line - Ultra smooth financial spline */}
+                  {chartMath.pathStr && (
+                    <path
+                      d={chartMath.pathStr}
+                      fill="none"
+                      stroke="#f8fafc"
+                      strokeWidth="1.15"
+                      filter="url(#lineGlow)"
+                      vectorEffect="non-scaling-stroke"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  )}
+
+                  {/* Active Contract Overlay (5 ticks progress) */}
+                  {contractOverlay && (
+                    <g className="contract-visualization-group">
+                      <path
+                        d={contractOverlay.path}
+                        fill="none"
+                        stroke={
+                          activeContract?.status === 'won'
+                            ? '#34d399'
+                            : activeContract?.status === 'lost'
+                            ? '#f87171'
+                            : '#38bdf8'
+                        }
+                        strokeWidth="2.2"
+                        vectorEffect="non-scaling-stroke"
+                        strokeLinecap="round"
+                      />
+                      {contractOverlay.points.map((pt, i) => (
+                        <circle
+                          key={i}
+                          cx={pt.x}
+                          cy={pt.y}
+                          r="0.85"
+                          fill={activeContract?.status === 'won' ? '#34d399' : '#2dd4bf'}
+                          stroke="#07100f"
+                          strokeWidth="0.75"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ))}
+                      {/* Contract Progress Text Badge (e.g. 5/5) like Deriv */}
+                      {contractOverlay.entryPt && (
+                        <text
+                          x={contractOverlay.entryPt.x}
+                          y={Math.max(6, contractOverlay.entryPt.y - 3)}
+                          fill="#f1f5f9"
+                          fontSize="3"
+                          fontWeight="800"
+                          textAnchor="middle"
+                          fontFamily="'DM Mono', monospace"
+                        >
+                          {activeContract?.currentTickCount}/{activeContract?.totalTicks}
+                        </text>
+                      )}
+                    </g>
+                  )}
+
+                  {/* Spot Vertical Crosshair dashed line */}
+                  <line
+                    x1={chartMath.currentX}
+                    y1="0"
+                    x2={chartMath.currentX}
+                    y2="65"
+                    stroke="#2dd4bf"
+                    strokeWidth="0.75"
+                    vectorEffect="non-scaling-stroke"
+                    strokeDasharray="2 3"
+                    opacity="0.4"
+                  />
+
+                  {/* Spot Horizontal Crosshair Line extending to axis */}
+                  <line
+                    x1="0"
+                    y1={chartMath.currentY}
+                    x2="100"
+                    y2={chartMath.currentY}
+                    stroke="#2dd4bf"
+                    strokeWidth="0.75"
+                    vectorEffect="non-scaling-stroke"
+                    strokeDasharray="2 3"
+                    opacity="0.55"
+                  />
+
+                  {/* Latest Spot Marker - Glowing pulsing multi-layer dot */}
+                  <circle
+                    cx={chartMath.currentX}
+                    cy={chartMath.currentY}
+                    r="2.2"
+                    fill="#2dd4bf"
+                    opacity="0.2"
+                  />
+                  <circle
+                    cx={chartMath.currentX}
+                    cy={chartMath.currentY}
+                    r="1.4"
+                    fill="#2dd4bf"
+                    opacity="0.45"
+                  />
+                  <circle
+                    cx={chartMath.currentX}
+                    cy={chartMath.currentY}
+                    r="0.85"
+                    fill="#ffffff"
+                    stroke="#0d9488"
+                    strokeWidth="0.6"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+
+                {/* Accumulator HUD Banner */}
+                {tradeCategory === 'growth' && growthType === 'accumulator' && (
+                  <div className="dtrader-accu-hud">
+                    <span className="accu-hud-title">🌱 Accumulators ({(growthRate * 100).toFixed(0)}%/tick)</span>
+                    <span className="accu-hud-stats">
+                      Ticks: <b>{activeContract?.currentTickCount ?? 0}t</b> · Return: <b>${liveAccuPayout.toFixed(2)}</b>
+                    </span>
+                  </div>
+                )}
+
+                {/* Multipliers HUD Banner */}
+                {tradeCategory === 'growth' && growthType === 'multiplier' && (
+                  <div className="dtrader-mult-hud">
+                    <span style={{ color: '#2dd4bf', fontWeight: 700 }}>⚡ Multipliers ×{multiplier}</span>
+                    <span>TP: <b style={{ color: '#34d399' }}>+${takeProfit}</b></span>
+                    <span>SL: <b style={{ color: '#f87171' }}>-${stopLoss}</b></span>
+                  </div>
+                )}
+
+                {/* Floating Live Price Callout */}
+                <div className="dtrader-floating-callout">
+                  <div className={`callout-pct ${(currentTick?.changePct ?? 0) >= 0 ? 'positive' : 'negative'}`}>
+                    {scrollOffset > 0 ? `Past: -${scrollOffset}t` : (currentTick?.changePct ?? 0) >= 0 ? `+${currentTick?.changePct ?? 0}%` : `${currentTick?.changePct ?? 0}%`}
+                  </div>
+                  <div className="callout-price">
+                    {scrollOffset > 0 && visibleTicks.length > 0
+                      ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2)
+                      : currentTick?.quote.toFixed(2) ?? '—'}
+                  </div>
+                  <div className="callout-time">
+                    {scrollOffset > 0 && visibleTicks.length > 0
+                      ? visibleTicks[visibleTicks.length - 1].time
+                      : currentTick?.time ?? '—'}
+                  </div>
+                </div>
+
+                {/* Right Y-Axis Price Labels */}
+                <div className="dtrader-y-axis">
+                  {chartMath.yLabels.map((yl, i) => (
+                    <span
+                      key={i}
+                      className="dtrader-axis-label"
+                      style={{ top: `${(yl.yPos / 65) * 100}%` }}
+                    >
+                      {yl.price}
+                    </span>
+                  ))}
+
+                  {/* High-Contrast Live Price Badge */}
+                  <div
+                    className={`dtrader-live-price-badge ${scrollOffset > 0 ? 'historical' : ''}`}
+                    style={{ top: `${(chartMath.currentY / 65) * 100}%` }}
+                  >
+                    <span className={`badge-dot ${scrollOffset > 0 ? 'past' : ''}`} />
+                    <b>{scrollOffset > 0 && visibleTicks.length > 0 ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2) : currentTick?.quote.toFixed(2) ?? '—'}</b>
+                  </div>
+                </div>
               </div>
-              <div className="callout-price">
-                {scrollOffset > 0 && visibleTicks.length > 0
-                  ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2)
-                  : currentTick?.quote.toFixed(2) ?? '—'}
-              </div>
-              <div className="callout-time">
-                {scrollOffset > 0 && visibleTicks.length > 0
-                  ? visibleTicks[visibleTicks.length - 1].time
-                  : currentTick?.time ?? '—'}
-              </div>
-            </div>
 
-            {/* Right Y-Axis Price Labels */}
-            <div className="dtrader-y-axis">
-              {chartMath.yLabels.map((yl, i) => (
-                <span
-                  key={i}
-                  className="dtrader-axis-label"
-                  style={{ top: `${(yl.yPos / 65) * 100}%` }}
-                >
-                  {yl.price}
-                </span>
-              ))}
-
-              {/* High-Contrast Live Price Badge */}
-              <div
-                className={`dtrader-live-price-badge ${scrollOffset > 0 ? 'historical' : ''}`}
-                style={{ top: `${(chartMath.currentY / 65) * 100}%` }}
-              >
-                <span className={`badge-dot ${scrollOffset > 0 ? 'past' : ''}`} />
-                <b>{scrollOffset > 0 && visibleTicks.length > 0 ? visibleTicks[visibleTicks.length - 1].quote.toFixed(2) : currentTick?.quote.toFixed(2) ?? '—'}</b>
+              {/* Bottom Zoom / Navigation Controls */}
+              <div className="dtrader-bottom-controls">
+                <div className="dtrader-bottom-pill">
+                  <button
+                    type="button"
+                    className="zoom-btn"
+                    onClick={() => setScrollOffset((prev) => Math.min(Math.max(0, tickHistory.length - zoomLevel), prev + 12))}
+                    title="Scroll back in history (older ticks)"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="zoom-btn"
+                    onClick={() => updateZoomLevel((z) => Math.min(90, z + 8))}
+                    title="Zoom Out (More ticks)"
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`zoom-btn ${scrollOffset === 0 ? 'active' : ''}`}
+                    onClick={() => { setScrollOffset(0); updateZoomLevel(35); }}
+                    title={scrollOffset === 0 ? 'Recenter Live Chart' : 'Return to Live'}
+                  >
+                    <Crosshair size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="zoom-btn"
+                    onClick={() => updateZoomLevel((z) => Math.max(15, z - 8))}
+                    title="Zoom In (Spread ticks)"
+                  >
+                    <Plus size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="zoom-btn"
+                    onClick={() => setScrollOffset((prev) => Math.max(0, prev - 12))}
+                    title="Scroll forward (newer ticks)"
+                    disabled={scrollOffset === 0}
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>
-
-          {/* Bottom Zoom / Navigation Controls */}
-          <div className="dtrader-bottom-controls">
-            <div className="dtrader-bottom-pill">
-              <button
-                type="button"
-                className="zoom-btn"
-                onClick={() => setScrollOffset((prev) => Math.min(Math.max(0, tickHistory.length - zoomLevel), prev + 12))}
-                title="Scroll back in history (older ticks)"
-              >
-                <ChevronLeft size={14} />
-              </button>
-              <button
-                type="button"
-                className="zoom-btn"
-                onClick={() => updateZoomLevel((z) => Math.min(90, z + 8))}
-                title="Zoom Out (More ticks)"
-              >
-                <Minus size={14} />
-              </button>
-              <button
-                type="button"
-                className={`zoom-btn ${scrollOffset === 0 ? 'active' : ''}`}
-                onClick={() => { setScrollOffset(0); updateZoomLevel(35); }}
-                title={scrollOffset === 0 ? 'Recenter Live Chart' : 'Return to Live'}
-              >
-                <Crosshair size={14} />
-              </button>
-              <button
-                type="button"
-                className="zoom-btn"
-                onClick={() => updateZoomLevel((z) => Math.max(15, z - 8))}
-                title="Zoom In (Spread ticks)"
-              >
-                <Plus size={14} />
-              </button>
-              <button
-                type="button"
-                className="zoom-btn"
-                onClick={() => setScrollOffset((prev) => Math.max(0, prev - 12))}
-                title="Scroll forward (newer ticks)"
-                disabled={scrollOffset === 0}
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          </div>
+            </>
+          )}
 
           {/* In-chart Active Contract Overlay Status Card */}
           {activeContract && (
@@ -1293,29 +1601,187 @@ export function ManualTrader({
 
         {/* Right Execution Ticket Panel */}
         <div className="dtrader-ticket-panel">
-          {/* ── Direction tabs (Rise / Fall, Higher / Lower, etc.) ── */}
-          {dirTabs && (
+          {/* Grabber Handle */}
+          <div className="dtrader-ticket-grabber" />
+
+          {/* Learn about this trade type link */}
+          <div className="dtrader-learn-trade-row">
+            <button
+              type="button"
+              className="dtrader-learn-trade-btn"
+              onClick={() => setShowHowToModal(true)}
+            >
+              <HelpCircle size={13} />
+              <span>Learn about this trade type</span>
+              <ChevronRight size={13} />
+            </button>
+          </div>
+
+          {/* Trade Type Selector Card matching Traderscheme / Deriv */}
+          <button
+            type="button"
+            className="dtrader-contract-select-card"
+            onClick={() => setShowTradeTypeDropdown(true)}
+            title="Click to change trade type"
+          >
+            <div className="contract-select-left">
+              <span className="contract-icon-box">
+                {tradeCategory === 'digits' && digitSubtype === 'over_under' ? (
+                  <span className="contract-arrows-pair">
+                    <span className="arr-up">↗</span>
+                    <span className="arr-down">↘</span>
+                  </span>
+                ) : tradeCategory === 'digits' && digitSubtype === 'match_diff' ? (
+                  <span className="contract-arrows-pair">
+                    <span className="arr-up">⌕</span>
+                  </span>
+                ) : tradeCategory === 'growth' ? (
+                  <span>🌱</span>
+                ) : (
+                  <span className="contract-arrows-pair">
+                    <span className="arr-up">↗</span>
+                    <span className="arr-down">↘</span>
+                  </span>
+                )}
+              </span>
+              <strong className="contract-select-name">{tradeLabelCurrent}</strong>
+            </div>
+            <ChevronRight size={16} className="contract-select-chevron" />
+          </button>
+
+          {/* Direction Segmented Tabs for Rise/Fall */}
+          {tradeCategory === 'directional' && directionalType === 'rise_fall' && (
             <div className="dtrader-direction-tabs">
               <button
                 type="button"
                 className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`}
                 onClick={() => setDirection('CALL')}
               >
-                <span>{dirTabs.call}</span>
+                <span>Rise</span>
               </button>
               <button
                 type="button"
                 className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`}
                 onClick={() => setDirection('PUT')}
               >
-                <span>{dirTabs.put}</span>
+                <span>Fall</span>
               </button>
+            </div>
+          )}
+
+          {/* Direction Segmented Tabs for Higher/Lower */}
+          {tradeCategory === 'directional' && directionalType === 'higher_lower' && (
+            <div className="dtrader-direction-tabs">
+              <button
+                type="button"
+                className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`}
+                onClick={() => setDirection('CALL')}
+              >
+                <span>Higher</span>
+              </button>
+              <button
+                type="button"
+                className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`}
+                onClick={() => setDirection('PUT')}
+              >
+                <span>Lower</span>
+              </button>
+            </div>
+          )}
+
+          {/* Direction Segmented Tabs for Touch/No Touch */}
+          {tradeCategory === 'directional' && directionalType === 'touch_no_touch' && (
+            <div className="dtrader-direction-tabs">
+              <button
+                type="button"
+                className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`}
+                onClick={() => setDirection('CALL')}
+              >
+                <span>Touch</span>
+              </button>
+              <button
+                type="button"
+                className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`}
+                onClick={() => setDirection('PUT')}
+              >
+                <span>No Touch</span>
+              </button>
+            </div>
+          )}
+
+          {/* Direction Segmented Tabs for Multipliers */}
+          {tradeCategory === 'growth' && growthType === 'multiplier' && (
+            <div className="dtrader-direction-tabs">
+              <button
+                type="button"
+                className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`}
+                onClick={() => setDirection('CALL')}
+              >
+                <span>Up</span>
+              </button>
+              <button
+                type="button"
+                className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`}
+                onClick={() => setDirection('PUT')}
+              >
+                <span>Down</span>
+              </button>
+            </div>
+          )}
+
+          {/* Direction Segmented Tabs for Even/Odd */}
+          {tradeCategory === 'digits' && digitSubtype === 'even_odd' && (
+            <div className="dtrader-direction-tabs">
+              <button
+                type="button"
+                className={`direction-tab rise ${digitType === 'DIGITEVEN' ? 'active' : ''}`}
+                onClick={() => setDigitType('DIGITEVEN')}
+              >
+                <span>Even</span>
+              </button>
+              <button
+                type="button"
+                className={`direction-tab fall ${digitType === 'DIGITODD' ? 'active' : ''}`}
+                onClick={() => setDigitType('DIGITODD')}
+              >
+                <span>Odd</span>
+              </button>
+            </div>
+          )}
+
+          {/* 2x5 Digit Keypad for Over/Under and Matches/Differs */}
+          {tradeCategory === 'digits' && digitSubtype !== 'even_odd' && (
+            <div className="dtrader-digit-keypad">
+              <div className="digit-keypad-row">
+                {[0, 1, 2, 3, 4].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    className={`digit-key-btn ${digitBarrier === d ? 'active' : ''}`}
+                    onClick={() => setDigitBarrier(d)}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+              <div className="digit-keypad-row">
+                {[5, 6, 7, 8, 9].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    className={`digit-key-btn ${digitBarrier === d ? 'active' : ''}`}
+                    onClick={() => setDigitBarrier(d)}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
           {/* ── 3 Parameter Cards in ONE compact row ── */}
           <div className="dtrader-params-row" ref={paramsRowRef}>
-            {/* Card 1: Duration (or Growth Rate / Multiplier) */}
+            {/* Card 1: Duration / Growth Rate / Multiplier */}
             {tradeCategory === 'growth' && growthType === 'accumulator' ? (
               <div
                 className={`dtrader-param-card ${activeParamPopover === 'duration' ? 'active' : ''}`}
@@ -1430,7 +1896,7 @@ export function ManualTrader({
               onClick={() => setActiveParamPopover(activeParamPopover === 'stake' ? null : 'stake')}
             >
               <span className="param-card-label">Stake</span>
-              <span className="param-card-value">${stake}</span>
+              <span className="param-card-value">${stake.toFixed(2)}</span>
               {activeParamPopover === 'stake' && (
                 <div className="param-popover popover-center" onClick={(e) => e.stopPropagation()}>
                   <div className="popover-title">Stake</div>
@@ -1475,7 +1941,7 @@ export function ManualTrader({
               )}
             </div>
 
-            {/* Card 3: Allow equals / Barrier / Digit / TP-SL */}
+            {/* Card 3: Allow equals / Barrier / Prediction / TP-SL */}
             {tradeCategory === 'directional' && directionalType === 'rise_fall' ? (
               <div
                 className={`dtrader-param-card ${allowEquals ? 'enabled' : ''}`}
@@ -1505,35 +1971,13 @@ export function ManualTrader({
                   </div>
                 )}
               </div>
-            ) : tradeCategory === 'digits' && digitMeta.needsBarrier ? (
+            ) : tradeCategory === 'digits' && digitSubtype !== 'even_odd' ? (
               <div
                 className={`dtrader-param-card ${activeParamPopover === 'barrier' ? 'active' : ''}`}
                 onClick={() => setActiveParamPopover(activeParamPopover === 'barrier' ? null : 'barrier')}
               >
-                <span className="param-card-label">
-                  {digitType === 'DIGITOVER' ? 'Over' : digitType === 'DIGITUNDER' ? 'Under' : 'Digit'}
-                </span>
+                <span className="param-card-label">Prediction</span>
                 <span className="param-card-value">{digitBarrier}</span>
-                {activeParamPopover === 'barrier' && (
-                  <div className="param-popover popover-right" onClick={(e) => e.stopPropagation()}>
-                    <div className="popover-title">Select Digit</div>
-                    <div className="popover-chips digit-chips">
-                      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
-                        <button
-                          key={d}
-                          type="button"
-                          className={`popover-chip ${digitBarrier === d ? 'active' : ''}`}
-                          onClick={() => {
-                            setDigitBarrier(d);
-                            setActiveParamPopover(null);
-                          }}
-                        >
-                          {d}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             ) : tradeCategory === 'growth' && growthType === 'multiplier' ? (
               <div
@@ -1578,62 +2022,372 @@ export function ManualTrader({
             )}
           </div>
 
-          {/* Big Buy Action Button */}
-          <button
-            type="button"
-            className={`dtrader-buy-action-btn ${tradeBtnColor}`}
-            disabled={!derivConnected || isSubmitting || (activeContract !== null && activeContract.status === 'running')}
-            onClick={() => void handleBuy()}
-          >
+          {/* Action Buttons */}
+          <div className="dtrader-actions-container">
             {isSubmitting ? (
-              <span className="buy-loading">
+              <div className="dtrader-action-loading">
                 <RefreshCw size={18} className="spin" />
-                Purchasing contract…
-              </span>
-            ) : !derivConnected ? (
-              <strong className="buy-headline">Connect Deriv to trade</strong>
-            ) : activeContract?.status === 'running' ? (
-              <>
-                <strong className="buy-headline">Running contract ({activeContract.currentTickCount}/{activeContract.totalTicks}t)</strong>
-                <span className="buy-payout">Potential payout ${potentialPayout.toFixed(2)}</span>
-              </>
-            ) : (
-              <>
+                <span>Purchasing contract…</span>
+              </div>
+            ) : activeContract !== null && activeContract.status === 'running' ? (
+              tradeCategory === 'growth' && growthType === 'accumulator' ? (
+                <button
+                  type="button"
+                  className="dtrader-single-btn close-accu"
+                  onClick={handleCloseAccumulator}
+                >
+                  <span className="btn-main">Close Position</span>
+                  <span className="btn-sub">Profit +${(liveAccuPayout - stake).toFixed(2)} USD (Tick {activeContract.currentTickCount})</span>
+                </button>
+              ) : (
+                <button type="button" className="dtrader-buy-action-btn running" disabled>
+                  <strong className="buy-headline">Running contract ({activeContract.currentTickCount}/{activeContract.totalTicks}t)</strong>
+                  <span className="buy-payout">Potential payout ${activeContract.payout.toFixed(2)}</span>
+                </button>
+              )
+            ) : tradeCategory === 'growth' && growthType === 'accumulator' ? (
+              <button
+                type="button"
+                className="dtrader-buy-action-btn accu"
+                onClick={() => void handleExecuteTrade('ACCU')}
+              >
+                <strong className="buy-headline">Open Accumulator</strong>
+                <span className="buy-payout">Stake ${stake.toFixed(2)} USD · {(growthRate * 100).toFixed(0)}%/tick</span>
+              </button>
+            ) : tradeCategory === 'digits' && digitSubtype === 'over_under' ? (
+              <div className="dtrader-dual-action-row">
+                <button
+                  type="button"
+                  className="dtrader-dual-btn teal"
+                  onClick={() => void handleExecuteTrade('DIGITOVER')}
+                >
+                  <span className="btn-line-1"><span className="btn-arrow">↗</span> Over</span>
+                  <span className="btn-line-2">Payout ${payoutOver.toFixed(2)} USD</span>
+                </button>
+                <button
+                  type="button"
+                  className="dtrader-dual-btn red"
+                  onClick={() => void handleExecuteTrade('DIGITUNDER')}
+                >
+                  <span className="btn-line-1"><span className="btn-arrow">↘</span> Under</span>
+                  <span className="btn-line-2">Payout ${payoutUnder.toFixed(2)} USD</span>
+                </button>
+              </div>
+            ) : tradeCategory === 'digits' && digitSubtype === 'match_diff' ? (
+              <div className="dtrader-dual-action-row">
+                <button
+                  type="button"
+                  className="dtrader-dual-btn teal"
+                  onClick={() => void handleExecuteTrade('DIGITMATCH')}
+                >
+                  <span className="btn-line-1">Matches</span>
+                  <span className="btn-line-2">Payout ${payoutMatch.toFixed(2)} USD</span>
+                </button>
+                <button
+                  type="button"
+                  className="dtrader-dual-btn red"
+                  onClick={() => void handleExecuteTrade('DIGITDIFF')}
+                >
+                  <span className="btn-line-1">Differs</span>
+                  <span className="btn-line-2">Payout ${payoutDiff.toFixed(2)} USD</span>
+                </button>
+              </div>
+            ) : tradeCategory === 'digits' && digitSubtype === 'even_odd' ? (
+              <button
+                type="button"
+                className={`dtrader-buy-action-btn ${digitType === 'DIGITEVEN' ? 'rise' : 'fall'}`}
+                onClick={() => void handleExecuteTrade(digitType === 'DIGITEVEN' ? 'DIGITEVEN' : 'DIGITODD')}
+              >
                 <strong className="buy-headline">Buy</strong>
                 <span className="buy-payout">
-                  {tradeCategory === 'growth'
-                    ? `Growth ${(growthRate * 100).toFixed(0)}% / tick`
-                    : `Payout \$${potentialPayout.toFixed(2)}`}
+                  {digitType === 'DIGITEVEN' ? 'Even' : 'Odd'} · Payout ${payoutEven.toFixed(2)} USD
                 </span>
-              </>
+              </button>
+            ) : tradeCategory === 'growth' && growthType === 'multiplier' ? (
+              <button
+                type="button"
+                className={`dtrader-buy-action-btn ${direction === 'CALL' ? 'rise' : 'fall'}`}
+                onClick={() => void handleExecuteTrade(direction === 'CALL' ? 'MULTUP' : 'MULTDOWN')}
+              >
+                <strong className="buy-headline">Buy</strong>
+                <span className="buy-payout">
+                  {direction === 'CALL' ? 'Up' : 'Down'} · Multiplier ×{multiplier}
+                </span>
+              </button>
+            ) : (
+              /* Directional: Rise/Fall, Higher/Lower, Touch/No Touch — single large Buy button matching Deriv DTrader! */
+              <button
+                type="button"
+                className={`dtrader-buy-action-btn ${direction === 'CALL' ? 'rise' : 'fall'}`}
+                onClick={() => void handleExecuteTrade(direction)}
+              >
+                <strong className="buy-headline">Buy</strong>
+                <span className="buy-payout">
+                  Payout ${direction === 'CALL' ? payoutRise.toFixed(2) : payoutFall.toFixed(2)} USD
+                </span>
+              </button>
             )}
-          </button>
+          </div>
         </div>
       </div>
 
-      {/* "How to trade Rise/Fall" Modal */}
+      {/* ── Trade Type Selector Modal / Sheet ─────────────────────────── */}
+      {showTradeTypeDropdown && (
+        <div className="dtrader-modal-backdrop" onClick={() => setShowTradeTypeDropdown(false)}>
+          <div className="dtrader-type-modal-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title-group">
+                <h3>Select Trade Type</h3>
+                <span className="modal-subtitle">Choose contract mechanics</span>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setShowTradeTypeDropdown(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body type-picker-body">
+              {/* Category: Digits */}
+              <div className="type-group-section">
+                <div className="type-group-header">
+                  <Hash size={14} />
+                  <span>Digits</span>
+                </div>
+                <div className="type-options-grid">
+                  <button
+                    type="button"
+                    className={`type-option-card ${tradeCategory === 'digits' && digitSubtype === 'over_under' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setTradeCategory('digits');
+                      setDigitSubtype('over_under');
+                      setDigitType('DIGITOVER');
+                      setShowTradeTypeDropdown(false);
+                    }}
+                  >
+                    <div className="type-option-icon">↗ ↘</div>
+                    <div className="type-option-info">
+                      <strong>Over/Under</strong>
+                      <span>Predict if last digit is greater or less than target</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className={`type-option-card ${tradeCategory === 'digits' && digitSubtype === 'match_diff' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setTradeCategory('digits');
+                      setDigitSubtype('match_diff');
+                      setDigitType('DIGITMATCH');
+                      setShowTradeTypeDropdown(false);
+                    }}
+                  >
+                    <div className="type-option-icon">≑ ≠</div>
+                    <div className="type-option-info">
+                      <strong>Matches/Differs</strong>
+                      <span>Predict if last digit matches or differs from target</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className={`type-option-card ${tradeCategory === 'digits' && digitSubtype === 'even_odd' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setTradeCategory('digits');
+                      setDigitSubtype('even_odd');
+                      setDigitType('DIGITEVEN');
+                      setShowTradeTypeDropdown(false);
+                    }}
+                  >
+                    <div className="type-option-icon">2 | 3</div>
+                    <div className="type-option-info">
+                      <strong>Even/Odd</strong>
+                      <span>Predict if exit tick digit is even or odd</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Category: Directional */}
+              <div className="type-group-section">
+                <div className="type-group-header">
+                  <LineChartIcon size={14} />
+                  <span>Directional</span>
+                </div>
+                <div className="type-options-grid">
+                  <button
+                    type="button"
+                    className={`type-option-card ${tradeCategory === 'directional' && directionalType === 'rise_fall' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setTradeCategory('directional');
+                      setDirectionalType('rise_fall');
+                      setShowTradeTypeDropdown(false);
+                    }}
+                  >
+                    <div className="type-option-icon">↗ ↘</div>
+                    <div className="type-option-info">
+                      <strong>Rise/Fall</strong>
+                      <span>Predict if exit price is higher or lower than entry</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className={`type-option-card ${tradeCategory === 'directional' && directionalType === 'higher_lower' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setTradeCategory('directional');
+                      setDirectionalType('higher_lower');
+                      setShowTradeTypeDropdown(false);
+                    }}
+                  >
+                    <div className="type-option-icon">↑ ↓</div>
+                    <div className="type-option-info">
+                      <strong>Higher/Lower</strong>
+                      <span>Predict price above or below a barrier price</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className={`type-option-card ${tradeCategory === 'directional' && directionalType === 'touch_no_touch' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setTradeCategory('directional');
+                      setDirectionalType('touch_no_touch');
+                      setShowTradeTypeDropdown(false);
+                    }}
+                  >
+                    <div className="type-option-icon">⊙</div>
+                    <div className="type-option-info">
+                      <strong>Touch/No Touch</strong>
+                      <span>Win if price touches or avoids a barrier</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Category: Growth */}
+              <div className="type-group-section">
+                <div className="type-group-header">
+                  <span>🌱</span>
+                  <span>Growth</span>
+                </div>
+                <div className="type-options-grid">
+                  <button
+                    type="button"
+                    className={`type-option-card ${tradeCategory === 'growth' && growthType === 'accumulator' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setTradeCategory('growth');
+                      setGrowthType('accumulator');
+                      setShowTradeTypeDropdown(false);
+                    }}
+                  >
+                    <div className="type-option-icon">🌱</div>
+                    <div className="type-option-info">
+                      <strong>Accumulators</strong>
+                      <span>Stake grows each tick as price stays within range</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className={`type-option-card ${tradeCategory === 'growth' && growthType === 'multiplier' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setTradeCategory('growth');
+                      setGrowthType('multiplier');
+                      setShowTradeTypeDropdown(false);
+                    }}
+                  >
+                    <div className="type-option-icon">⚡</div>
+                    <div className="type-option-info">
+                      <strong>Multipliers</strong>
+                      <span>Multiply profit/loss with leverage and risk controls</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* "How to trade" Modal */}
       {showHowToModal && (
         <div className="dtrader-modal-backdrop" onClick={() => setShowHowToModal(false)}>
           <div className="dtrader-modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>How to trade Rise/Fall?</h3>
+              <h3>How to trade {tradeLabelCurrent}?</h3>
               <button type="button" onClick={() => setShowHowToModal(false)}>
                 <X size={18} />
               </button>
             </div>
             <div className="modal-body">
-              <p>
-                <b>Rise:</b> You win the payout if the exit tick is strictly higher than the entry tick.
-              </p>
-              <p>
-                <b>Fall:</b> You win the payout if the exit tick is strictly lower than the entry tick.
-              </p>
-              <p>
-                <b>Allow equals:</b> If enabled, you also win if the exit tick equals the entry tick (payout is slightly adjusted for the equal advantage).
-              </p>
-              <p className="muted">
-                Each trade settles automatically after 5 ticks (approx. 7.5 seconds) with instant credit to your account.
-              </p>
+              {tradeCategory === 'digits' && digitSubtype === 'over_under' && (
+                <>
+                  <p>
+                    <b>Over:</b> You win the payout if the last digit of the exit tick is strictly <b>greater than</b> your prediction digit ({digitBarrier}).
+                  </p>
+                  <p>
+                    <b>Under:</b> You win the payout if the last digit of the exit tick is strictly <b>less than</b> your prediction digit ({digitBarrier}).
+                  </p>
+                  <p className="muted">
+                    Contract runs for the specified ticks (default {durationTicks} ticks) and settles automatically with instant payout credit.
+                  </p>
+                </>
+              )}
+              {tradeCategory === 'digits' && digitSubtype === 'match_diff' && (
+                <>
+                  <p>
+                    <b>Matches:</b> You win if the last digit of the exit tick <b>matches</b> your selected digit (up to 9× payout!).
+                  </p>
+                  <p>
+                    <b>Differs:</b> You win if the last digit of the exit tick is <b>different from</b> your selected digit.
+                  </p>
+                  <p className="muted">
+                    Instant settlement after {durationTicks} ticks with live Deriv verification.
+                  </p>
+                </>
+              )}
+              {tradeCategory === 'digits' && digitSubtype === 'even_odd' && (
+                <>
+                  <p>
+                    <b>Even:</b> Win if the exit tick's last digit is 0, 2, 4, 6, or 8.
+                  </p>
+                  <p>
+                    <b>Odd:</b> Win if the exit tick's last digit is 1, 3, 5, 7, or 9.
+                  </p>
+                  <p className="muted">
+                    Fair 50/50 probability mechanism with standard binary payout.
+                  </p>
+                </>
+              )}
+              {tradeCategory === 'growth' && growthType === 'accumulator' && (
+                <>
+                  <p>
+                    <b>Accumulators:</b> Your stake continuously compounds by {(growthRate * 100).toFixed(0)}% every tick as long as price stays inside the dynamic volatility corridor.
+                  </p>
+                  <p>
+                    <b>Cash Out:</b> You can close your position at any time to lock in accumulated profits before a corridor breach.
+                  </p>
+                </>
+              )}
+              {tradeCategory === 'growth' && growthType === 'multiplier' && (
+                <>
+                  <p>
+                    <b>Multipliers:</b> Amplifies returns by {multiplier}× leverage.
+                  </p>
+                  <p>
+                    <b>Risk Protection:</b> Take Profit and Stop Loss limits safeguard your capital automatically.
+                  </p>
+                </>
+              )}
+              {tradeCategory === 'directional' && (
+                <>
+                  <p>
+                    <b>Rise:</b> You win the payout if the exit tick is strictly higher than the entry tick.
+                  </p>
+                  <p>
+                    <b>Fall:</b> You win the payout if the exit tick is strictly lower than the entry tick.
+                  </p>
+                  <p>
+                    <b>Allow equals:</b> If enabled, you also win if the exit tick equals the entry tick (payout is slightly adjusted for the equal advantage).
+                  </p>
+                  <p className="muted">
+                    Each trade settles automatically after {durationTicks} ticks with instant credit to your account.
+                  </p>
+                </>
+              )}
             </div>
             <div className="modal-footer">
               <button type="button" className="primary" onClick={() => setShowHowToModal(false)}>
