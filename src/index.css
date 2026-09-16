@@ -144,7 +144,7 @@ h1, h2, p { margin: 0; }
 h1 { margin-top: 7px; color: #f2f7f5; font-size: clamp(24px, 3vw, 33px); letter-spacing: -.04em; line-height: 1.12; }
 h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 .page-header p { margin-top: 10px; color: #81928e; font-size: 12px; line-height: 1.6; }
-.primary, .secondary { display: inline-flex; justify-content: center; align-items: center; gap: 8px; min-height: 38px; padding: 0 15px; border-radius: 7px; font-size: 11px; font-weight: 700; transition: .2s ease; }
+.primary, .secondary { display: inline-flex; justify-content: center; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 7px; font-size: 11px; font-weight: 700; transition: .2s ease; }
 .primary { border: 1px solid #3cd3ba; color: #05140f; background: linear-gradient(135deg, #34c9b0, #42d5bb); box-shadow: 0 4px 14px #27bca320; }
 .primary:hover { background: linear-gradient(135deg, #42d5bb, #5ee8d1); transform: translateY(-1px); box-shadow: 0 6px 18px #27bca33a; }
 .secondary { border: 1px solid #233f3a; color: #aaccC4; background: #101e1b; }
@@ -596,7 +596,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 14px;
+  padding: 5px 12px;
   border-radius: 20px;
   border: 1px solid #2dd4bf;
   background: linear-gradient(135deg, #0d2e29, #0f3832);
@@ -972,7 +972,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 
 .auth-tab {
   flex: 1;
-  padding: 8px 12px;
+  padding: 6px 10px;
   font-size: 13px;
   font-weight: 600;
   color: #94a3b8;
@@ -1090,7 +1090,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   justify-content: center;
   gap: 8px;
   width: 100%;
-  height: 44px;
+  height: 40px;
   background: linear-gradient(135deg, #0d9488, #14b8a6);
   border: none;
   border-radius: 6px;
@@ -2090,7 +2090,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   align-items: center;
   justify-content: center;
   gap: 7px;
-  height: 46px;
+  height: 40px;
   border-radius: 10px;
   font-size: 14px;
   font-weight: 700;
@@ -2283,7 +2283,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 /* Big Action Button */
 .dtrader-buy-action-btn {
   width: 100%;
-  height: 58px;
+  height: 50px;
   border: none;
   border-radius: 14px;
   cursor: pointer;
