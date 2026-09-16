@@ -105,15 +105,15 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
         <div className="lp-hero-inner">
           {/* Left: Copy */}
           <div className="lp-hero-copy">
-            <p className="lp-eyebrow">TRADE SMARTER</p>
+            <p className="lp-eyebrow">FREE DERIV TRADING BOT</p>
             <h1 className="lp-headline">
-              Data-Driven<br />
-              Synthetic Trading<br />
+              Algorithmic Trading for<br />
+              Volatility Indices<br />
               <span className="lp-headline-accent">Made Simple.</span>
             </h1>
             <p className="lp-sub">
-              Real-time market scanner, powerful analysis tools,
-              and automation — all in one platform.
+              Free Deriv trading bot for Volatility 100, 75, 50, 25, 10.
+              Automate Even/Odd, Over/Under strategies with smart bots and risk management.
             </p>
 
             <div className="lp-actions">
@@ -130,7 +130,7 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
           <div className="lp-hero-visual">
             <img
               src="/apex-hero-visual.png"
-              alt="APEX Trading Platform"
+              alt="Deriv Trading Bot Interface - Volatility Index Trading Platform"
               className="lp-hero-img"
             />
           </div>
@@ -138,11 +138,12 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
 
         {/* Feature strip */}
         <div className="lp-features" id="features">
+          <h2 className="lp-features-title">Trading Bot Features</h2>
           {FEATURES.map((f) => (
             <div className="lp-feature-item" key={f.label}>
               <span className="lp-feature-icon">{f.icon}</span>
               <div className="lp-feature-text">
-                <strong>{f.label}</strong>
+                <h3>{f.label}</h3>
                 <span>{f.desc}</span>
               </div>
             </div>
