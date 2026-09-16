@@ -550,7 +550,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   .stats-grid, .record-summary { grid-template-columns: repeat(2, 1fr); }
   .grid-2, .builder-grid, .signal-layout, .bulk-grid, .trade-layout { grid-template-columns: 1fr; }
   .bot-grid, .quick-grid, .settings-grid { grid-template-columns: 1fr; }
-  .record-summary { grid-template-columns: 1fr; }
+  .record-summary { grid-template-columns: repeat(3, 1fr); }
   .apex-banner { align-items: flex-start; flex-direction: column; gap: 20px; }
   .apex-score { padding: 16px 0 0; border-top: 1px solid #5c4829; border-left: 0; width: 100%; text-align: left; }
   .session-panel { align-items: flex-start; flex-direction: column; gap: 16px; }
@@ -626,6 +626,56 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   }
   .digits-trade-panel {
     position: static !important;
+  }
+}
+
+/* Digits Analyser Mobile Optimizations */
+@media (max-width: 480px) {
+  /* Current tick grid - 3 columns on mobile */
+  .current-tick-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6px !important;
+  }
+  
+  /* Digit gauges - 5 columns on mobile */
+  .digits-gauges-grid {
+    grid-template-columns: repeat(5, 1fr) !important;
+    gap: 6px !important;
+  }
+  
+  /* Tick history squares - smaller on mobile */
+  .tick-history-squares > div {
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 12px !important;
+  }
+  
+  /* Even/Odd boxes - smaller on mobile */
+  .tick-history-odd-even > div {
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 9px !important;
+  }
+  
+  /* Over/Under boxes - smaller on mobile */
+  .tick-history-over-under > div {
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 8px !important;
+    padding: 0 2px !important;
+  }
+}
+
+@media (max-width: 360px) {
+  /* Extra small mobile - still 5 columns but with smaller gap */
+  .digits-gauges-grid {
+    grid-template-columns: repeat(5, 1fr) !important;
+    gap: 4px !important;
+  }
+  
+  /* Current tick grid - smaller gap on extra small screens */
+  .current-tick-grid {
+    gap: 4px !important;
   }
 }
 
