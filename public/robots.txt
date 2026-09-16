@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /node_modules/
+Disallow: /apex-lab/
+Disallow: /dist/
+
+Sitemap: https://apextradinglab.app/sitemap.xml
