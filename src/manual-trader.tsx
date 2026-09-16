@@ -150,11 +150,45 @@ export function ManualTrader({
   const [showHowToModal, setShowHowToModal] = useState<boolean>(false);
   const [showInstrumentDropdown, setShowInstrumentDropdown] = useState<boolean>(false);
   const [showTradeTypeDropdown, setShowTradeTypeDropdown] = useState<boolean>(false);
+  const [activeParamPopover, setActiveParamPopover] = useState<'duration' | 'stake' | 'barrier' | null>(null);
   const [showPositionsPanel, setShowPositionsPanel] = useState<boolean>(false);
   const [chartType, setChartType] = useState<'area' | 'line'>('area');
   const [zoomLevel, setZoomLevel] = useState<number>(35); // number of visible ticks
   const [showZoomPill, setShowZoomPill] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  const tradeTypePickerRef = useRef<HTMLDivElement>(null);
+  const paramsRowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showTradeTypeDropdown) return;
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (tradeTypePickerRef.current && !tradeTypePickerRef.current.contains(e.target as Node)) {
+        setShowTradeTypeDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [showTradeTypeDropdown]);
+
+  useEffect(() => {
+    if (!activeParamPopover) return;
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (paramsRowRef.current && !paramsRowRef.current.contains(e.target as Node)) {
+        setActiveParamPopover(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [activeParamPopover]);
 
   // Historical panning & gesture state
   const [scrollOffset, setScrollOffset] = useState<number>(0);
@@ -578,6 +612,40 @@ export function ManualTrader({
     : tradeCategory === 'growth' ? 'accu'
     : direction === 'CALL' ? 'rise' : 'fall';
 
+  const tradeLabelCurrent = tradeCategory === 'directional'
+    ? (DIRECTIONAL_TYPES.find((d) => d.key === directionalType)?.label ?? 'Rise/Fall')
+    : tradeCategory === 'growth'
+    ? (GROWTH_TYPES.find((g) => g.key === growthType)?.label ?? 'Accumulators')
+    : (DIGIT_TYPES.find((d) => d.type === digitType)?.label ?? 'Even');
+
+  const getDirectionTabs = () => {
+    if (tradeCategory === 'directional') {
+      switch (directionalType) {
+        case 'higher_lower':
+          return { call: 'Higher', put: 'Lower' };
+        case 'touch_no_touch':
+          return { call: 'Touch', put: 'No Touch' };
+        case 'in_out':
+          return { call: 'Ends Between', put: 'Ends Outside' };
+        case 'asians':
+          return { call: 'Asian Up', put: 'Asian Down' };
+        case 'reset':
+          return { call: 'Reset Call', put: 'Reset Put' };
+        case 'ticks_hl':
+          return { call: 'High Tick', put: 'Low Tick' };
+        case 'runs':
+          return { call: 'Only Ups', put: 'Only Downs' };
+        case 'rise_fall':
+        default:
+          return { call: 'Rise', put: 'Fall' };
+      }
+    }
+    if (tradeCategory === 'growth' && growthType === 'multiplier') {
+      return { call: 'Up', put: 'Down' };
+    }
+    return null;
+  };
+
   const handleBuy = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
@@ -674,23 +742,100 @@ export function ManualTrader({
             <Plus size={16} />
           </button>
 
-          <div className="dtrader-asset-picker">
-            <button
-              type="button"
-              className="dtrader-asset-btn"
-              onClick={() => setShowInstrumentPanel(!showInstrumentPanel)}
-            >
-              <div className="dtrader-asset-badge">
-                <span>{selectedInstrument.replace('Volatility ', '').replace(' Index', '').replace('(1s)', '1s').substring(0, 5)}</span>
-                {selectedInstrument.includes('(1s)') && <span className="sub">1s</span>}
+          <div className="dtrader-asset-picker" ref={tradeTypePickerRef}>
+            <div className="dtrader-asset-unified-pill">
+              <div
+                className="dtrader-asset-market-part"
+                onClick={() => setShowInstrumentPanel(!showInstrumentPanel)}
+                title="Choose Market / Asset"
+              >
+                <div className="dtrader-asset-badge">
+                  <span>{selectedInstrument.replace('Volatility ', '').replace(' Index', '').replace('(1s)', '1s').substring(0, 5)}</span>
+                  {selectedInstrument.includes('(1s)') && <span className="sub">1s</span>}
+                </div>
+                <div className="dtrader-asset-title-wrap">
+                  <strong className="dtrader-asset-title">{selectedInstrument}</strong>
+                  <div
+                    className="dtrader-trade-type-trigger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowTradeTypeDropdown((v) => !v);
+                    }}
+                    title="Select Contract Type"
+                  >
+                    <span>{tradeLabelCurrent}</span>
+                    <ChevronDown size={12} className={showTradeTypeDropdown ? 'rotated' : ''} />
+                  </div>
+                </div>
               </div>
-              <div className="dtrader-asset-info">
-                <strong>{selectedInstrument}</strong>
-                <span className="dtrader-trade-type">
-                  {tradeCategory === 'directional' ? 'Rise/Fall' : tradeCategory === 'growth' ? 'Accumulator' : 'Digits'} <ChevronDown size={13} />
-                </span>
+            </div>
+
+            {showTradeTypeDropdown && (
+              <div className="dtrader-type-dropdown">
+                {/* Directional */}
+                <div className="type-dropdown-group">
+                  <span className="type-dropdown-group-label">Directional</span>
+                  {DIRECTIONAL_TYPES.map((dt) => (
+                    <button
+                      key={dt.key}
+                      type="button"
+                      className={`type-dropdown-item ${tradeCategory === 'directional' && directionalType === dt.key ? 'active' : ''}`}
+                      onClick={() => {
+                        setTradeCategory('directional');
+                        setDirectionalType(dt.key);
+                        setShowTradeTypeDropdown(false);
+                      }}
+                    >
+                      <span className="type-item-label">{dt.label}</span>
+                      <span className="type-item-desc">{dt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                {/* Growth */}
+                <div className="type-dropdown-group">
+                  <span className="type-dropdown-group-label">Growth based</span>
+                  {GROWTH_TYPES.map((gt) => (
+                    <button
+                      key={gt.key}
+                      type="button"
+                      className={`type-dropdown-item ${tradeCategory === 'growth' && growthType === gt.key ? 'active' : ''}`}
+                      onClick={() => {
+                        setTradeCategory('growth');
+                        setGrowthType(gt.key);
+                        setShowTradeTypeDropdown(false);
+                      }}
+                    >
+                      <span className="type-item-label">{gt.label}</span>
+                      <span className="type-item-desc">{gt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                {/* Digits */}
+                <div className="type-dropdown-group">
+                  <span className="type-dropdown-group-label">Digit based</span>
+                  {DIGIT_TYPES.map((dt) => (
+                    <button
+                      key={dt.type}
+                      type="button"
+                      className={`type-dropdown-item ${tradeCategory === 'digits' && digitType === dt.type ? 'active' : ''}`}
+                      style={{ '--type-color': dt.color } as React.CSSProperties}
+                      onClick={() => {
+                        setTradeCategory('digits');
+                        setDigitType(dt.type);
+                        setShowTradeTypeDropdown(false);
+                      }}
+                    >
+                      <span
+                        className="type-item-label"
+                        style={{ color: tradeCategory === 'digits' && digitType === dt.type ? dt.color : undefined }}
+                      >
+                        {dt.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </button>
+            )}
           </div>
         </div>
 
@@ -738,35 +883,16 @@ export function ManualTrader({
       <div className="dtrader-grid">
         {/* Left / Center Financial Chart */}
         <div className="dtrader-chart-panel">
-          {/* Chart Header Overlay */}
-          <div className="dtrader-chart-header">
-            <div className="dtrader-chart-header-actions">
-              <button
-                type="button"
-                className={`dtrader-positions-btn ${showPositionsPanel ? 'active' : ''}`}
-                onClick={() => setShowPositionsPanel(v => !v)}
-                title="Toggle Positions"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
-                </svg>
-                Positions
-              </button>
-            </div>
-            <div className="dtrader-chart-spot">
-              <span>Spot:</span>
-              {isChartLoading ? (
-                <strong className="chart-loading-price">—</strong>
-              ) : (
-                <>
-                  <strong>{currentTick?.quote.toFixed(2) ?? '—'}</strong>
-                  <em className={( currentTick?.changePct ?? 0) >= 0 ? 'positive' : 'negative'}>
-                    {(currentTick?.changePct ?? 0) >= 0 ? `+${currentTick?.changePct ?? 0}%` : `${currentTick?.changePct ?? 0}%`}
-                  </em>
-                </>
-              )}
-            </div>
-          </div>
+          {/* Floating Positions Button on Chart */}
+          <button
+            type="button"
+            className={`dtrader-floating-positions-btn ${showPositionsPanel ? 'active' : ''} ${activeContract ? 'has-active' : ''}`}
+            onClick={() => setShowPositionsPanel((v) => !v)}
+            title="Toggle Positions"
+          >
+            <Layers size={13} />
+            <span>Positions{activeContract ? ' (1)' : ''}</span>
+          </button>
 
           {/* Collapsible Positions Panel */}
           {showPositionsPanel && (
@@ -1129,323 +1255,325 @@ export function ManualTrader({
               </button>
             </div>
           </div>
+
+          {/* In-chart Active Contract Overlay Status Card */}
+          {activeContract && (
+            <div className={`dtrader-chart-contract-card ${activeContract.status}`}>
+              <div className="contract-card-header">
+                <span className="contract-card-badge">
+                  {activeContract.status === 'running'
+                    ? 'In Progress'
+                    : activeContract.status === 'won'
+                    ? '🎉 Won'
+                    : '📉 Lost'}
+                </span>
+                <b className="contract-card-ticks">
+                  {activeContract.currentTickCount}/{activeContract.totalTicks} ticks
+                </b>
+              </div>
+              <div className="contract-card-grid">
+                <div>
+                  <small>Entry</small>
+                  <strong>{activeContract.entryQuote.toFixed(2)}</strong>
+                </div>
+                <div>
+                  <small>Current</small>
+                  <strong>{currentTick?.quote.toFixed(2) ?? '—'}</strong>
+                </div>
+                <div>
+                  <small>Payout</small>
+                  <strong className={activeContract.status === 'won' ? 'positive' : ''}>
+                    ${activeContract.payout.toFixed(2)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Execution Ticket Panel */}
         <div className="dtrader-ticket-panel">
-          {/* ── Trade Type Dropdown ── */}
-          <div className="dtrader-type-selector" ref={(el) => {
-            // close on outside click
-            if (!el) return;
-            const handler = (e: MouseEvent) => {
-              if (!el.contains(e.target as Node)) setShowTradeTypeDropdown(false);
-            };
-            document.addEventListener('mousedown', handler);
-            return () => document.removeEventListener('mousedown', handler);
-          }}>
-            <button
-              type="button"
-              className="dtrader-type-btn"
-              onClick={() => setShowTradeTypeDropdown(v => !v)}
-            >
-              <span className="type-btn-label">
-                {tradeCategory === 'directional'
-                  ? DIRECTIONAL_TYPES.find(d => d.key === directionalType)?.label ?? 'Rise/Fall'
-                  : tradeCategory === 'growth'
-                  ? GROWTH_TYPES.find(g => g.key === growthType)?.label ?? 'Accumulators'
-                  : DIGIT_TYPES.find(d => d.type === digitType)?.label ?? 'Even'}
-              </span>
-              <ChevronDown size={13} className={showTradeTypeDropdown ? 'rotated' : ''} />
-            </button>
-
-            {showTradeTypeDropdown && (
-              <div className="dtrader-type-dropdown">
-                {/* Directional */}
-                <div className="type-dropdown-group">
-                  <span className="type-dropdown-group-label">Directional</span>
-                  {DIRECTIONAL_TYPES.map(dt => (
-                    <button key={dt.key} type="button"
-                      className={`type-dropdown-item ${tradeCategory === 'directional' && directionalType === dt.key ? 'active' : ''}`}
-                      onClick={() => { setTradeCategory('directional'); setDirectionalType(dt.key); setShowTradeTypeDropdown(false); }}
-                    >
-                      <span className="type-item-label">{dt.label}</span>
-                      <span className="type-item-desc">{dt.desc}</span>
-                    </button>
-                  ))}
-                </div>
-                {/* Growth */}
-                <div className="type-dropdown-group">
-                  <span className="type-dropdown-group-label">Growth based</span>
-                  {GROWTH_TYPES.map(gt => (
-                    <button key={gt.key} type="button"
-                      className={`type-dropdown-item ${tradeCategory === 'growth' && growthType === gt.key ? 'active' : ''}`}
-                      onClick={() => { setTradeCategory('growth'); setGrowthType(gt.key); setShowTradeTypeDropdown(false); }}
-                    >
-                      <span className="type-item-label">{gt.label}</span>
-                      <span className="type-item-desc">{gt.desc}</span>
-                    </button>
-                  ))}
-                </div>
-                {/* Digits */}
-                <div className="type-dropdown-group">
-                  <span className="type-dropdown-group-label">Digit based</span>
-                  {DIGIT_TYPES.map(dt => (
-                    <button key={dt.type} type="button"
-                      className={`type-dropdown-item ${tradeCategory === 'digits' && digitType === dt.type ? 'active' : ''}`}
-                      style={{ '--type-color': dt.color } as React.CSSProperties}
-                      onClick={() => { setTradeCategory('digits'); setDigitType(dt.type); setShowTradeTypeDropdown(false); }}
-                    >
-                      <span className="type-item-label" style={{ color: tradeCategory === 'digits' && digitType === dt.type ? dt.color : undefined }}>{dt.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── Directional direction tabs ── */}
-          {tradeCategory === 'directional' && (
-            <div>
-              {/* Rise/Fall */}
-              {directionalType === 'rise_fall' && (
-                <div className="dtrader-direction-tabs">
-                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                    <ArrowUp size={16} /><span>Rise</span>
-                  </button>
-                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                    <ArrowDown size={16} /><span>Fall</span>
-                  </button>
-                </div>
-              )}
-
-              {/* Higher/Lower */}
-              {directionalType === 'higher_lower' && (
-                <>
-                  <div className="dtrader-direction-tabs">
-                    <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                      <ArrowUp size={16} /><span>Higher</span>
-                    </button>
-                    <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                      <ArrowDown size={16} /><span>Lower</span>
-                    </button>
-                  </div>
-                  <div style={{ marginTop: 8 }}>
-                    <div style={{ fontSize: 11, color: '#80948e', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Barrier</div>
-                    <input type="text" value={barrier} onChange={e => setBarrier(e.target.value)}
-                      placeholder="e.g. 1234.56"
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
-                  </div>
-                </>
-              )}
-
-              {/* Touch/No Touch */}
-              {directionalType === 'touch_no_touch' && (
-                <>
-                  <div className="dtrader-direction-tabs">
-                    <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                      <span>Touch</span>
-                    </button>
-                    <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                      <span>No Touch</span>
-                    </button>
-                  </div>
-                  <div style={{ marginTop: 8 }}>
-                    <div style={{ fontSize: 11, color: '#80948e', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Barrier</div>
-                    <input type="text" value={barrier} onChange={e => setBarrier(e.target.value)}
-                      placeholder="e.g. 1234.56"
-                      style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
-                  </div>
-                </>
-              )}
-
-              {/* In/Out */}
-              {directionalType === 'in_out' && (
-                <div className="dtrader-direction-tabs">
-                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                    <span>Ends Between</span>
-                  </button>
-                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                    <span>Ends Outside</span>
-                  </button>
-                </div>
-              )}
-
-              {/* Asians */}
-              {directionalType === 'asians' && (
-                <div className="dtrader-direction-tabs">
-                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                    <ArrowUp size={15} /><span>Asian Up</span>
-                  </button>
-                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                    <ArrowDown size={15} /><span>Asian Down</span>
-                  </button>
-                </div>
-              )}
-
-              {/* Reset */}
-              {directionalType === 'reset' && (
-                <div className="dtrader-direction-tabs">
-                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                    <span>Reset Call</span>
-                  </button>
-                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                    <span>Reset Put</span>
-                  </button>
-                </div>
-              )}
-
-              {/* High/Low Ticks */}
-              {directionalType === 'ticks_hl' && (
-                <div className="dtrader-direction-tabs">
-                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                    <span>High Tick</span>
-                  </button>
-                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                    <span>Low Tick</span>
-                  </button>
-                </div>
-              )}
-
-              {/* Only Ups/Downs */}
-              {directionalType === 'runs' && (
-                <div className="dtrader-direction-tabs">
-                  <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                    <ArrowUp size={15} /><span>Only Ups</span>
-                  </button>
-                  <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                    <ArrowDown size={15} /><span>Only Downs</span>
-                  </button>
-                </div>
-              )}
+          {/* ── Direction tabs (Rise / Fall, Higher / Lower, etc.) ── */}
+          {dirTabs && (
+            <div className="dtrader-direction-tabs">
+              <button
+                type="button"
+                className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`}
+                onClick={() => setDirection('CALL')}
+              >
+                <span>{dirTabs.call}</span>
+              </button>
+              <button
+                type="button"
+                className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`}
+                onClick={() => setDirection('PUT')}
+              >
+                <span>{dirTabs.put}</span>
+              </button>
             </div>
           )}
 
-          {/* ── Growth based ── */}
-          {tradeCategory === 'growth' && (
-            <div style={{ marginBottom: 2 }}>
-              {/* Accumulator controls */}
-              {growthType === 'accumulator' && (
-                <>
-                  <div style={{ fontSize: 11, color: '#80948e', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Growth rate</div>
-                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                    {[0.01, 0.02, 0.03, 0.04, 0.05].map(r => (
-                      <button key={r} type="button" onClick={() => setGrowthRate(r)}
-                        style={{ padding: '6px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: `1px solid ${growthRate === r ? '#22c55e' : '#1d2d29'}`, background: growthRate === r ? 'rgba(34,197,94,0.1)' : 'transparent', color: growthRate === r ? '#22c55e' : '#718580', fontWeight: 700 }}>
-                        {(r * 100).toFixed(0)}%
-                      </button>
-                    ))}
+          {/* ── 3 Parameter Cards in ONE compact row ── */}
+          <div className="dtrader-params-row" ref={paramsRowRef}>
+            {/* Card 1: Duration (or Growth Rate / Multiplier) */}
+            {tradeCategory === 'growth' && growthType === 'accumulator' ? (
+              <div
+                className={`dtrader-param-card ${activeParamPopover === 'duration' ? 'active' : ''}`}
+                onClick={() => setActiveParamPopover(activeParamPopover === 'duration' ? null : 'duration')}
+              >
+                <span className="param-card-label">Growth</span>
+                <span className="param-card-value">{(growthRate * 100).toFixed(0)}%</span>
+                {activeParamPopover === 'duration' && (
+                  <div className="param-popover popover-left" onClick={(e) => e.stopPropagation()}>
+                    <div className="popover-title">Growth Rate</div>
+                    <div className="popover-chips">
+                      {[0.01, 0.02, 0.03, 0.04, 0.05].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          className={`popover-chip ${growthRate === r ? 'active' : ''}`}
+                          onClick={() => {
+                            setGrowthRate(r);
+                            setActiveParamPopover(null);
+                          }}
+                        >
+                          {(r * 100).toFixed(0)}%
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </>
-              )}
-
-              {/* Multiplier controls */}
-              {growthType === 'multiplier' && (
-                <>
-                  <div className="dtrader-direction-tabs">
-                    <button type="button" className={`direction-tab rise ${direction === 'CALL' ? 'active' : ''}`} onClick={() => setDirection('CALL')}>
-                      <ArrowUp size={16} /><span>Up</span>
-                    </button>
-                    <button type="button" className={`direction-tab fall ${direction === 'PUT' ? 'active' : ''}`} onClick={() => setDirection('PUT')}>
-                      <ArrowDown size={16} /><span>Down</span>
-                    </button>
-                  </div>
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ fontSize: 11, color: '#80948e', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Multiplier</div>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
-                      {[10, 20, 30, 40, 50].map(m => (
-                        <button key={m} type="button" onClick={() => setMultiplier(m)}
-                          style={{ padding: '5px 10px', borderRadius: 5, fontSize: 11, cursor: 'pointer', border: `1px solid ${multiplier === m ? '#22c55e' : '#1d2d29'}`, background: multiplier === m ? 'rgba(34,197,94,0.1)' : 'transparent', color: multiplier === m ? '#22c55e' : '#718580', fontWeight: 700 }}>
+                )}
+              </div>
+            ) : tradeCategory === 'growth' && growthType === 'multiplier' ? (
+              <div
+                className={`dtrader-param-card ${activeParamPopover === 'duration' ? 'active' : ''}`}
+                onClick={() => setActiveParamPopover(activeParamPopover === 'duration' ? null : 'duration')}
+              >
+                <span className="param-card-label">Multiplier</span>
+                <span className="param-card-value">×{multiplier}</span>
+                {activeParamPopover === 'duration' && (
+                  <div className="param-popover popover-left" onClick={(e) => e.stopPropagation()}>
+                    <div className="popover-title">Multiplier</div>
+                    <div className="popover-chips">
+                      {[10, 20, 30, 40, 50].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          className={`popover-chip ${multiplier === m ? 'active' : ''}`}
+                          onClick={() => {
+                            setMultiplier(m);
+                            setActiveParamPopover(null);
+                          }}
+                        >
                           ×{m}
                         </button>
                       ))}
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 10, color: '#80948e', marginBottom: 4, fontWeight: 600 }}>Stop loss ($)</div>
-                        <input type="number" min={0} value={stopLoss} onChange={e => setStopLoss(Number(e.target.value))}
-                          style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 10, color: '#80948e', marginBottom: 4, fontWeight: 600 }}>Take profit ($)</div>
-                        <input type="number" min={0} value={takeProfit} onChange={e => setTakeProfit(Number(e.target.value))}
-                          style={{ width: '100%', boxSizing: 'border-box', padding: '7px 9px', background: '#0b1918', border: '1px solid #1d2d29', borderRadius: 6, color: '#e0f0ec', fontSize: 12, fontFamily: "'DM Mono', monospace", outline: 'none' }} />
-                      </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div
+                className={`dtrader-param-card ${activeParamPopover === 'duration' ? 'active' : ''}`}
+                onClick={() => setActiveParamPopover(activeParamPopover === 'duration' ? null : 'duration')}
+              >
+                <span className="param-card-label">Duration</span>
+                <span className="param-card-value">{durationTicks} {durationTicks === 1 ? 'tick' : 'ticks'}</span>
+                {activeParamPopover === 'duration' && (
+                  <div className="param-popover popover-left" onClick={(e) => e.stopPropagation()}>
+                    <div className="popover-title">Duration</div>
+                    <div className="popover-chips">
+                      {[1, 2, 3, 5, 10, 15].map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          className={`popover-chip ${durationTicks === t ? 'active' : ''}`}
+                          onClick={() => {
+                            setDurationTicks(t);
+                            setActiveParamPopover(null);
+                          }}
+                        >
+                          {t}t
+                        </button>
+                      ))}
+                    </div>
+                    <div className="popover-stepper">
+                      <button
+                        type="button"
+                        onClick={() => setDurationTicks((d) => Math.max(1, d - 1))}
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={durationTicks}
+                        onChange={(e) => setDurationTicks(Math.max(1, Math.min(60, Number(e.target.value))))}
+                      />
+                      <span>ticks</span>
+                      <button
+                        type="button"
+                        onClick={() => setDurationTicks((d) => Math.min(60, d + 1))}
+                      >
+                        +
+                      </button>
                     </div>
                   </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* ── Digit based ── */}
-          {tradeCategory === 'digits' && (
-            <div style={{ marginBottom: 2 }}>
-              {digitMeta.needsBarrier && (
-                <div>
-                  <div style={{ fontSize: 11, color: '#80948e', marginBottom: 5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    {digitType === 'DIGITOVER' ? 'Over digit' : digitType === 'DIGITUNDER' ? 'Under digit' : 'Digit'}
-                  </div>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {[0,1,2,3,4,5,6,7,8,9].map(d => (
-                      <button key={d} type="button" onClick={() => setDigitBarrier(d)}
-                        style={{ width: 28, height: 28, borderRadius: 5, fontSize: 12, fontWeight: 800, cursor: 'pointer', fontFamily: "'DM Mono', monospace", border: `1px solid ${digitBarrier === d ? digitMeta.color : '#1d2d29'}`, background: digitBarrier === d ? 'rgba(167,139,250,0.12)' : 'transparent', color: digitBarrier === d ? digitMeta.color : '#718580' }}>
-                        {d}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Compact params row: Duration · Stake · Allow Equals */}
-          <div className="dtrader-params-row">
-            {/* Duration — hidden for growth/accumulator */}
-            {tradeCategory !== 'growth' && (
-              <div className="dtrader-param-cell">
-                <span className="param-label">Duration</span>
-                <div className="param-value-row">
-                  <input
-                    type="number"
-                    min="1"
-                    max="60"
-                    value={durationTicks}
-                    onChange={(e) => setDurationTicks(Math.max(1, Number(e.target.value)))}
-                    className="param-input"
-                  />
-                  <span className="param-unit">t</span>
-                </div>
+                )}
               </div>
             )}
 
-            {/* Stake */}
-            <div className="dtrader-param-cell">
-              <span className="param-label">Stake</span>
-              <div className="param-value-row">
-                <span className="param-currency">$</span>
-                <input
-                  type="number"
-                  min="0.35"
-                  step="1"
-                  value={stake}
-                  onChange={(e) => setStake(Math.max(0.35, Number(e.target.value)))}
-                  className="param-input"
-                />
-              </div>
+            {/* Card 2: Stake (always present) */}
+            <div
+              className={`dtrader-param-card ${activeParamPopover === 'stake' ? 'active' : ''}`}
+              onClick={() => setActiveParamPopover(activeParamPopover === 'stake' ? null : 'stake')}
+            >
+              <span className="param-card-label">Stake</span>
+              <span className="param-card-value">${stake}</span>
+              {activeParamPopover === 'stake' && (
+                <div className="param-popover popover-center" onClick={(e) => e.stopPropagation()}>
+                  <div className="popover-title">Stake</div>
+                  <div className="popover-chips">
+                    {[1, 2, 5, 10, 25, 50].map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`popover-chip ${stake === s ? 'active' : ''}`}
+                        onClick={() => {
+                          setStake(s);
+                          setActiveParamPopover(null);
+                        }}
+                      >
+                        ${s}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="popover-stepper">
+                    <button
+                      type="button"
+                      onClick={() => setStake((s) => Math.max(0.35, Number((s - 1).toFixed(2))))}
+                    >
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      min="0.35"
+                      step="1"
+                      value={stake}
+                      onChange={(e) => setStake(Math.max(0.35, Number(e.target.value)))}
+                    />
+                    <span>USD</span>
+                    <button
+                      type="button"
+                      onClick={() => setStake((s) => Number((s + 1).toFixed(2)))}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Allow Equals — directional only */}
-            {tradeCategory === 'directional' && (
-              <div className="dtrader-param-cell">
-                <span className="param-label">Allow =</span>
-                <label className="dtrader-switch" style={{ marginTop: 4 }}>
-                  <input
-                    type="checkbox"
-                    checked={allowEquals}
-                    onChange={(e) => setAllowEquals(e.target.checked)}
-                  />
-                  <span className="slider" />
-                </label>
+            {/* Card 3: Allow equals / Barrier / Digit / TP-SL */}
+            {tradeCategory === 'directional' && directionalType === 'rise_fall' ? (
+              <div
+                className={`dtrader-param-card ${allowEquals ? 'enabled' : ''}`}
+                onClick={() => setAllowEquals((v) => !v)}
+                title="Toggle Allow Equals"
+              >
+                <span className="param-card-label">Allow equals</span>
+                <span className="param-card-value">{allowEquals ? 'Yes' : '-'}</span>
+              </div>
+            ) : tradeCategory === 'directional' && (directionalType === 'higher_lower' || directionalType === 'touch_no_touch') ? (
+              <div
+                className={`dtrader-param-card ${activeParamPopover === 'barrier' ? 'active' : ''}`}
+                onClick={() => setActiveParamPopover(activeParamPopover === 'barrier' ? null : 'barrier')}
+              >
+                <span className="param-card-label">Barrier</span>
+                <span className="param-card-value">{barrier}</span>
+                {activeParamPopover === 'barrier' && (
+                  <div className="param-popover popover-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="popover-title">Barrier Offset/Price</div>
+                    <input
+                      type="text"
+                      value={barrier}
+                      onChange={(e) => setBarrier(e.target.value)}
+                      className="popover-input"
+                      placeholder="e.g. 1234.56"
+                    />
+                  </div>
+                )}
+              </div>
+            ) : tradeCategory === 'digits' && digitMeta.needsBarrier ? (
+              <div
+                className={`dtrader-param-card ${activeParamPopover === 'barrier' ? 'active' : ''}`}
+                onClick={() => setActiveParamPopover(activeParamPopover === 'barrier' ? null : 'barrier')}
+              >
+                <span className="param-card-label">
+                  {digitType === 'DIGITOVER' ? 'Over' : digitType === 'DIGITUNDER' ? 'Under' : 'Digit'}
+                </span>
+                <span className="param-card-value">{digitBarrier}</span>
+                {activeParamPopover === 'barrier' && (
+                  <div className="param-popover popover-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="popover-title">Select Digit</div>
+                    <div className="popover-chips digit-chips">
+                      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          className={`popover-chip ${digitBarrier === d ? 'active' : ''}`}
+                          onClick={() => {
+                            setDigitBarrier(d);
+                            setActiveParamPopover(null);
+                          }}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : tradeCategory === 'growth' && growthType === 'multiplier' ? (
+              <div
+                className={`dtrader-param-card ${activeParamPopover === 'barrier' ? 'active' : ''}`}
+                onClick={() => setActiveParamPopover(activeParamPopover === 'barrier' ? null : 'barrier')}
+              >
+                <span className="param-card-label">TP / SL</span>
+                <span className="param-card-value">${takeProfit} / ${stopLoss}</span>
+                {activeParamPopover === 'barrier' && (
+                  <div className="param-popover popover-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="popover-title">Take Profit & Stop Loss</div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: '#8fa6a0', marginBottom: 2 }}>TP ($)</div>
+                        <input
+                          type="number"
+                          min="0"
+                          value={takeProfit}
+                          onChange={(e) => setTakeProfit(Number(e.target.value))}
+                          className="popover-input"
+                        />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: '#8fa6a0', marginBottom: 2 }}>SL ($)</div>
+                        <input
+                          type="number"
+                          min="0"
+                          value={stopLoss}
+                          onChange={(e) => setStopLoss(Number(e.target.value))}
+                          className="popover-input"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="dtrader-param-card">
+                <span className="param-card-label">Payout</span>
+                <span className="param-card-value">${potentialPayout.toFixed(2)}</span>
               </div>
             )}
           </div>
@@ -1464,51 +1592,22 @@ export function ManualTrader({
               </span>
             ) : !derivConnected ? (
               <strong className="buy-headline">Connect Deriv to trade</strong>
+            ) : activeContract?.status === 'running' ? (
+              <>
+                <strong className="buy-headline">Running contract ({activeContract.currentTickCount}/{activeContract.totalTicks}t)</strong>
+                <span className="buy-payout">Potential payout ${potentialPayout.toFixed(2)}</span>
+              </>
             ) : (
               <>
-                <strong className="buy-headline">Buy {tradeLabel}</strong>
+                <strong className="buy-headline">Buy</strong>
                 <span className="buy-payout">
-                  {tradeCategory === 'growth' ? `Growth ${(growthRate * 100).toFixed(0)}% / tick` : `Payout \$${potentialPayout.toFixed(2)}`}
+                  {tradeCategory === 'growth'
+                    ? `Growth ${(growthRate * 100).toFixed(0)}% / tick`
+                    : `Payout \$${potentialPayout.toFixed(2)}`}
                 </span>
               </>
             )}
           </button>
-
-          {/* Active Contract Status Card */}
-          {activeContract && (
-            <div className={`contract-status-card ${activeContract.status}`}>
-              <div className="contract-status-header">
-                <span>
-                  {activeContract.status === 'running'
-                    ? 'Contract in Progress'
-                    : activeContract.status === 'won'
-                    ? '🎉 Contract Won!'
-                    : '📉 Contract Lost'}
-                </span>
-                <b>
-                  {activeContract.currentTickCount}/{activeContract.totalTicks} ticks
-                </b>
-              </div>
-              <div className="contract-status-body">
-                <div>
-                  <small>Entry Quote</small>
-                  <strong>{activeContract.entryQuote.toFixed(2)}</strong>
-                </div>
-                <div>
-                  <small>Current</small>
-                  <strong>{currentTick?.quote.toFixed(2) ?? '—'}</strong>
-                </div>
-                <div>
-                  <small>Payout</small>
-                  <strong className={activeContract.status === 'won' ? 'positive' : ''}>
-                    ${activeContract.payout.toFixed(2)}
-                  </strong>
-                </div>
-              </div>
-            </div>
-          )}
-
-
         </div>
       </div>
 
