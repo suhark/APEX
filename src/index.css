@@ -280,6 +280,9 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .bulk-summary span {
@@ -329,28 +332,64 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 
 @media (max-width: 767px) {
   .bulk-instruments-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
   .bulk-summary {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 8px;
+    padding: 8px;
   }
 
   .bulk-summary div {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 0;
-    border-bottom: 1px solid #1a302b;
+    padding: 10px 12px;
+    border: 1px solid #1e4037;
+    border-radius: 6px;
+    background: #0b1715;
   }
 
   .bulk-summary div:last-child {
-    border-bottom: none;
+    grid-column: 1 / -1;
+  }
+
+  .bulk-controls {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .bulk-controls label:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .guard-note {
+    font-size: 10px;
+    padding: 8px 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .bulk-instruments-grid {
+    grid-template-columns: 1fr;
   }
 
   .bulk-controls {
     grid-template-columns: 1fr;
+  }
+
+  .bulk-controls label:last-child {
+    grid-column: auto;
+  }
+
+  .bulk-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .bulk-summary div:last-child {
+    grid-column: auto;
   }
 }
 .panel { min-width: 0; padding: 20px; border: 1px solid #192c28; border-radius: 12px; background: #0e1918; box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
