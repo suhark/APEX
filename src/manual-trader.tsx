@@ -2144,7 +2144,7 @@ export function ManualTrader({
                 <X size={18} />
               </button>
             </div>
-            <div className="modal-body type-picker-body">
+            <div className="type-picker-body">
               {/* Category: Digits */}
               <div className="type-group-section">
                 <div className="type-group-header">
