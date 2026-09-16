@@ -6,12 +6,224 @@ type BulkTrade = { instrument: string; direction: string; stake: number; duratio
 type Props = { runTrade: (details: { instrument: string; direction: string; stake: number; source: string; batchId?: string; duration?: number }) => Promise<void>; trades: BulkTrade[] };
 
 export function BulkTrader({ runTrade, trades }: Props) {
-  const [ledgerPage, setLedgerPage] = useState(1); const [ledgerOpen, setLedgerOpen] = useState(false); const ledgerPageSize = 8;
-    const [selected, setSelected] = useState(instruments.slice(0, 3)); const [direction, setDirection] = useState<'CALL' | 'PUT'>('CALL'); const [stake, setStake] = useState(5); const [duration, setDuration] = useState(5); const [running, setRunning] = useState(false); const [submitted, setSubmitted] = useState(0); const [batchId, setBatchId] = useState<string | null>(null); const [expanded, setExpanded] = useState(true);
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  const ledgerPageSize = 8;
+
+  const [selected, setSelected] = useState(instruments.slice(0, 3));
+  const [direction, setDirection] = useState<'CALL' | 'PUT'>('CALL');
+  const [stake, setStake] = useState(5);
+  const [duration, setDuration] = useState(5);
+  const [running, setRunning] = useState(false);
+  const [submitted, setSubmitted] = useState(0);
+  const [batchId, setBatchId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(true);
+
   const bulkTrades = useMemo(() => trades.filter((trade) => trade.instrument && (trade as BulkTrade & { source?: string }).source === 'bulk'), [trades]);
-  const won = bulkTrades.filter((trade) => trade.result === 'won').length; const lost = bulkTrades.filter((trade) => trade.result === 'lost').length; const pnl = bulkTrades.reduce((sum, trade) => sum + Number(trade.profit || 0), 0); const ledgerPages = Math.max(1, Math.ceil(bulkTrades.length / ledgerPageSize)); const visibleLedger = bulkTrades.slice((ledgerPage - 1) * ledgerPageSize, ledgerPage * ledgerPageSize);
-  const execute = async () => { if (!selected.length || stake <= 0) return; const id = `BULK-${Date.now().toString(36).toUpperCase()}`; setBatchId(id); setLedgerOpen(true); setRunning(true); setSubmitted(0); for (const instrument of selected) { await runTrade({ instrument, direction, stake, duration, source: 'bulk', batchId: id }); setSubmitted((value) => value + 1); } setRunning(false); };
-  return <><PageHeader eyebrow="Multi-market execution" title="Bulk trader" description="Submit one configured contract across multiple markets and monitor the complete batch ledger." action={<div className="bulk-header-actions"><button className="secondary bulk-ledger-desktop-trigger" onClick={() => setLedgerOpen((value) => !value)}><CheckCircle2 size={15} /> Ledger · {won}W / {lost}L</button><button className="primary" disabled={running || !selected.length} onClick={() => void execute()}>{running ? <><RefreshCw className="spin" size={16} /> {submitted}/{selected.length}</> : <><Play size={16} /> Submit batch</>}</button></div>} /><div className="bulk-grid"><section className="panel"><div className="panel-title"><div><span className="eyebrow">Market selection</span><h2>Choose instruments</h2></div><button className="text-button" onClick={() => setSelected(selected.length === instruments.length ? [] : instruments)}>{selected.length === instruments.length ? 'Clear all' : 'Select all'}</button></div>{instruments.map((instrument) => <button className={selected.includes(instrument) ? 'instrument selected' : 'instrument'} key={instrument} onClick={() => setSelected((items) => items.includes(instrument) ? items.filter((item) => item !== instrument) : [...items, instrument])}><div><span className="check-box">{selected.includes(instrument) && <Check size={13} />}</span><b>{instrument}</b></div></button>)}</section><section className="panel"><span className="eyebrow">Batch configuration</span><h2>Same contract on every market</h2><div className="bulk-controls"><label>Direction<select value={direction} onChange={(event) => setDirection(event.target.value as 'CALL' | 'PUT')}><option value="CALL">CALL / Rise</option><option value="PUT">PUT / Fall</option></select></label><label>Stake<input type="number" min="0.35" step=".01" value={stake} onChange={(event) => setStake(Number(event.target.value))} /></label><label>Duration<input type="number" min="1" value={duration} onChange={(event) => setDuration(Number(event.target.value))} /></label></div><div className="bulk-summary"><div><span>Selected</span><strong>{selected.length}</strong></div><div><span>Total stake</span><strong>{money(selected.length * stake)}</strong></div><div><span>Direction</span><strong>{direction}</strong></div></div><div className="guard-note"><ShieldCheck size={16} /> Existing Deriv and risk controls apply to each contract.</div></section>{!ledgerOpen && <button type="button" aria-label="Open batch ledger" className="bulk-ledger-handle bulk-mobile-handle" onClick={() => setLedgerOpen(true)}><span className="bulk-chevron" aria-hidden="true"><ChevronUp size={17} strokeWidth={2.5} /></span><span className="bulk-handle-copy"><b>{batchId ?? 'Batch activity'}</b><small>{won} won · {lost} lost · {money(pnl)}</small></span><ChevronDown className="bulk-handle-open-icon" size={16} aria-hidden="true" /></button>}<section className={`panel bulk-ledger-panel ${ledgerOpen ? 'ledger-open' : 'ledger-collapsed'}`}>{ledgerOpen && <><button type="button" aria-label="Collapse batch ledger" className="bulk-ledger-close" onClick={() => setLedgerOpen(false)}><ChevronDown size={15} /> Close ledger</button><div className="panel-title"><div><span className="eyebrow">Batch ledger</span><h2>{batchId ?? 'No batch submitted'}</h2></div><CheckCircle2 size={20} /></div><div className="bulk-run-stats"><div><span>Bulk trades</span><strong>{bulkTrades.length}</strong></div><div><span>Won</span><strong className="positive">{won}</strong></div><div><span>Lost</span><strong className="negative">{lost}</strong></div><div><span>Net P/L</span><strong className={pnl >= 0 ? 'positive' : 'negative'}>{money(pnl)}</strong></div></div>{batchId && <div className="bulk-progress"><span style={{ width: `${selected.length ? submitted / selected.length * 100 : 0}%` }} /></div>}<div className="bulk-ledger-list">{bulkTrades.length ? visibleLedger.map((trade, index) => <div className="bulk-ledger-row" key={`${trade.instrument}-${trade.created_at}-${index}`}><span>{trade.instrument}</span><b>{trade.direction}</b><span className={trade.result === 'won' ? 'bulk-result-won' : trade.result === 'lost' ? 'bulk-result-lost' : 'bulk-result-pending'}>{trade.result}</span><strong className={trade.profit >= 0 ? 'positive' : 'negative'}>{money(trade.profit)}</strong></div>) : <p className="muted">Submit a batch to see each contract and its settled result here.</p>}</div>{bulkTrades.length > ledgerPageSize && <div className="bulk-pagination"><button className="secondary" disabled={ledgerPage === 1} onClick={() => setLedgerPage((page) => page - 1)}>Previous</button><span>Page {ledgerPage} of {ledgerPages}</span><button className="secondary" disabled={ledgerPage === ledgerPages} onClick={() => setLedgerPage((page) => page + 1)}>Next</button></div>}</>}</section></div></>;
+  const won = bulkTrades.filter((trade) => trade.result === 'won').length;
+  const lost = bulkTrades.filter((trade) => trade.result === 'lost').length;
+  const pnl = bulkTrades.reduce((sum, trade) => sum + Number(trade.profit || 0), 0);
+  const ledgerPages = Math.max(1, Math.ceil(bulkTrades.length / ledgerPageSize));
+  const visibleLedger = bulkTrades.slice((ledgerPage - 1) * ledgerPageSize, ledgerPage * ledgerPageSize);
+
+  const execute = async () => {
+    if (!selected.length || stake <= 0) return;
+    const id = `BULK-${Date.now().toString(36).toUpperCase()}`;
+    setBatchId(id);
+    setLedgerOpen(true);
+    setRunning(true);
+    setSubmitted(0);
+    for (const instrument of selected) {
+      await runTrade({ instrument, direction, stake, duration, source: 'bulk', batchId: id });
+      setSubmitted((value) => value + 1);
+    }
+    setRunning(false);
+  };
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Multi-market execution"
+        title="Bulk trader"
+        description="Submit one configured contract across multiple markets and monitor the complete batch ledger."
+        action={
+          <div className="bulk-header-actions">
+            <button className="secondary bulk-ledger-desktop-trigger" onClick={() => setLedgerOpen((value) => !value)}>
+              <CheckCircle2 size={15} /> Ledger · {won}W / {lost}L
+            </button>
+            <button className="primary" disabled={running || !selected.length} onClick={() => void execute()}>
+              {running ? <><RefreshCw className="spin" size={16} /> {submitted}/{selected.length}</> : <><Play size={16} /> Submit batch</>}
+            </button>
+          </div>
+        }
+      />
+
+      <div className="bulk-grid">
+        {/* Configuration Section - Primary controls */}
+        <section className="panel bulk-config-section">
+          <div className="panel-title">
+            <div>
+              <span className="eyebrow">Batch configuration</span>
+              <h2>Same contract on every market</h2>
+            </div>
+          </div>
+
+          <div className="bulk-controls">
+            <label>Direction
+              <select value={direction} onChange={(event) => setDirection(event.target.value as 'CALL' | 'PUT')}>
+                <option value="CALL">CALL / Rise</option>
+                <option value="PUT">PUT / Fall</option>
+              </select>
+            </label>
+            <label>Stake
+              <input type="number" min="0.35" step=".01" value={stake} onChange={(event) => setStake(Number(event.target.value))} />
+            </label>
+            <label>Duration
+              <input type="number" min="1" value={duration} onChange={(event) => setDuration(Number(event.target.value))} />
+            </label>
+          </div>
+
+          <div className="bulk-summary">
+            <div><span>Selected</span><strong>{selected.length}</strong></div>
+            <div><span>Total stake</span><strong>{money(selected.length * stake)}</strong></div>
+            <div><span>Direction</span><strong>{direction}</strong></div>
+          </div>
+
+          <div className="guard-note">
+            <ShieldCheck size={16} /> Existing Deriv and risk controls apply to each contract.
+          </div>
+        </section>
+
+        {/* Market Selection Section */}
+        <section className="panel bulk-market-section">
+          <div className="panel-title">
+            <div>
+              <span className="eyebrow">Market selection</span>
+              <h2>Choose instruments</h2>
+            </div>
+            <button className="text-button" onClick={() => setSelected(selected.length === instruments.length ? [] : instruments)}>
+              {selected.length === instruments.length ? 'Clear all' : 'Select all'}
+            </button>
+          </div>
+
+          <div className="bulk-instruments-grid">
+            {instruments.map((instrument) => (
+              <button
+                className={selected.includes(instrument) ? 'instrument selected' : 'instrument'}
+                key={instrument}
+                onClick={() => setSelected((items) => items.includes(instrument) ? items.filter((item) => item !== instrument) : [...items, instrument])}
+              >
+                <div>
+                  <span className="check-box">{selected.includes(instrument) && <Check size={13} />}</span>
+                  <b>{instrument}</b>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Mobile Ledger Handle */}
+        {!ledgerOpen && (
+          <button
+            type="button"
+            aria-label="Open batch ledger"
+            className="bulk-ledger-handle bulk-mobile-handle"
+            onClick={() => setLedgerOpen(true)}
+          >
+            <span className="bulk-chevron" aria-hidden="true">
+              <ChevronUp size={17} strokeWidth={2.5} />
+            </span>
+            <span className="bulk-handle-copy">
+              <b>{batchId ?? 'Batch activity'}</b>
+              <small>{won} won · {lost} lost · {money(pnl)}</small>
+            </span>
+            <ChevronDown className="bulk-handle-open-icon" size={16} aria-hidden="true" />
+          </button>
+        )}
+
+        {/* Ledger Section */}
+        <section className={`panel bulk-ledger-panel ${ledgerOpen ? 'ledger-open' : 'ledger-collapsed'}`}>
+          {ledgerOpen && (
+            <>
+              <button
+                type="button"
+                aria-label="Collapse batch ledger"
+                className="bulk-ledger-close"
+                onClick={() => setLedgerOpen(false)}
+              >
+                <ChevronDown size={15} /> Close ledger
+              </button>
+
+              <div className="panel-title">
+                <div>
+                  <span className="eyebrow">Batch ledger</span>
+                  <h2>{batchId ?? 'No batch submitted'}</h2>
+                </div>
+                <CheckCircle2 size={20} />
+              </div>
+
+              <div className="bulk-run-stats">
+                <div><span>Bulk trades</span><strong>{bulkTrades.length}</strong></div>
+                <div><span>Won</span><strong className="positive">{won}</strong></div>
+                <div><span>Lost</span><strong className="negative">{lost}</strong></div>
+                <div><span>Net P/L</span><strong className={pnl >= 0 ? 'positive' : 'negative'}>{money(pnl)}</strong></div>
+              </div>
+
+              {batchId && (
+                <div className="bulk-progress">
+                  <span style={{ width: `${selected.length ? submitted / selected.length * 100 : 0}%` }} />
+                </div>
+              )}
+
+              <div className="bulk-ledger-list">
+                {bulkTrades.length ? (
+                  visibleLedger.map((trade, index) => (
+                    <div className="bulk-ledger-row" key={`${trade.instrument}-${trade.created_at}-${index}`}>
+                      <span>{trade.instrument}</span>
+                      <b>{trade.direction}</b>
+                      <span className={trade.result === 'won' ? 'bulk-result-won' : trade.result === 'lost' ? 'bulk-result-lost' : 'bulk-result-pending'}>
+                        {trade.result}
+                      </span>
+                      <strong className={trade.profit >= 0 ? 'positive' : 'negative'}>{money(trade.profit)}</strong>
+                    </div>
+                  ))
+                ) : (
+                  <p className="muted">Submit a batch to see each contract and its settled result here.</p>
+                )}
+              </div>
+
+              {bulkTrades.length > ledgerPageSize && (
+                <div className="bulk-pagination">
+                  <button className="secondary" disabled={ledgerPage === 1} onClick={() => setLedgerPage((page) => page - 1)}>
+                    Previous
+                  </button>
+                  <span>Page {ledgerPage} of {ledgerPages}</span>
+                  <button className="secondary" disabled={ledgerPage === ledgerPages} onClick={() => setLedgerPage((page) => page + 1)}>
+                    Next
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </div>
+    </>
+  );
 }
-function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) { return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>; }
-function money(value: number) { return `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`; }
+
+function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
+  return (
+    <div className="page-header">
+      <div>
+        <span className="eyebrow">{eyebrow}</span>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function money(value: number) {
+  return `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`;
+}
