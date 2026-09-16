@@ -357,6 +357,8 @@ export function ManualTrader({
 
   // Active in-chart contract visualization
   const [activeContract, setActiveContract] = useState<ActiveContract | null>(null);
+  const [positionHistory, setPositionHistory] = useState<ActiveContract[]>([]);
+  const [positionsTab, setPositionsTab] = useState<'open' | 'closed'>('open');
 
   // Tick series generation
   const [tickHistory, setTickHistory] = useState<TickPoint[]>([]);
@@ -453,7 +455,10 @@ export function ManualTrader({
           const nextTicks = [...prevAc.ticks, { quote: t.quote, tickIndex: nextTick.index }];
           if (nextTicks.length >= prevAc.totalTicks) {
             const won = evaluateContractResult(prevAc, t.quote, allowEquals);
-            return { ...prevAc, currentTickCount: prevAc.totalTicks, ticks: nextTicks, status: won ? 'won' : 'lost' };
+            const updatedContract = { ...prevAc, currentTickCount: prevAc.totalTicks, ticks: nextTicks, status: won ? 'won' : 'lost' };
+            // Update position history when contract completes
+            setPositionHistory(prev => prev.map(c => c.id === prevAc.id ? updatedContract : c));
+            return updatedContract;
           }
           return { ...prevAc, currentTickCount: nextTicks.length, ticks: nextTicks };
         });
@@ -510,13 +515,15 @@ export function ManualTrader({
         if (count >= activeContract.totalTicks) {
           // Settle contract
           const won = evaluateContractResult(activeContract, nextQuote, allowEquals);
-
-          setActiveContract({
+          const updatedContract = {
             ...activeContract,
             currentTickCount: activeContract.totalTicks,
             ticks: nextContractTicks,
             status: won ? 'won' : 'lost',
-          });
+          };
+          setActiveContract(updatedContract);
+          // Update position history when contract completes
+          setPositionHistory(prev => prev.map(c => c.id === activeContract.id ? updatedContract : c));
         } else {
           setActiveContract({
             ...activeContract,
@@ -780,7 +787,7 @@ export function ManualTrader({
         calcPayout = Number((stake * multiplier).toFixed(2));
       }
 
-      setActiveContract({
+      const newContract: ActiveContract = {
         id: String(Date.now()),
         direction: (action === 'CALL' || action === 'PUT') ? action : (action === 'DIGITOVER' || action === 'DIGITMATCH' || action === 'DIGITEVEN' || action === 'MULTUP' || action === 'ACCU') ? 'CALL' : 'PUT',
         contractType: action,
@@ -793,7 +800,10 @@ export function ManualTrader({
         payout: calcPayout,
         ticks: [{ quote: currentTick?.quote ?? 0, tickIndex: currentTick?.index ?? 0 }],
         status: 'running',
-      });
+      };
+
+      setActiveContract(newContract);
+      setPositionHistory(prev => [newContract, ...prev]);
 
       if (derivConnected) {
         try {
@@ -986,12 +996,12 @@ export function ManualTrader({
             {/* Positions Button in Topbar */}
             <button
               type="button"
-              className={`dtrader-topbar-pos-btn ${showPositionsPanel ? 'active' : ''} ${activeContract ? 'has-active' : ''}`}
+              className={`dtrader-topbar-pos-btn ${showPositionsPanel ? 'active' : ''} ${positionHistory.length > 0 ? 'has-active' : ''}`}
               onClick={() => setShowPositionsPanel((v) => !v)}
               title="Toggle Positions"
             >
               <Layers size={13} />
-              <span>Positions{activeContract ? ' (1)' : ''}</span>
+              <span>Positions{positionHistory.length > 0 ? ` (${positionHistory.length})` : ''}</span>
             </button>
 
             {derivConnected && derivAccount ? (
@@ -1037,8 +1047,18 @@ export function ManualTrader({
               <div className="positions-panel-header">
                 <span className="positions-panel-title">Positions</span>
                 <div className="positions-panel-tabs">
-                  <span className="pos-tab active">Open</span>
-                  <span className="pos-tab">Closed</span>
+                  <span
+                    className={`pos-tab ${positionsTab === 'open' ? 'active' : ''}`}
+                    onClick={() => setPositionsTab('open')}
+                  >
+                    Open
+                  </span>
+                  <span
+                    className={`pos-tab ${positionsTab === 'closed' ? 'active' : ''}`}
+                    onClick={() => setPositionsTab('closed')}
+                  >
+                    Closed
+                  </span>
                 </div>
                 <button
                   type="button"
@@ -1049,30 +1069,64 @@ export function ManualTrader({
                 </button>
               </div>
               <div className="positions-panel-body">
-                {activeContract ? (
-                  <div className={`position-row ${activeContract.status}`}>
-                    <div className="position-row-icon">
-                      <span>{selectedInstrument.replace('Volatility ', 'V').replace(' Index', '')}</span>
-                    </div>
-                    <div className="position-row-info">
-                      <strong>{selectedInstrument}</strong>
-                      <span>{activeContract.direction === 'CALL' ? 'Rise' : 'Fall'} · ${activeContract.stake.toFixed(2)}</span>
-                    </div>
-                    <div className="position-row-status">
-                      <span className={`pos-status-badge ${activeContract.status}`}>
-                        {activeContract.status === 'running' ? `${activeContract.currentTickCount}/${activeContract.totalTicks}t` : activeContract.status}
-                      </span>
-                      <strong className={activeContract.status === 'won' ? 'positive' : activeContract.status === 'lost' ? 'negative' : ''}>
-                        {activeContract.status === 'won' ? `+$${activeContract.payout.toFixed(2)}` :
-                         activeContract.status === 'lost' ? `-$${activeContract.stake.toFixed(2)}` :
-                         `$${activeContract.payout.toFixed(2)}`}
-                      </strong>
-                    </div>
-                  </div>
+                {positionsTab === 'open' ? (
+                  <>
+                    {activeContract && activeContract.status === 'running' ? (
+                      <div className={`position-row ${activeContract.status}`}>
+                        <div className="position-row-icon">
+                          <span>{selectedInstrument.replace('Volatility ', 'V').replace(' Index', '')}</span>
+                        </div>
+                        <div className="position-row-info">
+                          <strong>{selectedInstrument}</strong>
+                          <span>{activeContract.direction === 'CALL' ? 'Rise' : 'Fall'} · ${activeContract.stake.toFixed(2)}</span>
+                        </div>
+                        <div className="position-row-status">
+                          <span className={`pos-status-badge ${activeContract.status}`}>
+                            {activeContract.status === 'running' ? `${activeContract.currentTickCount}/${activeContract.totalTicks}t` : activeContract.status}
+                          </span>
+                          <strong className={activeContract.status === 'won' ? 'positive' : activeContract.status === 'lost' ? 'negative' : ''}>
+                            {activeContract.status === 'won' ? `+$${activeContract.payout.toFixed(2)}` :
+                             activeContract.status === 'lost' ? `-$${activeContract.stake.toFixed(2)}` :
+                             `$${activeContract.payout.toFixed(2)}`}
+                          </strong>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="positions-empty">
+                        <span>No open positions</span>
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <div className="positions-empty">
-                    <span>No open positions</span>
-                  </div>
+                  <>
+                    {positionHistory.filter(p => p.status !== 'running').length > 0 ? (
+                      positionHistory.filter(p => p.status !== 'running').map((position) => (
+                        <div key={position.id} className={`position-row ${position.status}`}>
+                          <div className="position-row-icon">
+                            <span>{selectedInstrument.replace('Volatility ', 'V').replace(' Index', '')}</span>
+                          </div>
+                          <div className="position-row-info">
+                            <strong>{selectedInstrument}</strong>
+                            <span>{position.direction === 'CALL' ? 'Rise' : 'Fall'} · ${position.stake.toFixed(2)}</span>
+                          </div>
+                          <div className="position-row-status">
+                            <span className={`pos-status-badge ${position.status}`}>
+                              {position.status}
+                            </span>
+                            <strong className={position.status === 'won' ? 'positive' : position.status === 'lost' ? 'negative' : ''}>
+                              {position.status === 'won' ? `+$${position.payout.toFixed(2)}` :
+                               position.status === 'lost' ? `-$${position.stake.toFixed(2)}` :
+                               `$${position.payout.toFixed(2)}`}
+                            </strong>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="positions-empty">
+                        <span>No closed positions</span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>

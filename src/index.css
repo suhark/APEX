@@ -3161,15 +3161,15 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 /* ── Trade Type Modal Sheet ───────────────────────────────── */
 .dtrader-type-modal-sheet {
   background: #0d1f1d;
-  border: 1px solid #1e4a40;
-  border-radius: 20px;
+  border: none;
+  border-radius: 0;
   width: 100%;
-  max-width: 520px;
-  max-height: 85vh;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
   animation: modalSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -3559,6 +3559,10 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   user-select: none;
 }
 
+.pos-tab:hover {
+  color: #8aa39a;
+}
+
 .pos-tab.active {
   background: #14332e;
   color: #2dd4bf;
@@ -3791,7 +3795,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  padding: 20px;
+  padding: 0;
   animation: fadeIn 0.2s ease;
 }
 
