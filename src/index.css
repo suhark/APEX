@@ -339,7 +339,9 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   .bulk-summary {
     grid-template-columns: 1fr 1fr !important;
     gap: 8px;
-    padding: 8px;
+    padding: 0;
+    border: none;
+    background: transparent;
   }
 
   .bulk-summary div {
