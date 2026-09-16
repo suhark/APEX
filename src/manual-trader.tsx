@@ -19,6 +19,18 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  Zap,
+  Target,
+  ArrowUpRight,
+  ArrowDownRight,
+  TrendingUp,
+  TrendingDown,
+  Minus as MinusIcon,
+  Plus as PlusIcon,
+  X as XIcon,
+  Check,
+  Grid3x3,
+  Infinity,
 } from 'lucide-react';
 
 export interface ManualTraderProps {
@@ -693,6 +705,69 @@ export function ManualTrader({
     if (directionalType === 'higher_lower') return '↑ ↓';
     if (directionalType === 'touch_no_touch') return '⊙';
     return '↗ ↘';
+  };
+
+  const getTradeTypeIconComponent = (type: string) => {
+    switch (type) {
+      case 'over_under':
+        return (
+          <div className="trade-type-icon-pair">
+            <ArrowUp size={16} className="icon-up" />
+            <ArrowDown size={16} className="icon-down" />
+          </div>
+        );
+      case 'match_diff':
+        return (
+          <div className="trade-type-icon-pair">
+            <Zap size={16} className="icon-match" />
+            <XIcon size={16} className="icon-diff" />
+          </div>
+        );
+      case 'even_odd':
+        return (
+          <div className="trade-type-icon-pair">
+            <Grid3x3 size={16} className="icon-even" />
+            <MinusIcon size={16} className="icon-odd" />
+          </div>
+        );
+      case 'rise_fall':
+        return (
+          <div className="trade-type-icon-pair">
+            <TrendingUp size={16} className="icon-rise" />
+            <TrendingDown size={16} className="icon-fall" />
+          </div>
+        );
+      case 'higher_lower':
+        return (
+          <div className="trade-type-icon-pair separated">
+            <ArrowUpRight size={16} className="icon-higher" />
+            <ArrowDownRight size={16} className="icon-lower" />
+          </div>
+        );
+      case 'touch_no_touch':
+        return (
+          <div className="trade-type-icon-pair">
+            <Target size={16} className="icon-touch" />
+            <XIcon size={16} className="icon-no-touch" />
+          </div>
+        );
+      case 'accumulator':
+        return (
+          <div className="trade-type-icon-pair">
+            <PlusIcon size={16} className="icon-accu" />
+            <Zap size={16} className="icon-accu" />
+          </div>
+        );
+      case 'multiplier':
+        return (
+          <div className="trade-type-icon-pair">
+            <Infinity size={16} className="icon-mult" />
+            <Zap size={16} className="icon-mult" />
+          </div>
+        );
+      default:
+        return <Hash size={16} />;
+    }
   };
 
   const activeChartView = useMemo(() => {
@@ -2216,7 +2291,7 @@ export function ManualTrader({
                       setShowTradeTypeDropdown(false);
                     }}
                   >
-                    <div className="type-option-icon">↗ ↘</div>
+                    <div className="type-option-icon">{getTradeTypeIconComponent('over_under')}</div>
                     <div className="type-option-info">
                       <strong>Over/Under</strong>
                       <span>Predict if last digit is greater or less than target</span>
@@ -2232,7 +2307,7 @@ export function ManualTrader({
                       setShowTradeTypeDropdown(false);
                     }}
                   >
-                    <div className="type-option-icon">≑ ≠</div>
+                    <div className="type-option-icon">{getTradeTypeIconComponent('match_diff')}</div>
                     <div className="type-option-info">
                       <strong>Matches/Differs</strong>
                       <span>Predict if last digit matches or differs from target</span>
@@ -2248,7 +2323,7 @@ export function ManualTrader({
                       setShowTradeTypeDropdown(false);
                     }}
                   >
-                    <div className="type-option-icon">2 | 3</div>
+                    <div className="type-option-icon">{getTradeTypeIconComponent('even_odd')}</div>
                     <div className="type-option-info">
                       <strong>Even/Odd</strong>
                       <span>Predict if exit tick digit is even or odd</span>
@@ -2273,7 +2348,7 @@ export function ManualTrader({
                       setShowTradeTypeDropdown(false);
                     }}
                   >
-                    <div className="type-option-icon">↗ ↘</div>
+                    <div className="type-option-icon">{getTradeTypeIconComponent('rise_fall')}</div>
                     <div className="type-option-info">
                       <strong>Rise/Fall</strong>
                       <span>Predict if exit price is higher or lower than entry</span>
@@ -2288,7 +2363,7 @@ export function ManualTrader({
                       setShowTradeTypeDropdown(false);
                     }}
                   >
-                    <div className="type-option-icon">↑ ↓</div>
+                    <div className="type-option-icon">{getTradeTypeIconComponent('higher_lower')}</div>
                     <div className="type-option-info">
                       <strong>Higher/Lower</strong>
                       <span>Predict price above or below a barrier price</span>
@@ -2303,7 +2378,7 @@ export function ManualTrader({
                       setShowTradeTypeDropdown(false);
                     }}
                   >
-                    <div className="type-option-icon">⊙</div>
+                    <div className="type-option-icon">{getTradeTypeIconComponent('touch_no_touch')}</div>
                     <div className="type-option-info">
                       <strong>Touch/No Touch</strong>
                       <span>Win if price touches or avoids a barrier</span>
@@ -2328,7 +2403,7 @@ export function ManualTrader({
                       setShowTradeTypeDropdown(false);
                     }}
                   >
-                    <div className="type-option-icon">🌱</div>
+                    <div className="type-option-icon">{getTradeTypeIconComponent('accumulator')}</div>
                     <div className="type-option-info">
                       <strong>Accumulators</strong>
                       <span>Stake grows each tick as price stays within range</span>
@@ -2343,7 +2418,7 @@ export function ManualTrader({
                       setShowTradeTypeDropdown(false);
                     }}
                   >
-                    <div className="type-option-icon">⚡</div>
+                    <div className="type-option-icon">{getTradeTypeIconComponent('multiplier')}</div>
                     <div className="type-option-info">
                       <strong>Multipliers</strong>
                       <span>Multiply profit/loss with leverage and risk controls</span>

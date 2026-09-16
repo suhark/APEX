@@ -3286,13 +3286,46 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   height: 40px;
   font-size: 16px;
   font-weight: 800;
-  color: #2dd4bf;
   background: rgba(45, 212, 191, 0.1);
   border: 1px solid rgba(45, 212, 191, 0.2);
   border-radius: 10px;
   font-family: 'DM Mono', monospace;
   flex-shrink: 0;
   transition: all 0.2s ease;
+}
+
+.trade-type-icon-pair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trade-type-icon-pair.separated {
+  gap: 10px;
+}
+
+.trade-type-icon-pair svg:first-child {
+  color: #f87171;
+}
+
+.trade-type-icon-pair svg:last-child {
+  color: #60a5fa;
+}
+
+.type-option-card.selected .trade-type-icon-pair svg:first-child {
+  color: #f87171;
+}
+
+.type-option-card.selected .trade-type-icon-pair svg:last-child {
+  color: #60a5fa;
+}
+
+.type-option-card:hover .trade-type-icon-pair svg:first-child {
+  color: #f87171;
+}
+
+.type-option-card:hover .trade-type-icon-pair svg:last-child {
+  color: #60a5fa;
 }
 
 .type-option-card:hover .type-option-icon {
