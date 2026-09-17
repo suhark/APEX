@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { subscribeTicks, symbolMap, getTicksHistory, getActiveSymbols, type DerivTick } from './deriv-client';
+import { subscribeTicks, symbolMap, getTicksHistory, getActiveSymbols, getProposal, type DerivTick, type DerivSymbol } from './deriv-client';
 import { DerivInstruments } from './deriv-instruments';
 import {
   ArrowDown,
@@ -35,7 +35,7 @@ import {
 
 export interface ManualTraderProps {
   tick: number;
-  runTrade: (details: { instrument: string; direction: string; stake: number; source: string; barrier?: number; growth_rate?: number; duration?: number }) => Promise<void>;
+  runTrade: (details: { instrument: string; direction: string; stake: number; source: string; barrier?: number; growth_rate?: number; duration?: number }) => Promise<{ contractId?: number; derivPayout?: number }>;
   derivConnected: boolean;
   isDerivReal: boolean;
   liveArmed?: boolean;
@@ -66,6 +66,7 @@ interface ActiveContract {
   totalTicks: number;
   stake: number;
   payout: number;
+  derivPayout?: number; // Accurate payout from Deriv API
   ticks: Array<{ quote: number; tickIndex: number }>;
   status: 'running' | 'won' | 'lost';
 }
@@ -220,6 +221,9 @@ export function ManualTrader({
   const [zoomLevel, setZoomLevel] = useState<number>(35);
   const [showZoomPill, setShowZoomPill] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [accuratePayouts, setAccuratePayouts] = useState<Record<string, number>>({});
+  const [showContractCard, setShowContractCard] = useState<boolean>(true);
+  const contractCardTimerRef = useRef<number | null>(null);
 
   const tradeTypePickerRef = useRef<HTMLDivElement>(null);
   const paramsRowRef = useRef<HTMLDivElement>(null);
@@ -655,30 +659,32 @@ export function ManualTrader({
   const payoutRate = allowEquals ? 1.74 : 1.95;
   const potentialPayout = Number((stake * payoutRate).toFixed(2));
 
-  // Over/Under payouts matching Deriv DTrader
+  // Over/Under payouts matching Deriv DTrader (use accurate data when available)
   const payoutOver = useMemo(() => {
+    if (accuratePayouts['DIGITOVER']) return accuratePayouts['DIGITOVER'];
     const winningDigits = Math.max(1, 9 - digitBarrier);
     const winProb = winningDigits / 10;
     return Number(((stake * 0.8888) / winProb).toFixed(2));
-  }, [stake, digitBarrier]);
+  }, [stake, digitBarrier, accuratePayouts]);
 
   const payoutUnder = useMemo(() => {
+    if (accuratePayouts['DIGITUNDER']) return accuratePayouts['DIGITUNDER'];
     const winningDigits = Math.max(1, digitBarrier);
     const winProb = winningDigits / 10;
     return Number(((stake * 0.909) / winProb).toFixed(2));
-  }, [stake, digitBarrier]);
+  }, [stake, digitBarrier, accuratePayouts]);
 
-  // Matches/Differs payouts
-  const payoutMatch = Number((stake * 9.0).toFixed(2));
-  const payoutDiff = Number((stake * 1.098).toFixed(2));
+  // Matches/Differs payouts (use accurate data when available)
+  const payoutMatch = accuratePayouts['DIGITMATCH'] || Number((stake * 9.0).toFixed(2));
+  const payoutDiff = accuratePayouts['DIGITDIFF'] || Number((stake * 1.098).toFixed(2));
 
-  // Even/Odd payouts
-  const payoutEven = Number((stake * 1.95).toFixed(2));
-  const payoutOdd = Number((stake * 1.95).toFixed(2));
+  // Even/Odd payouts (use accurate data when available)
+  const payoutEven = accuratePayouts['DIGITEVEN'] || Number((stake * 1.95).toFixed(2));
+  const payoutOdd = accuratePayouts['DIGITODD'] || Number((stake * 1.95).toFixed(2));
 
-  // Rise/Fall payouts
-  const payoutRise = Number((stake * (allowEquals ? 1.74 : 1.95)).toFixed(2));
-  const payoutFall = Number((stake * (allowEquals ? 1.74 : 1.95)).toFixed(2));
+  // Rise/Fall payouts (use accurate data when available)
+  const payoutRise = (accuratePayouts['CALL'] || Number((stake * (allowEquals ? 1.74 : 1.95)).toFixed(2)));
+  const payoutFall = (accuratePayouts['PUT'] || Number((stake * (allowEquals ? 1.74 : 1.95)).toFixed(2)));
 
   // Accumulator live payout
   const liveAccuPayout = activeContract && activeContract.contractType === 'ACCU'
@@ -882,7 +888,7 @@ export function ManualTrader({
 
       if (derivConnected) {
         try {
-          await runTrade({
+          const result = await runTrade({
             instrument: selectedInstrument,
             direction: contractDirection,
             stake,
@@ -891,6 +897,12 @@ export function ManualTrader({
             growth_rate,
             duration,
           });
+          
+          // Update the contract with accurate Deriv payout data
+          if (result && result.derivPayout) {
+            setActiveContract(prev => prev ? { ...prev, derivPayout: result.derivPayout } : prev);
+            setPositionHistory(prev => prev.map(c => c.id === newContract.id ? { ...c, derivPayout: result.derivPayout } : c));
+          }
         } catch (err) {
           console.warn('[ManualTrader] live runTrade warning:', err);
         }
@@ -1035,6 +1047,98 @@ export function ManualTrader({
   const activeCurrency = derivConnected && derivAccount ? (derivAccount.currency ?? 'USD') : 'USD';
   const isDemo = !derivConnected || Boolean(derivAccount?.is_virtual);
 
+  // Fetch accurate payouts from Deriv when connected
+  useEffect(() => {
+    if (!derivConnected || !selectedSymbolCode) {
+      setAccuratePayouts({});
+      return;
+    }
+
+    const fetchAccuratePayouts = async () => {
+      try {
+        const symbol = selectedSymbolCode as DerivSymbol;
+        const payoutMap: Record<string, number> = {};
+
+        // Fetch accurate payouts for each contract type
+        const contractTypes: Array<{ type: string; barrier?: number }> = [
+          { type: 'CALL' },
+          { type: 'PUT' },
+          { type: 'DIGITEVEN' },
+          { type: 'DIGITODD' },
+          { type: 'DIGITOVER', barrier: digitBarrier },
+          { type: 'DIGITUNDER', barrier: digitBarrier },
+          { type: 'DIGITMATCH', barrier: digitBarrier },
+          { type: 'DIGITDIFF', barrier: digitBarrier },
+        ];
+
+        for (const { type, barrier } of contractTypes) {
+          try {
+            const proposal = await getProposal({
+              symbol,
+              contract_type: type as any,
+              stake,
+              duration: durationTicks,
+              barrier,
+            });
+            payoutMap[type] = proposal.payout;
+          } catch (err) {
+            // Fall back to local calculation if proposal fails
+            if (import.meta.env.DEV) console.warn(`Failed to get proposal for ${type}:`, err);
+          }
+        }
+
+        setAccuratePayouts(payoutMap);
+      } catch (err) {
+        if (import.meta.env.DEV) console.warn('Failed to fetch accurate payouts:', err);
+      }
+    };
+
+    fetchAccuratePayouts();
+  }, [derivConnected, selectedSymbolCode, stake, durationTicks, digitBarrier]);
+
+  // Auto-hide contract card after trade completes
+  useEffect(() => {
+    // Clear any existing timer
+    if (contractCardTimerRef.current) {
+      clearTimeout(contractCardTimerRef.current);
+      contractCardTimerRef.current = null;
+    }
+
+    if (!activeContract) {
+      setShowContractCard(false);
+      return;
+    }
+
+    if (activeContract.status === 'running') {
+      setShowContractCard(true);
+      return;
+    }
+
+    // Hide the card after 3 seconds when trade completes
+    contractCardTimerRef.current = window.setTimeout(() => {
+      setShowContractCard(false);
+      contractCardTimerRef.current = null;
+    }, 3000);
+
+    return () => {
+      if (contractCardTimerRef.current) {
+        clearTimeout(contractCardTimerRef.current);
+        contractCardTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeContract?.status]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (contractCardTimerRef.current) {
+        clearTimeout(contractCardTimerRef.current);
+        contractCardTimerRef.current = null;
+      }
+    };
+  }, []);
+
   return (
     <div className="dtrader-container">
       {/* Top Navigation & Account Bar */}
@@ -1160,9 +1264,9 @@ export function ManualTrader({
                             {activeContract.status === 'running' ? `${activeContract.currentTickCount}/${activeContract.totalTicks}t` : activeContract.status}
                           </span>
                           <strong className={activeContract.status === 'won' ? 'positive' : activeContract.status === 'lost' ? 'negative' : ''}>
-                            {activeContract.status === 'won' ? `+$${activeContract.payout.toFixed(2)}` :
+                            {activeContract.status === 'won' ? `+$${(activeContract.derivPayout ?? activeContract.payout).toFixed(2)}` :
                              activeContract.status === 'lost' ? `-$${activeContract.stake.toFixed(2)}` :
-                             `$${activeContract.payout.toFixed(2)}`}
+                             `$${(activeContract.derivPayout ?? activeContract.payout).toFixed(2)}`}
                           </strong>
                         </div>
                       </div>
@@ -1189,9 +1293,9 @@ export function ManualTrader({
                               {position.status}
                             </span>
                             <strong className={position.status === 'won' ? 'positive' : position.status === 'lost' ? 'negative' : ''}>
-                              {position.status === 'won' ? `+$${position.payout.toFixed(2)}` :
+                              {position.status === 'won' ? `+$${(position.derivPayout ?? position.payout).toFixed(2)}` :
                                position.status === 'lost' ? `-$${position.stake.toFixed(2)}` :
-                               `$${position.payout.toFixed(2)}`}
+                               `$${(position.derivPayout ?? position.payout).toFixed(2)}`}
                             </strong>
                           </div>
                         </div>
@@ -1694,7 +1798,7 @@ export function ManualTrader({
           )}
 
           {/* In-chart Active Contract Overlay Status Card */}
-          {activeContract && (
+          {activeContract && showContractCard && (
             <div className={`dtrader-chart-contract-card ${activeContract.status}`}>
               <div className="contract-card-header">
                 <span className="contract-card-badge">
@@ -1720,7 +1824,7 @@ export function ManualTrader({
                 <div>
                   <small>Payout</small>
                   <strong className={activeContract.status === 'won' ? 'positive' : ''}>
-                    ${activeContract.payout.toFixed(2)}
+                    ${(activeContract.derivPayout ?? activeContract.payout).toFixed(2)}
                   </strong>
                 </div>
               </div>

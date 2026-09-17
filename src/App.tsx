@@ -1182,13 +1182,13 @@ function App() {
   derivConnectedRef.current = derivConnected;
   derivAccountRef.current = deriv.account;
 
-  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; batchId?: string; barrier?: number; growth_rate?: number; duration?: number }) => {
-    if (!workspace) return;
+  const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; batchId?: string; barrier?: number; growth_rate?: number; duration?: number }): Promise<{ contractId?: number; derivPayout?: number }> => {
+    if (!workspace) return {};
     const ws = workspaceRef.current;
-    if (!ws) return;
+    if (!ws) return {};
 
     if (details.botName && botPendingTradesRef.current.has(details.botName)) {
-      return;
+      return {};
     }
 
     const isBot = details.source === 'bot' || details.source === 'quick_bot' || details.source === 'bulk' || Boolean(details.botName);
@@ -1210,7 +1210,7 @@ function App() {
     if (sessionLossUsed >= ws.loss_limit) {
       if (isDerivReal && currentlyArmed) setLiveArmed(false);
       setNotice(`Trading blocked: Session loss limit of ${money(ws.loss_limit)} reached (${money(sessionLossUsed)} lost this session).`);
-      return;
+      return {};
     }
 
     if (derivConnected && deriv.account) {
@@ -1222,30 +1222,30 @@ function App() {
           } else {
             setNotice('Live execution is disarmed. Arm live trading in Topbar or Settings to place real trades.');
           }
-          return;
+          return {};
         }
 
         if (isBot && !botLiveAllowed) {
           setNotice('Automated bot live trading is blocked by default. Enable in Settings if you want bots to trade real money.');
-          return;
+          return {};
         }
 
         // Stake cap (% of balance)
         const maxAllowedStake = Math.max(1, Number(((deriv.account.balance * maxPercent) / 100).toFixed(2)));
         if (details.stake > maxAllowedStake) {
           setNotice(`Trade blocked: Stake (${money(details.stake)}) exceeds maximum allowed risk cap of ${maxPercent}% of balance (${money(maxAllowedStake)}).`);
-          return;
+          return {};
         }
       }
 
       // Check stake validity
       if (details.stake <= 0 || details.stake > deriv.account.balance) {
         setNotice('Stake must be greater than zero and within your Deriv balance.');
-        return;
+        return {};
       }
 
       const symbol = symbolMap[details.instrument];
-      if (!symbol) { setNotice('Unknown instrument for Deriv.'); return; }
+      if (!symbol) { setNotice('Unknown instrument for Deriv.'); return {}; }
 
       if (details.botName) {
         botPendingTradesRef.current.add(details.botName);
@@ -1297,6 +1297,9 @@ function App() {
             }
           } catch { /* ignore */ }
         })();
+
+        // Return accurate Deriv payout data for manual trader to use
+        return { contractId: result.contractId, derivPayout: result.proposal.payout };
 
         subscribeContract(result.contractId, (poc: DerivTradeResult) => {
           if (poc.status === 'won' || poc.status === 'lost') {
@@ -1409,8 +1412,8 @@ function App() {
       } catch (err) {
         if (details.botName) botPendingTradesRef.current.delete(details.botName);
         setNotice(`Deriv trade failed: ${err}`);
+        return {};
       }
-      return;
     }
 
     // ── Deriv is NOT connected — block all trading ─────────────────────────
@@ -1420,6 +1423,7 @@ function App() {
       ? 'Connect a Deriv account to run bots. Go to Settings → Connect Deriv.'
       : 'Connect your Deriv account to place trades. Go to Settings → Connect Deriv.';
     setNotice(msg);
+    return {};
   };
 
   // Deactivates every running bot — called when the session loss limit is hit
