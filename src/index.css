@@ -3139,6 +3139,8 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   width: clamp(56px, 16vw, 68px);
   position: relative;
   transition: transform 0.15s ease;
+  border-radius: 3px;
+  padding: 2px 0;
 }
 
 .digit-dial-wrapper:hover {
@@ -5636,15 +5638,28 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 }
 
 /* Feature strip */
-.lp-features {
+.lp-features-container {
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
   padding: 0 32px 48px;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid rgba(45, 212, 191, 0.1);
   margin-top: 8px;
+}
+
+.lp-features {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+}
+
+.lp-features-title {
+  margin-bottom: 16px;
+  margin-top: 24px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #f1f5f9;
+  text-align: left;
 }
 .lp-feature-item {
   display: flex;
@@ -5652,6 +5667,8 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   gap: 8px;
   padding: 28px 24px;
   border-right: 1px solid rgba(45, 212, 191, 0.08);
+  align-self: stretch;
+  min-height: 100px;
 }
 .lp-feature-item:last-child {
   border-right: none;
@@ -5665,6 +5682,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  text-align: left;
 }
 .lp-feature-text strong {
   font-size: 14px;
@@ -5842,9 +5860,11 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   .lp-headline {
     font-size: 40px;
   }
+  .lp-features-container {
+    padding: 0 24px 40px;
+  }
   .lp-features {
     grid-template-columns: repeat(2, 1fr);
-    padding: 0 24px 40px;
   }
   .lp-feature-item:nth-child(2) {
     border-right: none;
@@ -5876,9 +5896,11 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   .lp-headline {
     font-size: 32px;
   }
+  .lp-features-container {
+    padding: 0 20px 32px;
+  }
   .lp-features {
     grid-template-columns: 1fr 1fr;
-    padding: 0 20px 32px;
   }
   .lp-footer {
     padding: 16px 20px;

@@ -137,17 +137,19 @@ export function LandingPage({ onOpenAuth }: LandingPageProps) {
         </div>
 
         {/* Feature strip */}
-        <div className="lp-features" id="features">
+        <div className="lp-features-container" id="features">
           <h2 className="lp-features-title">Trading Bot Features</h2>
-          {FEATURES.map((f) => (
-            <div className="lp-feature-item" key={f.label}>
-              <span className="lp-feature-icon">{f.icon}</span>
-              <div className="lp-feature-text">
-                <h3>{f.label}</h3>
-                <span>{f.desc}</span>
+          <div className="lp-features">
+            {FEATURES.map((f) => (
+              <div className="lp-feature-item" key={f.label}>
+                <span className="lp-feature-icon">{f.icon}</span>
+                <div className="lp-feature-text">
+                  <h3>{f.label}</h3>
+                  <span>{f.desc}</span>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </section>
 
