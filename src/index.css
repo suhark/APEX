@@ -6,16 +6,16 @@
 /* ── New Color Theme Variables ───────────────────────────────────────── */
 :root {
   /* Backgrounds */
-  --bg-primary: #1a1a2e;
-  --bg-secondary: #16213e;
-  --bg-tertiary: #16162a;
-  --bg-card: #1f1f3a;
+  --bg-primary: #0f0f1a;
+  --bg-secondary: #121824;
+  --bg-tertiary: #0e0e18;
+  --bg-card: #151528;
   
   /* Accents */
   --accent-orange: #ff8c42;
   --accent-pink: #ff6b81;
   --accent-blue: #4a90e2;
-  --accent-purple: #9b59b6;
+  --accent-purple: #7c3aed;
   
   /* Status */
   --success: #10b981;
