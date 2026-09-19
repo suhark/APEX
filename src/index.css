@@ -2747,7 +2747,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 .auth-input-wrap input {
   width: 100%;
   height: 42px;
-  padding: 0 40px 0 38px;
+  padding: 0 48px 0 38px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-light);
   border-radius: 6px;
@@ -2765,7 +2765,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
 
 .auth-password-toggle {
   position: absolute;
-  right: 10px;
+  right: 12px;
   background: transparent;
   border: none;
   color: #64748b;
@@ -2773,6 +2773,7 @@ h2 { color: #e7f1ef; font-size: 16px; letter-spacing: -.02em; }
   padding: 4px;
   display: flex;
   align-items: center;
+  z-index: 1;
 }
 
 .auth-password-toggle:hover {

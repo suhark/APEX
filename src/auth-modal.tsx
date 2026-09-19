@@ -378,7 +378,7 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
                       onChange={e => setPassword(e.target.value)}
                       autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                       required disabled={loading} />
-                    <button type="button" className="auth-eye-btn" tabIndex={-1}
+                    <button type="button" className="auth-password-toggle" tabIndex={-1}
                       onClick={() => setShowPassword(v => !v)}>
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
