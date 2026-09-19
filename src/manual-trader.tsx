@@ -516,7 +516,7 @@ export function ManualTrader({
 
   // Monitor trades array to update manual trader contracts when Deriv settles them
   useEffect(() => {
-    if (!derivConnected) return;
+    if (!derivConnected || !trades) return;
 
     // Find recent manual trades that have settled
     const recentManualTrades = trades.filter(t =>
