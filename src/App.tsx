@@ -1183,11 +1183,18 @@ function App() {
   derivAccountRef.current = deriv.account;
 
   const runTrade = async (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; batchId?: string; barrier?: number; growth_rate?: number; duration?: number }): Promise<{ contractId?: number; derivPayout?: number }> => {
-    if (!workspace) return {};
+    if (!workspace) {
+      console.error('runTrade: No workspace available');
+      return {};
+    }
     const ws = workspaceRef.current;
-    if (!ws) return {};
+    if (!ws) {
+      console.error('runTrade: Workspace ref is null');
+      return {};
+    }
 
     if (details.botName && botPendingTradesRef.current.has(details.botName)) {
+      console.log(`runTrade: Bot ${details.botName} has pending trade, skipping`);
       return {};
     }
 
@@ -1209,7 +1216,12 @@ function App() {
     );
     if (sessionLossUsed >= ws.loss_limit) {
       if (isDerivReal && currentlyArmed) setLiveArmed(false);
-      setNotice(`Trading blocked: Session loss limit of ${money(ws.loss_limit)} reached (${money(sessionLossUsed)} lost this session).`);
+      const errorMsg = `Trading blocked: Session loss limit of ${money(ws.loss_limit)} reached (${money(sessionLossUsed)} lost this session).`;
+      console.error('runTrade:', errorMsg);
+      setNotice(errorMsg);
+      if (details.botName) {
+        setBotStatus(s => ({ ...s, [details.botName]: `🛑 Loss limit reached` }));
+      }
       return {};
     }
 
@@ -1217,41 +1229,69 @@ function App() {
       // Safety checks for REAL accounts:
       if (isDerivReal) {
         if (!currentlyArmed) {
-          if (isBot) {
-            setNotice('Bot trading on real account is disarmed for safety. Switch to Demo account to test bots.');
-          } else {
-            setNotice('Live execution is disarmed. Arm live trading in Topbar or Settings to place real trades.');
+          const errorMsg = isBot
+            ? 'Bot trading on real account is disarmed for safety. Switch to Demo account to test bots.'
+            : 'Live execution is disarmed. Arm live trading in Topbar or Settings to place real trades.';
+          console.error('runTrade:', errorMsg);
+          setNotice(errorMsg);
+          if (details.botName) {
+            setBotStatus(s => ({ ...s, [details.botName]: `🔒 Disarmed` }));
           }
           return {};
         }
 
         if (isBot && !botLiveAllowed) {
-          setNotice('Automated bot live trading is blocked by default. Enable in Settings if you want bots to trade real money.');
+          const errorMsg = 'Automated bot live trading is blocked by default. Enable in Settings if you want bots to trade real money.';
+          console.error('runTrade:', errorMsg);
+          setNotice(errorMsg);
+          if (details.botName) {
+            setBotStatus(s => ({ ...s, [details.botName]: `🔒 Bot trading blocked` }));
+          }
           return {};
         }
 
         // Stake cap (% of balance)
         const maxAllowedStake = Math.max(1, Number(((deriv.account.balance * maxPercent) / 100).toFixed(2)));
         if (details.stake > maxAllowedStake) {
-          setNotice(`Trade blocked: Stake (${money(details.stake)}) exceeds maximum allowed risk cap of ${maxPercent}% of balance (${money(maxAllowedStake)}).`);
+          const errorMsg = `Trade blocked: Stake (${money(details.stake)}) exceeds maximum allowed risk cap of ${maxPercent}% of balance (${money(maxAllowedStake)}).`;
+          console.error('runTrade:', errorMsg);
+          setNotice(errorMsg);
+          if (details.botName) {
+            setBotStatus(s => ({ ...s, [details.botName]: `💰 Stake too high` }));
+          }
           return {};
         }
       }
 
       // Check stake validity
       if (details.stake <= 0 || details.stake > deriv.account.balance) {
-        setNotice('Stake must be greater than zero and within your Deriv balance.');
+        const errorMsg = 'Stake must be greater than zero and within your Deriv balance.';
+        console.error('runTrade:', errorMsg, { stake: details.stake, balance: deriv.account.balance });
+        setNotice(errorMsg);
+        if (details.botName) {
+          setBotStatus(s => ({ ...s, [details.botName]: `💰 Invalid stake` }));
+        }
         return {};
       }
 
       const symbol = symbolMap[details.instrument];
-      if (!symbol) { setNotice('Unknown instrument for Deriv.'); return {}; }
+      if (!symbol) {
+        const errorMsg = `Unknown instrument for Deriv: ${details.instrument}`;
+        console.error('runTrade:', errorMsg);
+        setNotice(errorMsg);
+        if (details.botName) {
+          setBotStatus(s => ({ ...s, [details.botName]: `❓ Unknown instrument` }));
+        }
+        return {};
+      }
 
       if (details.botName) {
         botPendingTradesRef.current.add(details.botName);
+        console.log(`runTrade: Adding ${details.botName} to pending trades`);
       }
 
       try {
+        console.log(`runTrade: Executing trade`, { instrument: details.instrument, direction: details.direction, stake: details.stake, source: details.source });
         const result = await executeTrade({
           symbol: symbol as DerivSymbol,
           contract_type: details.direction as 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF' | 'ACCU',
@@ -1260,6 +1300,7 @@ function App() {
           barrier: details.barrier,
           growth_rate: details.growth_rate,
         });
+        console.log(`runTrade: Trade executed successfully`, { contractId: result.contractId, entryPrice: result.entryPrice });
 
         const tradeId = (typeof crypto !== 'undefined' && crypto.randomUUID)
           ? crypto.randomUUID()
@@ -1298,10 +1339,9 @@ function App() {
           } catch { /* ignore */ }
         })();
 
-        // Return accurate Deriv payout data for manual trader to use
-        return { contractId: result.contractId, derivPayout: result.proposal.payout };
-
+        // Subscribe to contract updates
         subscribeContract(result.contractId, (poc: DerivTradeResult) => {
+          console.log(`Contract update: ${tradeId}`, poc);
           if (poc.status === 'won' || poc.status === 'lost') {
             const finalProfit = poc.profit;
             const win = poc.status === 'won';
@@ -1381,11 +1421,17 @@ function App() {
               stopAllBots();
               setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. All bots stopped.${isDerivReal ? ' Live trading disarmed.' : ''}`);
             } else {
-              setNotice(`${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`);
+              const resultMsg = `${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`;
+              console.log('runTrade:', resultMsg);
+              setNotice(resultMsg);
+              if (details.botName) {
+                setBotStatus(s => ({ ...s, [details.botName]: `${poc.status === 'won' ? '✅' : '❌'} ${poc.status.toUpperCase()} ${money(finalProfit)}` }));
+              }
             }
           }
         }, (poc: DerivTradeResult) => {
           // Live P&L update for the open contracts bar
+          console.log(`Live P&L update: ${tradeId}`, poc);
           setOpenContractPnl(prev => ({
             ...prev,
             [tradeId]: {
@@ -1397,6 +1443,7 @@ function App() {
             },
           }));
         });
+
         // Seed the open contracts panel immediately on purchase
         setOpenContractPnl(prev => ({
           ...prev,
@@ -1408,10 +1455,24 @@ function App() {
             stake: details.stake,
           },
         }));
-        setNotice(`${details.direction} contract purchased on Deriv (${deriv.account.loginid} · ${deriv.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`);
+
+        // Return accurate Deriv payout data for manual trader to use
+        const successMsg = `${details.direction} contract purchased on Deriv (${deriv.account.loginid} · ${deriv.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`;
+        console.log('runTrade:', successMsg);
+        setNotice(successMsg);
+        if (details.botName) {
+          setBotStatus(s => ({ ...s, [details.botName]: `⏳ Trade placed: ${details.direction}` }));
+        }
+
+        return { contractId: result.contractId, derivPayout: result.proposal.payout };
       } catch (err) {
-        if (details.botName) botPendingTradesRef.current.delete(details.botName);
-        setNotice(`Deriv trade failed: ${err}`);
+        const errorMsg = `Deriv trade failed: ${err instanceof Error ? err.message : String(err)}`;
+        console.error('runTrade:', errorMsg, err);
+        if (details.botName) {
+          botPendingTradesRef.current.delete(details.botName);
+          setBotStatus(s => ({ ...s, [details.botName]: `❌ Trade failed` }));
+        }
+        setNotice(errorMsg);
         return {};
       }
     }
@@ -1563,6 +1624,9 @@ function App() {
             const lastDir = recentBot[0]?.direction as 'CALL' | 'PUT' | undefined;
             if (lastDir) direction = lastDir === 'CALL' ? 'PUT' : 'CALL';
           }
+
+          // Add status update for Phantom Scalper
+          setBotStatus(s => ({ ...s, 'Phantom Scalper': `🔄 ${direction} on ${instrument} (${money(stake)})` }));
         } else if (bot.name === 'Trend Pullback V3') {
           // ── STP-V3: Six-stage Trend Pullback strategy on V75 ─────────────
           const cfg = (botConfigRef.current['Trend Pullback V3'] ?? STP_DEFAULTS) as StpConfig;
@@ -1604,6 +1668,9 @@ function App() {
           } else {
             stake = Math.max(1, cfg.stakeValue);
           }
+
+          // Add execution status
+          setBotStatus(s => ({ ...s, 'Trend Pullback V3': `🔄 ${signal.direction} V75 (${money(stake)})` }));
         } else if (bot.name === 'Digit Surge') {
           const cfg = (botConfigRef.current['Digit Surge'] ?? DIGIT_SURGE_DEFAULTS) as DigitSurgeConfig;
 
@@ -1637,6 +1704,9 @@ function App() {
           instrument = 'Volatility 10 (1s) Index';
           direction  = digitDir;
           stake      = Math.max(0.35, cfg.stake);
+
+          // Add execution status
+          setBotStatus(s => ({ ...s, 'Digit Surge': `🔄 ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} on V10 (${money(stake)})` }));
 
         } else if (bot.name === 'Boom/Crash Rider') {
           // ── Boom/Crash Rider: pre-spike setup on Boom/Crash indices ──────
@@ -1681,6 +1751,9 @@ function App() {
           stake = Math.max(0.35, cfg.stake);
           boomCrashStateRef.current.lastTradeTime = Date.now();
 
+          // Add execution status
+          setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔄 ${direction} on ${instrument} (${money(stake)})` }));
+
         } else if (bot.name === 'Asian Drift') {
           // ── Asian Drift: MA drift → Asian Up/Down on V50 ─────────────────
           // Asian options settle on the average price of all ticks during the
@@ -1707,17 +1780,28 @@ function App() {
           stake      = Math.max(0.35, cfg.stake);
           botDuration = cfg.durationTicks;
 
+          // Add execution status
+          setBotStatus(s => ({ ...s, 'Asian Drift': `🔄 ${asianDir} on V50 (${money(stake)})` }));
+
         } else {
           // Default strategy for all other bots — stake from config
           const cfg = (botConfigRef.current[bot.name] ?? DEFAULT_BOT_DEFAULTS) as DefaultBotConfig;
           instrument = instruments[(currentTick + i) % instruments.length];
           direction  = (currentTick + i) % 2 ? 'CALL' : 'PUT';
           stake      = Math.max(1, cfg.stake);
+
+          // Add execution status for default bots
+          setBotStatus(s => ({ ...s, [bot.name]: `🔄 ${direction} on ${instrument} (${money(stake)})` }));
         }
 
-        void runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name, duration: botDuration });
+        // Execute trade and handle errors properly
+        runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name, duration: botDuration })
+          .catch((err) => {
+            console.error(`Bot ${bot.name} trade failed:`, err);
+            setBotStatus(s => ({ ...s, [bot.name]: `❌ Error: ${err instanceof Error ? err.message : 'Unknown error'}` }));
+          });
       });
-    }, 5000);
+    }, 3000); // Reduced from 5000ms to 3000ms for faster response
     return () => window.clearInterval(interval);
   }, []);
 
