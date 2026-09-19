@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient, type User } from '@supabase/supabase-js';
-import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, Ghost, Globe, Hash, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
+import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bell, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, FolderOpen, Ghost, Globe, Hash, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
 import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, subscribeTicks, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult, type DerivTick } from './deriv-client';
@@ -13,6 +13,9 @@ import { LandingPage } from './landing-page';
 import { PolicyModal, getPolicyConsent, recordPolicyConsent, type PolicyTab } from './policy-modal';
 import { AnalysisLab } from './analysis-lab';
 import { BulkTrader } from './bulk-trader';
+import { useNotificationSystem, NotificationPanel, NotificationSettings } from './notification-system';
+import { BotPerformanceDashboard } from './bot-performance-dashboard';
+import { StrategyExportImport, StrategyTemplateLibrary } from './strategy-export-import';
 
 const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
 
@@ -518,6 +521,9 @@ function App() {
   const [tradeAlert, setTradeAlert] = useState<TradeAlert | null>(null);
   // Live P&L for open (pending) contracts — keyed by trade id
   const [openContractPnl, setOpenContractPnl] = useState<Record<string, { profit: number; entryPrice: number; instrument: string; direction: string; stake: number }>>({});
+  
+  // Notification system
+  const notificationSystem = useNotificationSystem(user?.id || 'guest');
   const [confirmModal, setConfirmModal] = useState<{
     title: string; body: string;
     rows?: { label: string; value: string }[];
@@ -1370,6 +1376,15 @@ function App() {
             if (details.botName) {
               botPendingTradesRef.current.delete(details.botName);
               updateBotStatsFromTrade(details.botName, finalProfit, win);
+              
+              // Add notification for bot trade completion
+              notificationSystem.addNotification({
+                type: 'bot',
+                priority: 'medium',
+                title: `${details.botName} Trade ${win ? 'Won' : 'Lost'}`,
+                message: `${details.direction} on ${details.instrument} ${win ? '+' : ''}${money(finalProfit)}`,
+              });
+              
               // STP-V3 consecutive loss tracking
               if (details.botName === 'Trend Pullback V3') {
                 if (!win) {
@@ -1387,6 +1402,14 @@ function App() {
                   digitSurgeLossRef.current = 0;
                 }
               }
+            } else {
+              // Add notification for manual trade completion
+              notificationSystem.addNotification({
+                type: 'trade',
+                priority: 'medium',
+                title: `Trade ${win ? 'Won' : 'Lost'}`,
+                message: `${details.direction} on ${details.instrument} ${win ? '+' : ''}${money(finalProfit)}`,
+              });
             }
 
             applyBalanceDelta(finalProfit);
@@ -1900,6 +1923,8 @@ function App() {
       botStatus={botStatus}
       onSaveBotConfig={saveBotConfigAndUpdate}
       botConfig={botConfigRef.current}
+      notificationSystem={notificationSystem}
+      user={user}
     />
   );
 
@@ -2081,6 +2106,16 @@ function App() {
               </button>
             )}
             <button className="refresh hide-mobile" onClick={() => void load()}><RefreshCw size={15} /> Sync</button>
+            <button 
+              className="notification-bell-button" 
+              onClick={() => notificationSystem.setShowPanel(true)}
+              title="Notifications"
+            >
+              <Bell size={16} />
+              {notificationSystem.unreadCount > 0 && (
+                <span className="notification-badge">{notificationSystem.unreadCount}</span>
+              )}
+            </button>
             <div className="topbar-user-pill hide-mobile-compact" title={`Signed in as ${user.email}`}>
               <div className="user-avatar-dot">
                 <UserIcon size={13} />
@@ -2097,20 +2132,16 @@ function App() {
             </div>
             <div className="balance topbar-balance">
               {derivConnected ? (
-                <>
-                  <span className="balance-label hide-mobile">
-                    {isDerivReal ? (liveArmed ? 'Deriv live' : 'Deriv real') : 'Deriv demo'}
-                  </span>
-                  <strong>{money(deriv.account?.balance ?? 0)}</strong>
-                </>
-              ) : (
                 <button
                   className="connect-deriv-topbar-btn"
                   onClick={() => setPage('settings')}
                 >
-                  Connect Deriv
+                  <span className="balance-label hide-mobile">
+                    {isDerivReal ? (liveArmed ? 'Deriv live' : 'Deriv real') : 'Deriv demo'}
+                  </span>
+                  <strong>{money(deriv.account?.balance ?? 0)}</strong>
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         </header>
@@ -2159,6 +2190,18 @@ function App() {
           danger={confirmModal.danger}
           onConfirm={confirmModal.onConfirm}
           onCancel={() => setConfirmModal(null)}
+        />
+      )}
+      
+      {notificationSystem.showPanel && (
+        <NotificationPanel
+          notifications={notificationSystem.notifications}
+          unreadCount={notificationSystem.unreadCount}
+          onClose={() => notificationSystem.setShowPanel(false)}
+          onMarkAsRead={notificationSystem.markAsRead}
+          onMarkAllAsRead={notificationSystem.markAllAsRead}
+          onDelete={notificationSystem.deleteNotification}
+          onClearAll={notificationSystem.clearAll}
         />
       )}
       {/* Consent banner — shown once until user clicks "I Agree" */}
@@ -2242,6 +2285,8 @@ function PageView({
   botStatus,
   onSaveBotConfig,
   botConfig,
+  notificationSystem,
+  user,
 }: {
   page: Page;
   workspace: Workspace | null;
@@ -2275,6 +2320,11 @@ function PageView({
   sessionStartedAt: string | null;
   onRequestBotLiveConfirm: (onConfirm: () => void) => void;
   botsLoadError: boolean;
+  botStatus: Record<string, string>;
+  onSaveBotConfig: (botName: string, config: any) => void;
+  botConfig: Record<string, any>;
+  notificationSystem: any;
+  user: User | null;
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
   if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} />;
@@ -2294,7 +2344,7 @@ function PageView({
         linkedDemoAccount={deriv.accounts.find((a) => a.is_virtual)}
         onGoToSettings={() => setPage('settings')}
         onBack={() => setPage('dashboard')}
-        trades={contextTrades}
+        trades={trades}
       />
     );
   }
@@ -2337,6 +2387,10 @@ function PageView({
       resetSessionBaseline={resetSessionBaseline}
       sessionStartedAt={sessionStartedAt}
       onRequestBotLiveConfirm={onRequestBotLiveConfirm}
+      notificationSystem={notificationSystem}
+      botConfig={botConfig}
+      onSaveBotConfig={onSaveBotConfig}
+      user={user}
     />
   );
 }
@@ -3018,6 +3072,7 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
   onSaveBotConfig: (botName: string, cfg: BotConfig) => void;
   setPage: (page: Page) => void;
 }) {
+  const [showPerformanceDashboard, setShowPerformanceDashboard] = useState(false);
   // Local stake overrides per bot — seeded from botConfig (safe against empty/undefined)
   const [stakeMap, setStakeMap] = useState<Record<string, number>>(() => {
     const m: Record<string, number> = {};
@@ -3049,6 +3104,14 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
         eyebrow="Automation library"
         title="Free bots"
         description="Start with a clear strategy, a visible risk tier, and a demo-first execution loop. Multiple bots can run simultaneously."
+        action={
+          <button 
+            className="secondary" 
+            onClick={() => setShowPerformanceDashboard(!showPerformanceDashboard)}
+          >
+            {showPerformanceDashboard ? <><Bot size={16} /> Bot Grid</> : <><BarChart3 size={16} /> Performance Dashboard</>}
+          </button>
+        }
       />
       {botsLoadError && (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', marginBottom: '16px', background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: '9px', fontSize: '12px' }}>
@@ -3059,7 +3122,14 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
           </div>
         </div>
       )}
-      <div className="bot-grid">
+      
+      {showPerformanceDashboard ? (
+        <BotPerformanceDashboard 
+          bots={bots} 
+          trades={trades} 
+        />
+      ) : (
+        <div className="bot-grid">
         {bots.map((bot) => {
           const botTrades = trades.filter((trade) => trade.bot_name === bot.name);
           const stake = stakeMap[bot.name] ?? 10;
@@ -3113,11 +3183,10 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
           );
         })}
       </div>
+      )}
     </>
   );
 }
-
-
 
 function MarketScanner() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'>('ALL');
@@ -4408,6 +4477,10 @@ function Settings({
   lossLimitReached,
   resetSessionBaseline,
   onRequestBotLiveConfirm,
+  notificationSystem,
+  botConfig,
+  onSaveBotConfig,
+  user,
 }: {
   workspace: Workspace;
   updateWorkspace: (changes: Partial<Workspace>) => Promise<void>;
@@ -4432,6 +4505,10 @@ function Settings({
   lossLimitReached: boolean;
   resetSessionBaseline: () => void;
   onRequestBotLiveConfirm: (onConfirm: () => void) => void;
+  notificationSystem: any;
+  botConfig: Record<string, any>;
+  onSaveBotConfig: (botName: string, config: any) => void;
+  user: User | null;
 }) {
   const [limitInput, setLimitInput] = useState(String(Math.max(1, Number(workspace.loss_limit ?? 50))));
   const [limitSaved, setLimitSaved] = useState(false);
@@ -4664,6 +4741,47 @@ function Settings({
               Current session loss: <b>{money(sessionLossUsed)}</b> · {lossLimitReached ? 'Limit reached — trading blocked' : `${money(Math.max(0, parsedLimit - sessionLossUsed))} remaining at this limit`}
             </div>
           </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <div><span className="eyebrow">Communication</span><h2>Notification Settings</h2></div>
+            <Bell size={22} />
+          </div>
+          <NotificationSettings
+            preferences={notificationSystem.preferences}
+            onSave={notificationSystem.savePreferences}
+            onRequestPermission={notificationSystem.requestBrowserPermission}
+          />
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <div><span className="eyebrow">Strategy Management</span><h2>Export/Import Strategies</h2></div>
+            <FolderOpen size={22} />
+          </div>
+          <StrategyExportImport
+            botConfigs={botConfig}
+            workspaceSettings={{
+              lossLimit: workspace.loss_limit,
+              allowBotLiveTrading,
+              maxBalancePercent,
+            }}
+            onImport={(strategy) => {
+              // Handle strategy import
+              console.log('Importing strategy:', strategy);
+              setNotice(`Strategy "${strategy.strategy.name}" imported successfully!`);
+              // Apply imported configurations
+              strategy.strategy.botConfigs.forEach(({ botName, config }) => {
+                onSaveBotConfig(botName, config);
+              });
+              if (strategy.strategy.workspaceSettings) {
+                updateWorkspace({ loss_limit: strategy.strategy.workspaceSettings.lossLimit });
+              }
+            }}
+            userId={user?.id}
+          />
+          <StrategyTemplateLibrary />
         </section>
 
       </div>

@@ -122,7 +122,7 @@ export const TRADE_CATEGORIES: { key: TradeCategory; label: string; icon: string
 export type DigitContractType = 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF';
 
 export const DIGIT_TYPES: { type: DigitContractType; label: string; needsBarrier: boolean; color: string }[] = [
-  { type: 'DIGITEVEN',  label: 'Even',    needsBarrier: false, color: '#2dd4bf' },
+  { type: 'DIGITEVEN',  label: 'Even',    needsBarrier: false, color: '#ff8c42' },
   { type: 'DIGITODD',   label: 'Odd',     needsBarrier: false, color: '#f87171' },
   { type: 'DIGITOVER',  label: 'Over',    needsBarrier: true,  color: '#f97316' },
   { type: 'DIGITUNDER', label: 'Under',   needsBarrier: true,  color: '#3b82f6' },
@@ -997,7 +997,7 @@ export function ManualTrader({
     const radius = 22;
     const circumference = 2 * Math.PI * radius;
     const arcLength = Math.max(3, (pct / 100) * circumference);
-    const strokeColor = isMax ? '#00e5bf' : isMin ? '#f43f5e' : '#2dd4bf';
+    const strokeColor = isMax ? '#ffab5c' : isMin ? '#f43f5e' : '#ff8c42';
 
     return (
       <div
@@ -1538,12 +1538,12 @@ export function ManualTrader({
                 <svg viewBox="0 0 100 65" preserveAspectRatio="none" className="dtrader-svg">
                   <defs>
                     <linearGradient id="dtraderAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%"   stopColor="#2dd4bf" stopOpacity="0.18" />
-                      <stop offset="55%"  stopColor="#2dd4bf" stopOpacity="0.05" />
-                      <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0" />
+                      <stop offset="0%"   stopColor="#ff8c42" stopOpacity="0.18" />
+                      <stop offset="55%"  stopColor="#ff8c42" stopOpacity="0.05" />
+                      <stop offset="100%" stopColor="#ff8c42" stopOpacity="0" />
                     </linearGradient>
                     <filter id="lineGlow" x="-20%" y="-20%" width="140%" height="140%">
-                      <feDropShadow dx="0" dy="0" stdDeviation="0.35" floodColor="#2dd4bf" floodOpacity="0.35" />
+                      <feDropShadow dx="0" dy="0" stdDeviation="0.35" floodColor="#ff8c42" floodOpacity="0.35" />
                     </filter>
                   </defs>
 
@@ -1566,8 +1566,8 @@ export function ManualTrader({
                         y={Math.max(4, chartMath.currentY - 11)}
                         width="100"
                         height="22"
-                        fill="rgba(45, 212, 191, 0.08)"
-                        stroke="rgba(45, 212, 191, 0.35)"
+                        fill="rgba(255, 140, 66, 0.08)"
+                        stroke="rgba(255, 140, 66, 0.35)"
                         strokeDasharray="2 3"
                         vectorEffect="non-scaling-stroke"
                       />
@@ -1576,7 +1576,7 @@ export function ManualTrader({
                         y1={Math.max(4, chartMath.currentY - 11)}
                         x2="100"
                         y2={Math.max(4, chartMath.currentY - 11)}
-                        stroke="#2dd4bf"
+                        stroke="#ff8c42"
                         strokeWidth="0.8"
                         strokeDasharray="2 3"
                         vectorEffect="non-scaling-stroke"
@@ -1602,7 +1602,7 @@ export function ManualTrader({
                         y1={Math.max(4, chartMath.currentY - 14)}
                         x2="100"
                         y2={Math.max(4, chartMath.currentY - 14)}
-                        stroke="#34d399"
+                        stroke="#ff8c42"
                         strokeWidth="0.8"
                         strokeDasharray="3 3"
                         vectorEffect="non-scaling-stroke"
@@ -1664,7 +1664,7 @@ export function ManualTrader({
                         fill="none"
                         stroke={
                           activeContract?.status === 'won'
-                            ? '#34d399'
+                            ? '#ff8c42'
                             : activeContract?.status === 'lost'
                             ? '#f87171'
                             : '#38bdf8'
@@ -1679,7 +1679,7 @@ export function ManualTrader({
                           cx={pt.x}
                           cy={pt.y}
                           r="0.85"
-                          fill={activeContract?.status === 'won' ? '#34d399' : '#2dd4bf'}
+                          fill={activeContract?.status === 'won' ? '#ff8c42' : '#ff8c42'}
                           stroke="#07100f"
                           strokeWidth="0.75"
                           vectorEffect="non-scaling-stroke"
@@ -1708,7 +1708,7 @@ export function ManualTrader({
                     y1="0"
                     x2={chartMath.currentX}
                     y2="65"
-                    stroke="#2dd4bf"
+                    stroke="#ff8c42"
                     strokeWidth="0.75"
                     vectorEffect="non-scaling-stroke"
                     strokeDasharray="2 3"
@@ -1721,7 +1721,7 @@ export function ManualTrader({
                     y1={chartMath.currentY}
                     x2="100"
                     y2={chartMath.currentY}
-                    stroke="#2dd4bf"
+                    stroke="#ff8c42"
                     strokeWidth="0.75"
                     vectorEffect="non-scaling-stroke"
                     strokeDasharray="2 3"
@@ -1733,14 +1733,14 @@ export function ManualTrader({
                     cx={chartMath.currentX}
                     cy={chartMath.currentY}
                     r="2.2"
-                    fill="#2dd4bf"
+                    fill="#ff8c42"
                     opacity="0.2"
                   />
                   <circle
                     cx={chartMath.currentX}
                     cy={chartMath.currentY}
                     r="1.4"
-                    fill="#2dd4bf"
+                    fill="#ff8c42"
                     opacity="0.45"
                   />
                   <circle
@@ -1748,7 +1748,7 @@ export function ManualTrader({
                     cy={chartMath.currentY}
                     r="0.85"
                     fill="#ffffff"
-                    stroke="#0d9488"
+                    stroke="#ff8c42"
                     strokeWidth="0.6"
                     vectorEffect="non-scaling-stroke"
                   />
@@ -1767,8 +1767,8 @@ export function ManualTrader({
                 {/* Multipliers HUD Banner */}
                 {tradeCategory === 'growth' && growthType === 'multiplier' && (
                   <div className="dtrader-mult-hud">
-                    <span style={{ color: '#2dd4bf', fontWeight: 700 }}>⚡ Multipliers ×{multiplier}</span>
-                    <span>TP: <b style={{ color: '#34d399' }}>+${takeProfit}</b></span>
+                    <span style={{ color: '#ff8c42', fontWeight: 700 }}>⚡ Multipliers ×{multiplier}</span>
+                    <span>TP: <b style={{ color: '#ff8c42' }}>+${takeProfit}</b></span>
                     <span>SL: <b style={{ color: '#f87171' }}>-${stopLoss}</b></span>
                   </div>
                 )}
@@ -2743,11 +2743,11 @@ export function ManualTrader({
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10, width: '100%',
                       padding: '10px 12px', borderRadius: 8, marginBottom: 4, cursor: 'pointer',
-                      background: selectedInstrument === name ? 'rgba(45,212,191,0.08)' : 'transparent',
-                      border: `1px solid ${selectedInstrument === name ? 'rgba(45,212,191,0.3)' : '#1d2d29'}`,
-                      color: selectedInstrument === name ? '#2dd4bf' : '#cde0da', fontSize: 12, textAlign: 'left',
+                      background: selectedInstrument === name ? 'rgba(255,140,66,0.08)' : 'transparent',
+                      border: `1px solid ${selectedInstrument === name ? 'rgba(255,140,66,0.3)' : '#1d2d29'}`,
+                      color: selectedInstrument === name ? '#ff8c42' : '#cde0da', fontSize: 12, textAlign: 'left',
                     }}>
-                    <span style={{ width: 32, height: 32, borderRadius: 6, background: '#131f1d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: '#2dd4bf', flexShrink: 0 }}>
+                    <span style={{ width: 32, height: 32, borderRadius: 6, background: '#131f1d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: '#ff8c42', flexShrink: 0 }}>
                       {name.replace('Volatility ', '').replace(' Index', '').replace('(1s)', '').trim().substring(0, 4)}
                     </span>
                     {name}
