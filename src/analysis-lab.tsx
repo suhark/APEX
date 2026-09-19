@@ -8,14 +8,109 @@ function ema(values: number[], period: number) { if (values.length < period) ret
 function rsi(values: number[]) { const changes = values.slice(1).map((v, i) => v - values[i]); const gains = changes.filter((v) => v > 0).reduce((a, b) => a + b, 0); const losses = Math.abs(changes.filter((v) => v < 0).reduce((a, b) => a + b, 0)); return losses ? 100 - (100 / (1 + gains / losses)) : 100; }
 
 export function AnalysisLab() {
-  const [symbol, setSymbol] = useState('Volatility 75 Index'); const [timeframe, setTimeframe] = useState('1m'); const [chartWindow, setChartWindow] = useState(120); const [ticks, setTicks] = useState<Tick[]>([]); const [connected, setConnected] = useState(false); const [loading, setLoading] = useState(true); const [feedError, setFeedError] = useState(''); const [risk, setRisk] = useState(1); const [balance, setBalance] = useState(1000); const [entry, setEntry] = useState(100); const [exit, setExit] = useState(100.6); const [stake, setStake] = useState(10); const [multiTimeframeMode, setMultiTimeframeMode] = useState(false);
-  const quotes = ticks.map((tick) => tick.quote); const latest = quotes[quotes.length - 1] ?? 0; const fast = ema(quotes, 9); const slow = ema(quotes, 20); const momentum = rsi(quotes); const high = quotes.length ? Math.max(...quotes) : 0; const low = quotes.length ? Math.min(...quotes) : 0; const range = high - low; const direction = fast !== null && slow !== null ? (fast >= slow ? 'CALL' : 'PUT') : 'NO SIGNAL';
-  const trend = direction === 'CALL' ? 'Bullish' : direction === 'PUT' ? 'Bearish' : 'Neutral'; const trendStrength = Math.min(100, Math.abs((fast ?? latest) - (slow ?? latest)) / Math.max(latest, 1) * 10000); const atr = range / Math.max(quotes.length / 10, 1); const lastTick = ticks[ticks.length - 1]; const freshness = lastTick ? Math.max(0, Math.round((Date.now() - lastTick.time) / 1000)) : Infinity; const signalState = freshness > 15 ? 'EXPIRED' : quotes.length >= 50 ? 'CONFIRMED' : 'ACTIVE';
-  const scoreParts = { technical: Math.round(Math.min(20, trendStrength / 5 + (momentum > 45 && momentum < 70 ? 6 : 2))), statistical: Math.round(Math.min(25, quotes.length / 8)), validation: 0, economics: 0, data: freshness <= 5 ? 10 : freshness <= 15 ? 6 : 0 }; const score = Object.values(scoreParts).reduce((sum, value) => sum + value, 0);
-  const returns = quotes.slice(1).map((quote, index) => (quote - quotes[index]) / quotes[index]); const volatility = Math.sqrt(returns.reduce((sum, value) => sum + value ** 2, 0) / Math.max(returns.length, 1)) * 100;
-  const riskAmount = balance * risk / 100; const positionSize = Math.max(0, Math.min(riskAmount, stake)); const projected = entry ? ((exit - entry) / entry) * positionSize : 0;
+  const [symbol, setSymbol] = useState('Volatility 75 Index'); 
+  const [timeframe, setTimeframe] = useState('1m'); 
+  const [chartWindow, setChartWindow] = useState(120); 
+  const [ticks, setTicks] = useState<Tick[]>([]); 
+  const [connected, setConnected] = useState(false); 
+  const [loading, setLoading] = useState(true); 
+  const [feedError, setFeedError] = useState(''); 
+  const [risk, setRisk] = useState(1); 
+  const [balance, setBalance] = useState(1000); 
+  const [entry, setEntry] = useState(100); 
+  const [exit, setExit] = useState(100.6); 
+  const [stake, setStake] = useState(10); 
+  const [multiTimeframeMode, setMultiTimeframeMode] = useState(false);
+  const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(['1m', '5m']);
+  const [multiTimeframeData, setMultiTimeframeData] = useState<Record<string, Tick[]>>({});
+  const [correlationData, setCorrelationData] = useState<Record<string, number>>({});
+  
+  const quotes = ticks.map((tick) => tick.quote); 
+  const latest = quotes[quotes.length - 1] ?? 0; 
+  const fast = ema(quotes, 9); 
+  const slow = ema(quotes, 20); 
+  const momentum = rsi(quotes); 
+  const high = quotes.length ? Math.max(...quotes) : 0; 
+  const low = quotes.length ? Math.min(...quotes) : 0; 
+  const range = high - low; 
+  const direction = fast !== null && slow !== null ? (fast >= slow ? 'CALL' : 'PUT') : 'NO SIGNAL';
+  const trend = direction === 'CALL' ? 'Bullish' : direction === 'PUT' ? 'Bearish' : 'Neutral'; 
+  const trendStrength = Math.min(100, Math.abs((fast ?? latest) - (slow ?? latest)) / Math.max(latest, 1) * 10000); 
+  const atr = range / Math.max(quotes.length / 10, 1); 
+  const lastTick = ticks[ticks.length - 1]; 
+  const freshness = lastTick ? Math.max(0, Math.round((Date.now() - lastTick.time) / 1000)) : Infinity; 
+  const signalState = freshness > 15 ? 'EXPIRED' : quotes.length >= 50 ? 'CONFIRMED' : 'ACTIVE';
+  const scoreParts = { technical: Math.round(Math.min(20, trendStrength / 5 + (momentum > 45 && momentum < 70 ? 6 : 2))), statistical: Math.round(Math.min(25, quotes.length / 8)), validation: 0, economics: 0, data: freshness <= 5 ? 10 : freshness <= 15 ? 6 : 0 }; 
+  const score = Object.values(scoreParts).reduce((sum, value) => sum + value, 0);
+  const returns = quotes.slice(1).map((quote, index) => (quote - quotes[index]) / quotes[index]); 
+  const volatility = Math.sqrt(returns.reduce((sum, value) => sum + value ** 2, 0) / Math.max(returns.length, 1)) * 100;
+  const riskAmount = balance * risk / 100; 
+  const positionSize = Math.max(0, Math.min(riskAmount, stake)); 
+  const projected = entry ? ((exit - entry) / entry) * positionSize : 0;
   const chartQuotes = quotes.slice(Math.max(0, quotes.length - chartWindow));
-    const chart = useMemo(() => { const min = Math.min(...chartQuotes); const max = Math.max(...chartQuotes); const span = max - min || 1; return chartQuotes.map((quote, index) => `${(index / Math.max(chartQuotes.length - 1, 1)) * 100},${100 - ((quote - min) / span) * 86 - 7}`).join(' '); }, [chartQuotes]);
+  const chart = useMemo(() => { const min = Math.min(...chartQuotes); const max = Math.max(...chartQuotes); const span = max - min || 1; return chartQuotes.map((quote, index) => `${(index / Math.max(chartQuotes.length - 1, 1)) * 100},${100 - ((quote - min) / span) * 86 - 7}`).join(' '); }, [chartQuotes]);
+  
+  // Multi-timeframe data fetching
+  useEffect(() => {
+    if (!multiTimeframeMode) return;
+    
+    const code = (symbolMap[symbol] ?? 'R_75') as any;
+    const cancelled = { current: false };
+    
+    const fetchTimeframeData = async (tf: string) => {
+      try {
+        const history = await getTicksHistory(code, 300);
+        if (cancelled.current) return;
+        setMultiTimeframeData(prev => ({
+          ...prev,
+          [tf]: history.prices.map((quote, index) => ({ 
+            quote, 
+            time: (history.times[index] ?? Math.floor(Date.now() / 1000)) * 1000 
+          }))
+        }));
+      } catch (error) {
+        console.warn(`Failed to load ${tf} data:`, error);
+      }
+    };
+    
+    selectedTimeframes.forEach(tf => fetchTimeframeData(tf));
+    
+    return () => { cancelled.current = true; };
+  }, [symbol, multiTimeframeMode, selectedTimeframes]);
+  
+  // Calculate correlation between timeframes
+  useEffect(() => {
+    if (!multiTimeframeMode || selectedTimeframes.length < 2) return;
+    
+    const correlations: Record<string, number> = {};
+    const tfArray = selectedTimeframes;
+    
+    for (let i = 0; i < tfArray.length; i++) {
+      for (let j = i + 1; j < tfArray.length; j++) {
+        const tf1 = multiTimeframeData[tfArray[i]];
+        const tf2 = multiTimeframeData[tfArray[j]];
+        
+        if (tf1 && tf2 && tf1.length > 0 && tf2.length > 0) {
+          const minLength = Math.min(tf1.length, tf2.length);
+          const returns1 = tf1.slice(1, minLength).map((t, idx) => (t.quote - tf1[idx].quote) / tf1[idx].quote);
+          const returns2 = tf2.slice(1, minLength).map((t, idx) => (t.quote - tf2[idx].quote) / tf2[idx].quote);
+          
+          // Calculate Pearson correlation
+          const mean1 = returns1.reduce((a, b) => a + b, 0) / returns1.length;
+          const mean2 = returns2.reduce((a, b) => a + b, 0) / returns2.length;
+          const cov = returns1.reduce((sum, r1, idx) => sum + (r1 - mean1) * (returns2[idx] - mean2), 0) / returns1.length;
+          const std1 = Math.sqrt(returns1.reduce((sum, r) => sum + (r - mean1) ** 2, 0) / returns1.length);
+          const std2 = Math.sqrt(returns2.reduce((sum, r) => sum + (r - mean2) ** 2, 0) / returns2.length);
+          
+          const correlation = std1 > 0 && std2 > 0 ? cov / (std1 * std2) : 0;
+          correlations[`${tfArray[i]}-${tfArray[j]}`] = correlation;
+        }
+      }
+    }
+    
+    setCorrelationData(correlations);
+  }, [multiTimeframeData, selectedTimeframes]);
+  
   useEffect(() => {
     const code = (symbolMap[symbol] ?? 'R_75') as any;
     let cancelled = false;
@@ -30,7 +125,289 @@ export function AnalysisLab() {
     return () => { cancelled = true; unsubscribe(); };
   }, [symbol]);
   const refresh = () => { if (!connected) { setFeedError('Connect Deriv before refreshing live analysis.'); return; } setFeedError(''); };
-  return <><PageHeader eyebrow="Decision support" title="Analysis Lab" description="A transparent toolkit for studying price, momentum, volatility, structure and risk before you trade." action={<div style={{ display: 'flex', gap: '8px' }}><button className={multiTimeframeMode ? 'primary' : 'secondary'} onClick={() => setMultiTimeframeMode(!multiTimeframeMode)}><Layers size={16} /> {multiTimeframeMode ? 'Single View' : 'Multi-TF'}</button><button className="primary" onClick={refresh}><RefreshCw size={16} /> Refresh analysis</button></div>} /><section className="panel analysis-identity"><div><span className="eyebrow">Signal identity</span><h2>V75 · {symbol}</h2><p className="muted">Volatility Index · Rise/Fall · {timeframe}</p></div><div><span>Direction</span><strong>{trend}</strong></div><div><span>State</span><strong className={signalState === 'CONFIRMED' ? 'positive' : signalState === 'EXPIRED' ? 'negative' : ''}>{signalState}</strong></div><div><span>Score</span><strong>{score}/100</strong><small>ranking score, not probability</small></div><div><span>Last updated</span><strong>{lastTick ? new Date(lastTick.time).toLocaleTimeString() : '—'}</strong></div></section><div className="analysis-toolbar"><label>Market<select value={symbol} onChange={(event) => setSymbol(event.target.value)}><option>Volatility 75 Index</option><option>Volatility 50 Index</option><option>Volatility 100 Index</option></select></label><label>Timeframe<select value={timeframe} onChange={(event) => setTimeframe(event.target.value)}><option>1m</option><option>5m</option><option>15m</option></select></label><span className="analysis-live"><i className="live-dot" /> {loading ? 'Loading Deriv history…' : connected ? 'Live Deriv feed' : 'History loaded · waiting for tick'}</span>{feedError && <span className="analysis-feed-error">{feedError}</span>}</div><div className="analysis-grid"><section className="panel analysis-chart"><div className="panel-title"><div><span className="eyebrow">Price structure · {timeframe}</span><h2>{symbol}</h2></div><strong className="analysis-price">{latest ? latest.toFixed(2) : '—'}</strong></div><div className="analysis-chart-tools"><button type="button" onClick={() => setChartWindow((value) => Math.max(30, value - 30))}>−</button><span>{chartWindow} ticks</span><button type="button" onClick={() => setChartWindow((value) => Math.min(400, value + 30))}>+</button></div><div className="analysis-svg-wrap"><svg viewBox="0 0 100 100" preserveAspectRatio="none" className="analysis-svg"><polyline points={chart} fill="none" stroke="currentColor" strokeWidth="1.3" vectorEffect="non-scaling-stroke" /></svg></div><div className="chart-axis"><span>Low {low.toFixed(2)}</span><span>Range {range.toFixed(2)}</span><span>High {high.toFixed(2)}</span></div></section><section className="panel"><span className="eyebrow">Market technical regime</span><h2>{trend} alignment</h2><div className="analysis-regime"><div><span>Trend strength</span><strong>{trendStrength.toFixed(1)}</strong></div><div><span>Multi-TF alignment</span><strong>{timeframe} active</strong></div><div><span>Structure</span><strong>{trend === 'Bullish' ? 'HH / HL' : trend === 'Bearish' ? 'LH / LL' : 'Range'}</strong></div><div><span>Volatility regime</span><strong>{volatility > .15 ? 'Abnormal' : 'Normal'}</strong></div></div><h2>{direction === 'CALL' ? 'Bullish alignment' : direction === 'PUT' ? 'Bearish alignment' : 'Insufficient evidence'}</h2><div className="analysis-regime"><div><span>EMA 9</span><strong>{fast?.toFixed(3) ?? '—'}</strong></div><div><span>EMA 20</span><strong>{slow?.toFixed(3) ?? '—'}</strong></div><div><span>RSI 14</span><strong>{quotes.length > 1 ? momentum.toFixed(1) : '—'}</strong></div><div><span>Volatility</span><strong>{volatility.toFixed(3)}%</strong></div></div><div className="analysis-meter"><span style={{ width: `${Math.min(100, Math.max(0, momentum))}%` }} /></div><p className="muted">Momentum is descriptive evidence, not a guarantee. Confirm contract pricing and validation before acting.</p></section></div><div className="analysis-grid analysis-grid-three"><section className="panel"><div className="analysis-icon"><CandlestickChart size={17} /></div><span className="eyebrow">Trend tools</span><h2>Moving averages</h2><p className="muted">EMA 9/20 alignment highlights directional bias and helps separate trend from range conditions.</p><div className="tool-row"><span>Bias</span><b className={direction === 'CALL' ? 'positive' : 'negative'}>{direction}</b></div></section><section className="panel"><div className="analysis-icon"><Gauge size={17} /></div><span className="eyebrow">Momentum tools</span><h2>RSI and volatility</h2><p className="muted">Use momentum extremes with caution. High volatility lowers the quality of small edges.</p><div className="tool-row"><span>RSI state</span><b>{momentum > 70 ? 'Overbought' : momentum < 30 ? 'Oversold' : 'Neutral'}</b></div></section><section className="panel"><div className="analysis-icon"><ShieldCheck size={17} /></div><span className="eyebrow">Structure tools</span><h2>Range and breakouts</h2><p className="muted">Recent high, low and range provide context for pullbacks, breakouts and invalidation levels.</p><div className="tool-row"><span>Range</span><b>{range.toFixed(3)}</b></div></section></div><section className="panel analysis-evidence"><div><span className="eyebrow">Evidence checklist</span><h2>Qualification gates</h2></div>{[['Sample size gate', quotes.length >= 50], ['Multi-window consistency', quotes.length >= 100 && Math.abs(momentum - 50) > 5], ['Data freshness gate', freshness <= 15], ['Contract availability', connected], ['Technical regime', trend !== 'Neutral']].map(([label, passed]) => <div className="evidence-row" key={String(label)}><span>{passed ? '✓' : '✗'}</span><b>{label}</b><em>{passed ? 'PASS' : 'WAIT'}</em></div>)}</section><section className="panel score-breakdown"><span className="eyebrow">Score breakdown</span><h2>Weighted evidence</h2>{Object.entries(scoreParts).map(([key, value]) => <div className="tool-row" key={key}><span>{key === 'technical' ? 'Technical quality /20' : key === 'statistical' ? 'Statistical quality /25' : key === 'validation' ? 'Historical validation /25' : key === 'economics' ? 'Contract economics /20' : 'Data quality /10'}</span><b>{value}</b></div>)}</section><section className="panel validation-panel"><span className="eyebrow">Validation track record</span><h2>Live-capital gate</h2><div className="validation-grid"><div><span>OOS trades</span><strong>0 / 100</strong></div><div><span>Walk-forward windows</span><strong>0 / 5</strong></div><div><span>Actual OOS win rate</span><strong>—</strong></div><div><span>ROI</span><strong>—</strong></div><div><span>Profit factor</span><strong>—</strong></div><div><span>Live-capital gate</span><strong>NOT YET MET</strong></div></div><p className="muted">No validation results are invented. This configuration must accumulate out-of-sample evidence before promotion.</p></section><section className="panel risk-calculator"><div><span className="eyebrow">Risk calculator</span><h2>Size the idea before the contract</h2><p className="muted">This calculator does not place trades. It helps define a maximum stake from balance and risk tolerance.</p></div><div className="risk-fields"><label>Balance<input type="number" value={balance} onChange={(event) => setBalance(Number(event.target.value))} /></label><label>Risk %<input type="number" min="0" max="100" step=".1" value={risk} onChange={(event) => setRisk(Number(event.target.value))} /></label><label>Planned stake<input type="number" value={stake} onChange={(event) => setStake(Number(event.target.value))} /></label><label>Entry<input type="number" value={entry} onChange={(event) => setEntry(Number(event.target.value))} /></label><label>Exit<input type="number" value={exit} onChange={(event) => setExit(Number(event.target.value))} /></label></div><div className="risk-result"><div><span>Risk budget</span><strong>{money(riskAmount)}</strong></div><div><span>Suggested max stake</span><strong>{money(positionSize)}</strong></div><div><span>Projected move</span><strong className={projected >= 0 ? 'positive' : 'negative'}>{money(projected)}</strong></div></div></section></>;
+  
+  const toggleTimeframe = (tf: string) => {
+    setSelectedTimeframes(prev => 
+      prev.includes(tf) 
+        ? prev.filter(t => t !== tf)
+        : [...prev, tf]
+    );
+  };
+  
+  const generateMultiTfChart = (tf: string) => {
+    const tfTicks = multiTimeframeData[tf];
+    if (!tfTicks || tfTicks.length === 0) return '';
+    
+    const quotes = tfTicks.map(t => t.quote);
+    const chartQuotes = quotes.slice(Math.max(0, quotes.length - chartWindow));
+    const min = Math.min(...chartQuotes);
+    const max = Math.max(...chartQuotes);
+    const span = max - min || 1;
+    
+    return chartQuotes.map((quote, index) => 
+      `${(index / Math.max(chartQuotes.length - 1, 1)) * 100},${100 - ((quote - min) / span) * 86 - 7}`
+    ).join(' ');
+  };
+  
+  const getCorrelationColor = (correlation: number) => {
+    if (correlation > 0.7) return '#10b981';
+    if (correlation > 0.3) return '#34d399';
+    if (correlation > -0.3) return '#94a3b8';
+    if (correlation > -0.7) return '#f97316';
+    return '#ef4444';
+  };
+  
+  return <>
+    <PageHeader 
+      eyebrow="Decision support" 
+      title="Analysis Lab" 
+      description="A transparent toolkit for studying price, momentum, volatility, structure and risk before you trade." 
+      action={
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            className={multiTimeframeMode ? 'primary' : 'secondary'} 
+            onClick={() => setMultiTimeframeMode(!multiTimeframeMode)}
+          >
+            <Layers size={16} /> {multiTimeframeMode ? 'Single View' : 'Multi-TF'}
+          </button>
+          <button className="primary" onClick={refresh}>
+            <RefreshCw size={16} /> Refresh analysis
+          </button>
+        </div>
+      } 
+    />
+    
+    {multiTimeframeMode && (
+      <section className="panel" style={{ marginBottom: '16px' }}>
+        <div className="panel-title">
+          <div>
+            <span className="eyebrow">Multi-Timeframe Analysis</span>
+            <h2>Select Timeframes</h2>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {['1m', '5m', '15m'].map(tf => (
+            <button
+              key={tf}
+              className={selectedTimeframes.includes(tf) ? 'primary' : 'secondary'}
+              onClick={() => toggleTimeframe(tf)}
+              style={{ padding: '8px 16px' }}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
+      </section>
+    )}
+    
+    {multiTimeframeMode && selectedTimeframes.length >= 2 && (
+      <section className="panel" style={{ marginBottom: '16px' }}>
+        <div className="panel-title">
+          <div>
+            <span className="eyebrow">Correlation Analysis</span>
+            <h2>Timeframe Correlations</h2>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+          {Object.entries(correlationData).map(([pair, correlation]) => (
+            <div 
+              key={pair} 
+              style={{
+                padding: '12px',
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-light)',
+                borderRadius: '8px',
+                textAlign: 'center'
+              }}
+            >
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                {pair.replace('-', ' vs ')}
+              </div>
+              <div 
+                style={{ 
+                  fontSize: '18px', 
+                  fontWeight: '700', 
+                  color: getCorrelationColor(correlation),
+                  fontFamily: 'DM Mono, monospace'
+                }}
+              >
+                {correlation.toFixed(2)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+    
+    <section className="panel analysis-identity">
+      <div>
+        <span className="eyebrow">Signal identity</span>
+        <h2>V75 · {symbol}</h2>
+        <p className="muted">Volatility Index · Rise/Fall · {timeframe}</p>
+      </div>
+      <div><span>Direction</span><strong>{trend}</strong></div>
+      <div><span>State</span><strong className={signalState === 'CONFIRMED' ? 'positive' : signalState === 'EXPIRED' ? 'negative' : ''}>{signalState}</strong></div>
+      <div><span>Score</span><strong>{score}/100</strong><small>ranking score, not probability</small></div>
+      <div><span>Last updated</span><strong>{lastTick ? new Date(lastTick.time).toLocaleTimeString() : '—'}</strong></div>
+    </section>
+    
+    <div className="analysis-toolbar">
+      <label>Market<select value={symbol} onChange={(event) => setSymbol(event.target.value)}><option>Volatility 75 Index</option><option>Volatility 50 Index</option><option>Volatility 100 Index</option></select></label>
+      <label>Timeframe<select value={timeframe} onChange={(event) => setTimeframe(event.target.value)}><option>1m</option><option>5m</option><option>15m</option></select></label>
+      <span className="analysis-live"><i className="live-dot" /> {loading ? 'Loading Deriv history…' : connected ? 'Live Deriv feed' : 'History loaded · waiting for tick'}</span>
+      {feedError && <span className="analysis-feed-error">{feedError}</span>}
+    </div>
+    
+    {multiTimeframeMode ? (
+      <div className="analysis-grid-multi-tf">
+        {selectedTimeframes.map(tf => (
+          <section key={tf} className="panel analysis-chart">
+            <div className="panel-title">
+              <div>
+                <span className="eyebrow">Price structure · {tf}</span>
+                <h2>{symbol}</h2>
+              </div>
+              <strong className="analysis-price">
+                {multiTimeframeData[tf]?.length ? multiTimeframeData[tf][multiTimeframeData[tf].length - 1].quote.toFixed(2) : '—'}
+              </strong>
+            </div>
+            <div className="analysis-chart-tools">
+              <button type="button" onClick={() => setChartWindow((value) => Math.max(30, value - 30))}>−</button>
+              <span>{chartWindow} ticks</span>
+              <button type="button" onClick={() => setChartWindow((value) => Math.min(400, value + 30))}>+</button>
+            </div>
+            <div className="analysis-svg-wrap">
+              <svg viewBox="0 0 100 65" preserveAspectRatio="none" className="analysis-svg">
+                <polyline 
+                  points={generateMultiTfChart(tf)} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="1.3" 
+                  vectorEffect="non-scaling-stroke" 
+                />
+              </svg>
+            </div>
+            <div className="chart-axis">
+              <span>Low {multiTimeframeData[tf] ? Math.min(...multiTimeframeData[tf].map(t => t.quote)).toFixed(2) : '—'}</span>
+              <span>Range {multiTimeframeData[tf] ? (Math.max(...multiTimeframeData[tf].map(t => t.quote)) - Math.min(...multiTimeframeData[tf].map(t => t.quote))).toFixed(2) : '—'}</span>
+              <span>High {multiTimeframeData[tf] ? Math.max(...multiTimeframeData[tf].map(t => t.quote)).toFixed(2) : '—'}</span>
+            </div>
+          </section>
+        ))}
+      </div>
+    ) : (
+      <div className="analysis-grid">
+        <section className="panel analysis-chart">
+          <div className="panel-title">
+            <div>
+              <span className="eyebrow">Price structure · {timeframe}</span>
+              <h2>{symbol}</h2>
+            </div>
+            <strong className="analysis-price">{latest ? latest.toFixed(2) : '—'}</strong>
+          </div>
+          <div className="analysis-chart-tools">
+            <button type="button" onClick={() => setChartWindow((value) => Math.max(30, value - 30))}>−</button>
+            <span>{chartWindow} ticks</span>
+            <button type="button" onClick={() => setChartWindow((value) => Math.min(400, value + 30))}>+</button>
+          </div>
+          <div className="analysis-svg-wrap">
+            <svg viewBox="0 0 100 65" preserveAspectRatio="none" className="analysis-svg">
+              <polyline points={chart} fill="none" stroke="currentColor" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
+            </svg>
+          </div>
+          <div className="chart-axis">
+            <span>Low {low.toFixed(2)}</span>
+            <span>Range {range.toFixed(2)}</span>
+            <span>High {high.toFixed(2)}</span>
+          </div>
+        </section>
+        <section className="panel">
+          <span className="eyebrow">Market technical regime</span>
+          <h2>{trend} alignment</h2>
+          <div className="analysis-regime">
+            <div><span>Trend strength</span><strong>{trendStrength.toFixed(1)}</strong></div>
+            <div><span>Multi-TF alignment</span><strong>{timeframe} active</strong></div>
+            <div><span>Structure</span><strong>{trend === 'Bullish' ? 'HH / HL' : trend === 'Bearish' ? 'LH / LL' : 'Range'}</strong></div>
+            <div><span>Volatility regime</span><strong>{volatility > .15 ? 'Abnormal' : 'Normal'}</strong></div>
+          </div>
+          <h2>{direction === 'CALL' ? 'Bullish alignment' : direction === 'PUT' ? 'Bearish alignment' : 'Insufficient evidence'}</h2>
+          <div className="analysis-regime">
+            <div><span>EMA 9</span><strong>{fast?.toFixed(3) ?? '—'}</strong></div>
+            <div><span>EMA 20</span><strong>{slow?.toFixed(3) ?? '—'}</strong></div>
+            <div><span>RSI 14</span><strong>{quotes.length > 1 ? momentum.toFixed(1) : '—'}</strong></div>
+            <div><span>Volatility</span><strong>{volatility.toFixed(3)}%</strong></div>
+          </div>
+          <div className="analysis-meter"><span style={{ width: `${Math.min(100, Math.max(0, momentum))}%` }} /></div>
+          <p className="muted">Momentum is descriptive evidence, not a guarantee. Confirm contract pricing and validation before acting.</p>
+        </section>
+      </div>
+    )}
+    
+    <div className="analysis-grid analysis-grid-three">
+      <section className="panel">
+        <div className="analysis-icon"><CandlestickChart size={17} /></div>
+        <span className="eyebrow">Trend tools</span>
+        <h2>Moving averages</h2>
+        <p className="muted">EMA 9/20 alignment highlights directional bias and helps separate trend from range conditions.</p>
+        <div className="tool-row"><span>Bias</span><b className={direction === 'CALL' ? 'positive' : 'negative'}>{direction}</b></div>
+      </section>
+      <section className="panel">
+        <div className="analysis-icon"><Gauge size={17} /></div>
+        <span className="eyebrow">Momentum tools</span>
+        <h2>RSI and volatility</h2>
+        <p className="muted">Use momentum extremes with caution. High volatility lowers the quality of small edges.</p>
+        <div className="tool-row"><span>RSI state</span><b>{momentum > 70 ? 'Overbought' : momentum < 30 ? 'Oversold' : 'Neutral'}</b></div>
+      </section>
+      <section className="panel">
+        <div className="analysis-icon"><ShieldCheck size={17} /></div>
+        <span className="eyebrow">Structure tools</span>
+        <h2>Range and breakouts</h2>
+        <p className="muted">Recent high, low and range provide context for pullbacks, breakouts and invalidation levels.</p>
+        <div className="tool-row"><span>Range</span><b>{range.toFixed(3)}</b></div>
+      </section>
+    </div>
+    <section className="panel analysis-evidence">
+      <div><span className="eyebrow">Evidence checklist</span><h2>Qualification gates</h2></div>
+      {[['Sample size gate', quotes.length >= 50], ['Multi-window consistency', quotes.length >= 100 && Math.abs(momentum - 50) > 5], ['Data freshness gate', freshness <= 15], ['Contract availability', connected], ['Technical regime', trend !== 'Neutral']].map(([label, passed]) => <div className="evidence-row" key={String(label)}><span>{passed ? '✓' : '✗'}</span><b>{label}</b><em>{passed ? 'PASS' : 'WAIT'}</em></div>)}
+    </section>
+    <section className="panel score-breakdown">
+      <span className="eyebrow">Score breakdown</span>
+      <h2>Weighted evidence</h2>
+      {Object.entries(scoreParts).map(([key, value]) => <div className="tool-row" key={key}><span>{key === 'technical' ? 'Technical quality /20' : key === 'statistical' ? 'Statistical quality /25' : key === 'validation' ? 'Historical validation /25' : key === 'economics' ? 'Contract economics /20' : 'Data quality /10'}</span><b>{value}</b></div>)}
+    </section>
+    <section className="panel validation-panel">
+      <span className="eyebrow">Validation track record</span>
+      <h2>Live-capital gate</h2>
+      <div className="validation-grid">
+        <div><span>OOS trades</span><strong>0 / 100</strong></div>
+        <div><span>Walk-forward windows</span><strong>0 / 5</strong></div>
+        <div><span>Actual OOS win rate</span><strong>—</strong></div>
+        <div><span>ROI</span><strong>—</strong></div>
+        <div><span>Profit factor</span><strong>—</strong></div>
+        <div><span>Live-capital gate</span><strong>NOT YET MET</strong></div>
+      </div>
+      <p className="muted">No validation results are invented. This configuration must accumulate out-of-sample evidence before promotion.</p>
+    </section>
+    <section className="panel risk-calculator">
+      <div>
+        <span className="eyebrow">Risk calculator</span>
+        <h2>Size the idea before the contract</h2>
+        <p className="muted">This calculator does not place trades. It helps define a maximum stake from balance and risk tolerance.</p>
+      </div>
+      <div className="risk-fields">
+        <label>Balance<input type="number" value={balance} onChange={(event) => setBalance(Number(event.target.value))} /></label>
+        <label>Risk %<input type="number" min="0" max="100" step=".1" value={risk} onChange={(event) => setRisk(Number(event.target.value))} /></label>
+        <label>Planned stake<input type="number" value={stake} onChange={(event) => setStake(Number(event.target.value))} /></label>
+        <label>Entry<input type="number" value={entry} onChange={(event) => setEntry(Number(event.target.value))} /></label>
+        <label>Exit<input type="number" value={exit} onChange={(event) => setExit(Number(event.target.value))} /></label>
+      </div>
+      <div className="risk-result">
+        <div><span>Risk budget</span><strong>{money(riskAmount)}</strong></div>
+        <div><span>Suggested max stake</span><strong>{money(positionSize)}</strong></div>
+        <div><span>Projected move</span><strong className={projected >= 0 ? 'positive' : 'negative'}>{money(projected)}</strong></div>
+      </div>
+    </section>
+  </>;
 }
 function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) { return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>; }
 function money(value: number) { return `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`; }

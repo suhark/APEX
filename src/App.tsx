@@ -1869,6 +1869,40 @@ function App() {
   const guardPercent = computeGuardPercent(sessionLossUsed, lossLimit);
   const lossLimitReached = lossLimit > 0 && sessionLossUsed >= lossLimit;
 
+  // Session loss limit notifications
+  const lossLimitNotifiedRef = useRef<{ '75': boolean; '90': boolean; '100': boolean }>({ '75': false, '90': false, '100': false });
+  
+  useEffect(() => {
+    if (!lossLimit) return;
+    
+    const thresholds = [
+      { percent: 75, key: '75' as const },
+      { percent: 90, key: '90' as const },
+      { percent: 100, key: '100' as const },
+    ];
+    
+    thresholds.forEach(({ percent, key }) => {
+      if (guardPercent >= percent && !lossLimitNotifiedRef.current[key]) {
+        lossLimitNotifiedRef.current[key] = true;
+        
+        const priority = key === '100' ? 'high' : 'medium';
+        const title = key === '100' 
+          ? 'Session Loss Limit Reached!' 
+          : `Session Loss Warning: ${percent}%`;
+        const message = key === '100'
+          ? `Trading blocked. Session loss of ${money(sessionLossUsed)} has reached the limit of ${money(lossLimit)}.`
+          : `Session loss at ${money(sessionLossUsed)} (${guardPercent.toFixed(0)}% of ${money(lossLimit)} limit).`;
+        
+        notificationSystem.addNotification({
+          type: 'alert',
+          priority,
+          title,
+          message,
+        });
+      }
+    });
+  }, [guardPercent, lossLimit, sessionLossUsed, notificationSystem]);
+
   // Context-isolated trade list passed to all page components
   const contextTrades = useMemo(
     () => filterTradesByContext(trades, statsContext),
