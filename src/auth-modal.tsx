@@ -341,7 +341,7 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
                 {resendCooldown > 0 ? (
                   <span>Resend in {resendCooldown}s</span>
                 ) : (
-                  <button type="button" className="auth-link-btn"
+                  <button type="button" className="auth-link-btn secondary-action"
                     onClick={async () => {
                       setError(null);
                       const sent = await requestOtp(email.trim().toLowerCase());
@@ -404,17 +404,17 @@ export function AuthModal({ supabase, onAuthSuccess, onClose }: AuthModalProps) 
         {/* ── Footer links ── */}
         <div className="auth-footer">
           {mode === 'otp' ? (
-            <p>Wrong email? <button type="button" className="auth-link-btn" onClick={() => switchMode('signup')}>Go back</button></p>
+            <p>Wrong email? <button type="button" className="auth-link-btn secondary-action" onClick={() => switchMode('signup')}>Go back</button></p>
           ) : mode === 'reset' ? (
-            <p>Remembered it? <button type="button" className="auth-link-btn" onClick={() => switchMode('signin')}>Back to sign in</button></p>
+            <p>Remembered it? <button type="button" className="auth-link-btn secondary-action" onClick={() => switchMode('signin')}>Back to sign in</button></p>
           ) : mode === 'signin' ? (
             <p>
-              <button type="button" className="auth-link-btn" onClick={() => switchMode('reset')}>Forgot password?</button>
+              <button type="button" className="auth-link-btn secondary-action" onClick={() => switchMode('reset')}>Forgot password?</button>
               {' · '}
-              No account? <button type="button" className="auth-link-btn" onClick={() => switchMode('signup')}>Create one</button>
+              No account? <button type="button" className="auth-link-btn primary-action" onClick={() => switchMode('signup')}>Create one</button>
             </p>
           ) : (
-            <p>Already have an account? <button type="button" className="auth-link-btn" onClick={() => switchMode('signin')}>Sign in</button></p>
+            <p>Already have an account? <button type="button" className="auth-link-btn secondary-action" onClick={() => switchMode('signin')}>Sign in</button></p>
           )}
         </div>
       </div>
