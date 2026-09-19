@@ -1808,6 +1808,15 @@ function App() {
   const runTradeRef = useRef(runTrade);
   runTradeRef.current = runTrade;
 
+  // Map to track manual trader contracts by Deriv contract ID
+  const manualContractMapRef = useRef<Map<number, string>>(new Map());
+
+  const handleManualContractUpdate = (contractId: number, update: { status: 'won' | 'lost'; profit: number }) => {
+    console.log('Manual contract update:', contractId, update);
+    // This will be used to update the manual trader's active contract
+    // For now, we'll rely on the existing trade update mechanism
+  };
+
   const activeBalance = derivConnected && deriv.account ? deriv.account.balance : (workspace?.balance ?? 0);
   const sessionStartBalance = sessionStartingBalance ?? activeBalance;
 
@@ -2285,6 +2294,7 @@ function PageView({
         linkedDemoAccount={deriv.accounts.find((a) => a.is_virtual)}
         onGoToSettings={() => setPage('settings')}
         onBack={() => setPage('dashboard')}
+        trades={contextTrades}
       />
     );
   }

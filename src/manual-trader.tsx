@@ -46,6 +46,7 @@ export interface ManualTraderProps {
   linkedDemoAccount?: { loginid: string; balance: number; currency: string };
   onGoToSettings?: () => void;
   onBack?: () => void;
+  trades?: Array<{ id: string; result: string; profit: number; created_at: string; source?: string }>;
 }
 
 interface TickPoint {
@@ -57,6 +58,8 @@ interface TickPoint {
 
 interface ActiveContract {
   id: string;
+  tradeId?: string; // Deriv trade ID for matching with trades array
+  derivContractId?: number; // Actual Deriv contract ID for real-time updates
   direction: 'CALL' | 'PUT';
   contractType?: string;
   digitBarrier?: number;
@@ -191,6 +194,7 @@ export function ManualTrader({
   linkedDemoAccount,
   onGoToSettings,
   onBack,
+  trades = [],
 }: ManualTraderProps) {
   const [selectedInstrument, setSelectedInstrument] = useState<string>('Volatility 100 (1s) Index');
   const [selectedSymbolCode, setSelectedSymbolCode] = useState<string | null>('R_100');
@@ -468,6 +472,15 @@ export function ManualTrader({
         // Advance active contract
         setActiveContract(prevAc => {
           if (!prevAc || prevAc.status !== 'running') return prevAc;
+
+          // If this is a real Deriv contract, don't evaluate locally - wait for Deriv results
+          if (prevAc.derivContractId) {
+            const nextTicks = [...prevAc.ticks, { quote: t.quote, tickIndex: nextTick.index }];
+            // Just update ticks, don't settle - let Deriv handle the result
+            return { ...prevAc, currentTickCount: nextTicks.length, ticks: nextTicks };
+          }
+
+          // Synthetic mode - evaluate locally
           const nextTicks = [...prevAc.ticks, { quote: t.quote, tickIndex: nextTick.index }];
           if (nextTicks.length >= prevAc.totalTicks) {
             const won = evaluateContractResult(prevAc, t.quote, allowEquals);
@@ -501,6 +514,42 @@ export function ManualTrader({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedInstrument, selectedSymbolCode, derivConnected]);
 
+  // Monitor trades array to update manual trader contracts when Deriv settles them
+  useEffect(() => {
+    if (!derivConnected) return;
+
+    // Find recent manual trades that have settled
+    const recentManualTrades = trades.filter(t =>
+      t.source === 'manual' &&
+      (t.result === 'won' || t.result === 'lost') &&
+      new Date(t.created_at).getTime() > Date.now() - 60000 // Last 60 seconds
+    );
+
+    recentManualTrades.forEach(trade => {
+      // Try to match with active contract by creation time
+      const tradeTime = new Date(trade.created_at).getTime();
+      setActiveContract(prevAc => {
+        if (!prevAc || prevAc.status !== 'running') return prevAc;
+
+        // If this contract was created around the same time as the trade
+        const contractTime = parseInt(prevAc.id);
+        if (Math.abs(contractTime - tradeTime) < 5000) { // Within 5 seconds
+          console.log('[ManualTrader] Updating contract from Deriv result:', { contractId: prevAc.id, tradeResult: trade.result, profit: trade.profit });
+          const updatedContract = {
+            ...prevAc,
+            status: trade.result as 'won' | 'lost',
+            payout: Math.abs(trade.profit), // Use actual Deriv profit (absolute value for display)
+            derivPayout: trade.profit,
+          };
+          // Update position history
+          setPositionHistory(prev => prev.map(c => c.id === prevAc.id ? updatedContract : c));
+          return updatedContract;
+        }
+        return prevAc;
+      });
+    });
+  }, [trades, derivConnected]);
+
   // Synthetic tick feed — only runs when NOT connected to Deriv
   useEffect(() => {
     if (derivConnected) return; // real ticks handle updates when connected
@@ -525,6 +574,18 @@ export function ManualTrader({
 
       // Advance active contract ticks if a contract is running
       if (activeContract && activeContract.status === 'running') {
+        // If this is a real Deriv contract, don't evaluate locally - wait for Deriv results
+        if (activeContract.derivContractId) {
+          const nextContractTicks = [...activeContract.ticks, { quote: nextQuote, tickIndex: nextTick.index }];
+          setActiveContract({
+            ...activeContract,
+            currentTickCount: nextContractTicks.length,
+            ticks: nextContractTicks,
+          });
+          return updated;
+        }
+
+        // Synthetic mode - evaluate locally
         const nextContractTicks = [...activeContract.ticks, { quote: nextQuote, tickIndex: nextTick.index }];
         const count = nextContractTicks.length;
 
@@ -868,8 +929,9 @@ export function ManualTrader({
         calcPayout = Number((stake * multiplier).toFixed(2));
       }
 
+      const localContractId = String(Date.now());
       const newContract: ActiveContract = {
-        id: String(Date.now()),
+        id: localContractId,
         direction: (action === 'CALL' || action === 'PUT') ? action : (action === 'DIGITOVER' || action === 'DIGITMATCH' || action === 'DIGITEVEN' || action === 'MULTUP' || action === 'ACCU') ? 'CALL' : 'PUT',
         contractType: action,
         digitBarrier: (action === 'DIGITOVER' || action === 'DIGITUNDER' || action === 'DIGITMATCH' || action === 'DIGITDIFF') ? digitBarrier : undefined,
@@ -897,14 +959,17 @@ export function ManualTrader({
             growth_rate,
             duration,
           });
-          
-          // Update the contract with accurate Deriv payout data
-          if (result && result.derivPayout) {
-            setActiveContract(prev => prev ? { ...prev, derivPayout: result.derivPayout } : prev);
-            setPositionHistory(prev => prev.map(c => c.id === newContract.id ? { ...c, derivPayout: result.derivPayout } : c));
+
+          // Update the contract with Deriv contract ID and accurate payout data
+          if (result && result.contractId) {
+            setActiveContract(prev => prev ? { ...prev, derivContractId: result.contractId, derivPayout: result.derivPayout } : prev);
+            setPositionHistory(prev => prev.map(c => c.id === localContractId ? { ...c, derivContractId: result.contractId, derivPayout: result.derivPayout } : c));
           }
         } catch (err) {
           console.warn('[ManualTrader] live runTrade warning:', err);
+          // If Deriv trade fails, remove the local contract
+          setActiveContract(null);
+          setPositionHistory(prev => prev.filter(c => c.id !== localContractId));
         }
       }
     } finally {
