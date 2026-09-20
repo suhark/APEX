@@ -328,8 +328,8 @@ RESPONSE GUIDELINES:
       setConversation(prev => ({
         ...prev,
         messages: [...prev.messages, userMessage, assistantMessage],
-        isComplete: !needsClarification && extractedConfig !== null,
-        generatedConfig: extractedConfig,
+        isComplete: false, // Allow continued conversation even after config generation
+        generatedConfig: extractedConfig || prev.generatedConfig, // Keep existing config if no new one
         configFormat: selectedFormat,
         needsClarification
       }));
@@ -490,7 +490,7 @@ RESPONSE GUIDELINES:
           <div ref={messagesEndRef} />
         </div>
 
-        {conversation.isComplete && conversation.generatedConfig && (
+        {conversation.generatedConfig && (
           <div className="generated-config-panel">
             <div className="config-header">
               <div>
@@ -540,11 +540,11 @@ RESPONSE GUIDELINES:
                 ? "Please provide the requested information..." 
                 : "Describe your trading strategy..."
             }
-            disabled={isLoading || conversation.isComplete}
+            disabled={isLoading}
             rows={3}
           />
           <div className="input-actions">
-            {conversation.messages.length > 0 && !conversation.isComplete && (
+            {conversation.messages.length > 0 && (
               <button className="secondary" onClick={handleReset} disabled={isLoading}>
                 <RefreshCw size={16} /> Reset
               </button>
@@ -552,7 +552,7 @@ RESPONSE GUIDELINES:
             <button 
               className="primary" 
               onClick={handleSendMessage}
-              disabled={!input.trim() || isLoading || conversation.isComplete || !OPENROUTER_API_KEY}
+              disabled={!input.trim() || isLoading || !OPENROUTER_API_KEY}
             >
               {isLoading ? <Loader2 size={16} className="spinner" /> : <Send size={16} />}
               {isLoading ? 'Sending...' : conversation.needsClarification ? 'Answer' : 'Generate'}
