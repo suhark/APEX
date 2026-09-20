@@ -12,7 +12,7 @@ export default defineConfig({
   },
   server: {
     headers: {
-      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://openrouter.ai https://*.openrouter.ai https://*.supabase.co https://*.deriv.com; font-src 'self' data:;"
+      'Content-Security-Policy': "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://cloudflareinsights.com https://openrouter.ai https://*.openrouter.ai https://pnvddbkfxemntbxtmkhm.supabase.co wss://pnvddbkfxemntbxtmkhm.supabase.co https://*.supabase.co wss://*.derivws.com wss://*.binary.com https://*.deriv.com https://api.derivws.com https://auth.deriv.com; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
     }
   },
   optimizeDeps: {
