@@ -287,11 +287,6 @@ RESPONSE GUIDELINES:
       timestamp: Date.now()
     };
 
-    setConversation(prev => ({
-      ...prev,
-      messages: [...prev.messages, userMessage]
-    }));
-    
     setInput('');
     setIsLoading(true);
     setError('');
@@ -453,19 +448,9 @@ RESPONSE GUIDELINES:
               className={`message ${message.role === 'user' ? 'user-message' : 'assistant-message'}`}
             >
               <div className="message-content">
-                {message.role === 'assistant' && (
-                  <div className="message-avatar">
-                    <Sparkles size={16} />
-                  </div>
-                )}
                 <div className="message-text"
                   dangerouslySetInnerHTML={{ __html: parseMarkdown(message.content) }}
                 />
-                {message.role === 'user' && (
-                  <div className="message-avatar user">
-                    <span>U</span>
-                  </div>
-                )}
               </div>
               {message.timestamp && (
                 <div className="message-time">
@@ -478,9 +463,6 @@ RESPONSE GUIDELINES:
           {isLoading && (
             <div className="message assistant-message loading">
               <div className="message-content">
-                <div className="message-avatar">
-                  <Sparkles size={16} />
-                </div>
                 <div className="message-text">
                   <Loader2 size={16} className="spinner" />
                   <span>AI is thinking...</span>
