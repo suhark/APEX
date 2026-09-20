@@ -698,8 +698,8 @@ function App() {
           total_trades: bot.total_trades + 1,
           wins: bot.wins + (isWin ? 1 : 0),
           pnl: Number((bot.pnl + profit).toFixed(2)),
-          won_amount: Number((bot.won_amount + (isWin ? profit : 0)).toFixed(2)),
-          lost_amount: Number((bot.lost_amount + (isWin ? 0 : Math.abs(profit))).toFixed(2)),
+          won_amount: Number(((bot.won_amount || 0) + (isWin ? profit : 0)).toFixed(2)),
+          lost_amount: Number(((bot.lost_amount || 0) + (isWin ? 0 : Math.abs(profit))).toFixed(2)),
         };
       })
     );
@@ -1741,12 +1741,12 @@ function App() {
           const oddBias  = oddCount / total;
 
           if (Math.max(evenBias, oddBias) < cfg.biasThreshold) {
-            setBotStatus(s => ({ ...s, 'Digit Surge': `🔍 Scanning — bias ${(Math.max(evenBias, oddBias) * 100).toFixed(0)}% < ${(cfg.biasThreshold * 100).toFixed(0)}%` }));
+            setBotStatus(s => ({ ...s, 'Digit Surge': `🔍 Scanning — bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% < ${(cfg.biasThreshold * 100).toFixed(0)}%` }));
             return;
           }
 
           const digitDir = evenBias >= oddBias ? 'DIGITEVEN' : 'DIGITODD';
-          setBotStatus(s => ({ ...s, 'Digit Surge': `✅ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias, oddBias) * 100).toFixed(0)}% — losses: ${digitSurgeLossRef.current}/${cfg.maxConsecLosses}` }));
+          setBotStatus(s => ({ ...s, 'Digit Surge': `✅ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% — losses: ${digitSurgeLossRef.current}/${cfg.maxConsecLosses}` }));
           instrument = 'Volatility 10 (1s) Index';
           direction  = digitDir;
           stake      = Math.max(0.35, cfg.stake);
@@ -1815,12 +1815,12 @@ function App() {
           const drift = (close - ma) / (ma || 1);
 
           if (Math.abs(drift) < cfg.driftThreshold) {
-            setBotStatus(s => ({ ...s, 'Asian Drift': `🔍 Scanning — drift ${(drift * 100).toFixed(3)}%` }));
+            setBotStatus(s => ({ ...s, 'Asian Drift': `🔍 Scanning — drift ${((drift || 0) * 100).toFixed(3)}%` }));
             return;
           }
 
           const asianDir = drift > 0 ? 'ASIANU' : 'ASIAND';
-          setBotStatus(s => ({ ...s, 'Asian Drift': `✅ ASIAN ${drift > 0 ? 'UP' : 'DOWN'} drift ${(Math.abs(drift) * 100).toFixed(3)}%` }));
+          setBotStatus(s => ({ ...s, 'Asian Drift': `✅ ASIAN ${drift > 0 ? 'UP' : 'DOWN'} drift ${(Math.abs(drift || 0) * 100).toFixed(3)}%` }));
           instrument = 'Volatility 50 Index';
           direction  = asianDir;
           stake      = Math.max(0.35, cfg.stake);
@@ -2248,7 +2248,7 @@ function App() {
             return (
               <div className="ticker-item" key={instrument}>
                 <span>{instrument.replace(' Index', '')}</span>
-                <b>{value.toFixed(2)}</b>
+                <b>{(value || 0).toFixed(2)}</b>
                 <em className={up ? 'positive' : 'negative'}>{up ? '+' : '-'}{(0.12 + index * 0.08).toFixed(2)}%</em>
               </div>
             );
@@ -2591,9 +2591,9 @@ function LiveContractsBar({ contracts }: { contracts: Record<string, { profit: n
             <span style={{ color: '#80948e' }}>{c.instrument.replace('Volatility ', 'V').replace(' Index', '')}</span>
             <span style={{ color: '#cde0da', fontWeight: 600 }}>{label}</span>
             <span style={{ fontFamily: "'DM Mono', monospace", fontWeight: 700, color: isUp ? '#2dd4bf' : '#f87171' }}>
-              {isUp ? '+' : ''}{c.profit.toFixed(2)}
+              {isUp ? '+' : ''}{(c.profit || 0).toFixed(2)}
             </span>
-            <span style={{ color: '#4a6a62' }}>/ {c.stake.toFixed(2)}</span>
+            <span style={{ color: '#4a6a62' }}>/ {(c.stake || 0).toFixed(2)}</span>
           </div>
         );
       })}
@@ -2812,21 +2812,21 @@ function EquityChart({
         index: i + 1,
         trade,
         profit: p,
-        cumulative: Number(cumulative.toFixed(2)),
-        peak: Number(peak.toFixed(2)),
-        drawdown: Number(dd.toFixed(2)),
+        cumulative: Number((cumulative || 0).toFixed(2)),
+        peak: Number((peak || 0).toFixed(2)),
+        drawdown: Number((dd || 0).toFixed(2)),
       };
     });
 
-    const netProfit = Number(cumulative.toFixed(2));
+    const netProfit = Number((cumulative || 0).toFixed(2));
     const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : grossProfit > 0 ? 'MAX' : '1.0';
     const winRate = Math.round((wins / chronological.length) * 100);
 
     return {
       dataPoints,
       netProfit,
-      peak: Number(peak.toFixed(2)),
-      maxDrawdown: Number(maxDrawdown.toFixed(2)),
+      peak: Number((peak || 0).toFixed(2)),
+      maxDrawdown: Number((maxDrawdown || 0).toFixed(2)),
       profitFactor,
       winRate,
       bestStreak,
@@ -2846,8 +2846,8 @@ function EquityChart({
   let minVal = Math.min(0, ...values);
   let maxVal = Math.max(0, ...values);
   const pad = (maxVal - minVal) * 0.18 || 5;
-  minVal = Number((minVal - pad).toFixed(2));
-  maxVal = Number((maxVal + pad).toFixed(2));
+  minVal = Number(((minVal || 0) - pad).toFixed(2));
+  maxVal = Number(((maxVal || 0) + pad).toFixed(2));
   const range = maxVal - minVal || 1;
 
   // SVG coordinate space: 0 0 100 56
@@ -2857,9 +2857,9 @@ function EquityChart({
     return { ...pt, x, y };
   });
 
-  const pathStr = coords.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
-  const firstX = coords[0].x.toFixed(2);
-  const lastX = coords[coords.length - 1].x.toFixed(2);
+  const pathStr = coords.map((p, i) => `${i === 0 ? 'M' : 'L'} ${(p.x || 0).toFixed(2)} ${(p.y || 0).toFixed(2)}`).join(' ');
+  const firstX = (coords[0]?.x || 0).toFixed(2);
+  const lastX = (coords[coords.length - 1]?.x || 0).toFixed(2);
 
   // Break-even (0 line) position
   const zeroY = 50 - ((0 - minVal) / range) * 44;
@@ -2876,7 +2876,7 @@ function EquityChart({
   const strokeColor = stats.netProfit >= 0 ? color : '#f43f5e';
 
   // Format price helper
-  const fmt = (v: number) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toFixed(2)}`;
+  const fmt = (v: number) => `${v >= 0 ? '+' : '-'}$${Math.abs(v || 0).toFixed(2)}`;
 
   if (compact) {
     return (
@@ -2888,7 +2888,7 @@ function EquityChart({
               <stop offset="100%" stopColor={strokeColor} stopOpacity="0" />
             </linearGradient>
           </defs>
-          <polygon points={`2,55 ${coords.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')} ${lastX},55`} fill={`url(#${gid})`} />
+          <polygon points={`2,55 ${coords.map((p) => `${(p.x || 0).toFixed(2)},${(p.y || 0).toFixed(2)}`).join(' ')} ${lastX},55`} fill={`url(#${gid})`} />
           <path
             d={pathStr}
             fill="none"
@@ -3019,7 +3019,7 @@ function EquityChart({
           )}
 
           {/* Area Fill */}
-          <polygon points={`2,55 ${coords.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')} ${lastX},55`} fill={`url(#${gid})`} />
+          <polygon points={`2,55 ${coords.map((p) => `${(p.x || 0).toFixed(2)},${(p.y || 0).toFixed(2)}`).join(' ')} ${lastX},55`} fill={`url(#${gid})`} />
 
           {/* Main Equity Trend Line - razor-sharp thin line */}
           <path
