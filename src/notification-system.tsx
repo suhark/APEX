@@ -363,7 +363,7 @@ export function NotificationSettings({
   onSave: (prefs: NotificationPreferences) => void;
   onRequestPermission: () => Promise<boolean>;
 }) {
-  const [localPrefs, setLocalPrefs] = useState(preferences);
+  const [localPrefs, setLocalPrefs] = useState(preferences || DEFAULT_PREFERENCES);
   const [permissionStatus, setPermissionStatus] = useState<string>('unknown');
 
   useEffect(() => {

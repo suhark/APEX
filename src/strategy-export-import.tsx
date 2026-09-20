@@ -38,7 +38,7 @@ interface StrategyExportImportProps {
 }
 
 export function StrategyExportImport({ 
-  botConfigs, 
+  botConfigs = {}, 
   workspaceSettings, 
   onImport, 
   userId 
