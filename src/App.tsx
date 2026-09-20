@@ -3442,7 +3442,7 @@ function MarketScanner() {
       <p>Live market analysis powered by Deriv tick data</p>
     </div>
     <div className="feature-card">
-      <Settings size={20} />
+      <Settings2 size={20} />
       <h3>Advanced Filters</h3>
       <p>Customize scan parameters for your strategy</p>
     </div>
