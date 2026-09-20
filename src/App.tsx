@@ -143,6 +143,16 @@ function evaluateBotBuilderConditions(conditions: any[], currentTick: number): b
   
   const latestPrice = prices[prices.length - 1];
   
+  // Debug logging
+  if (import.meta.env.DEV) {
+    console.log('Bot Builder Conditions Debug:', {
+      conditions,
+      currentTick,
+      latestPrice,
+      pricesCount: prices.length
+    });
+  }
+  
   const calculateEMA = (period: number): number => {
     if (prices.length < period) return latestPrice;
     const multiplier = 2 / (period + 1);
@@ -320,6 +330,18 @@ function evaluateBotBuilderConditions(conditions: any[], currentTick: number): b
         break;
     }
     
+    // Debug logging for each condition
+    if (import.meta.env.DEV) {
+      console.log(`Condition ${i}:`, {
+        indicator: cond.indicator,
+        operator: cond.operator,
+        indicatorValue,
+        compareValue,
+        conditionMet,
+        logic: cond.logic
+      });
+    }
+    
     if (i === 0) {
       allConditionsMet = conditionMet;
     } else if (cond.logic === 'AND') {
@@ -331,6 +353,11 @@ function evaluateBotBuilderConditions(conditions: any[], currentTick: number): b
     if (!allConditionsMet && cond.logic === 'AND') {
       return false;
     }
+  }
+  
+  // Debug logging for final result
+  if (import.meta.env.DEV) {
+    console.log('Bot Builder Conditions Final Result:', allConditionsMet);
   }
   
   return allConditionsMet;
@@ -2093,6 +2120,18 @@ function App() {
           }
           
           const cfg = bbState.config;
+          
+          // Debug logging
+          if (import.meta.env.DEV) {
+            console.log('Bot Builder Execution Debug:', {
+              botName: cfg.name,
+              market: cfg.market,
+              isRunning: bbState.isRunning,
+              tradeCount: bbState.tradeCount,
+              consecLosses: bbState.consecLosses,
+              currentTick
+            });
+          }
           
           // Ensure purchaseConditions is always an array
           const purchaseConditions = cfg.purchaseConditions || [];
