@@ -1830,10 +1830,106 @@ function App() {
           setBotStatus(s => ({ ...s, 'Asian Drift': `🔄 ${asianDir} on V50 (${money(stake)})` }));
 
         } else {
-          // Default strategy for all other bots — stake from config
+          // Default strategy for all other bots — with basic condition checking
           const cfg = (botConfigRef.current[bot.name] ?? DEFAULT_BOT_DEFAULTS) as DefaultBotConfig;
+          
+          // Enhanced condition checking based on bot name
+          let shouldTrade = false;
+          let tradeDirection: 'CALL' | 'PUT' = 'CALL';
+          
+          if (bot.name === 'Apex Momentum') {
+            // Apex-specific: momentum + volatility check
+            let gains = 0; let losses = 0;
+            for (let t = 1; t <= 14; t++) {
+              const delta = priceFor(0, currentTick - t + 1) - priceFor(0, currentTick - t);
+              if (delta > 0) gains++; else losses++;
+            }
+            const momentum = (gains - losses) / 14;
+            const volatility = Math.abs(priceFor(0, currentTick) - priceFor(0, currentTick - 10)) / 10;
+            
+            // Trade only if momentum is strong AND volatility is moderate
+            if (Math.abs(momentum) > 0.3 && volatility > 0.5 && volatility < 2.0) {
+              shouldTrade = true;
+              tradeDirection = momentum > 0 ? 'CALL' : 'PUT';
+              setBotStatus(s => ({ ...s, [bot.name]: `✅ Momentum ${momentum > 0 ? 'UP' : 'DOWN'} (${(Math.abs(momentum) * 100).toFixed(0)}%) Vol: ${(volatility * 100).toFixed(1)}%` }));
+            } else {
+              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Momentum ${(momentum * 100).toFixed(0)}% Vol: ${(volatility * 100).toFixed(1)}% — waiting` }));
+              return;
+            }
+          } else if (bot.name === 'Reverse Signal') {
+            // Reverse Signal: trade against recent trend
+            let gains = 0; let losses = 0;
+            for (let t = 1; t <= 8; t++) {
+              const delta = priceFor(0, currentTick - t + 1) - priceFor(0, currentTick - t);
+              if (delta > 0) gains++; else losses++;
+            }
+            const recentTrend = gains > losses ? 'UP' : 'DOWN';
+            
+            // Trade against the recent trend
+            shouldTrade = true;
+            tradeDirection = recentTrend === 'UP' ? 'PUT' : 'CALL';
+            setBotStatus(s => ({ ...s, [bot.name]: `✅ Reversing ${recentTrend} trend` }));
+          } else if (bot.name === 'Momentum Pulse') {
+            // Momentum Pulse: strong directional move
+            let gains = 0; let losses = 0;
+            for (let t = 1; t <= 12; t++) {
+              const delta = priceFor(0, currentTick - t + 1) - priceFor(0, currentTick - t);
+              if (delta > 0) gains++; else losses++;
+            }
+            const momentum = (gains - losses) / 12;
+            
+            // Only trade if momentum is very strong (>70% directional bias)
+            if (Math.abs(momentum) > 0.4) {
+              shouldTrade = true;
+              tradeDirection = momentum > 0 ? 'CALL' : 'PUT';
+              setBotStatus(s => ({ ...s, [bot.name]: `✅ Strong ${momentum > 0 ? 'UP' : 'DOWN'} momentum (${(Math.abs(momentum) * 100).toFixed(0)}%)` }));
+            } else {
+              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Weak momentum ${(Math.abs(momentum) * 100).toFixed(0)}% — waiting` }));
+              return;
+            }
+          } else if (bot.name === 'Range Scout') {
+            // Range Scout: trade at support/resistance levels
+            const prices = Array.from({ length: 20 }, (_, t) => priceFor(0, currentTick - t));
+            const high = Math.max(...prices);
+            const low = Math.min(...prices);
+            const current = prices[0];
+            const range = high - low;
+            
+            // Trade if price is near range edges (within 10% of range)
+            const nearHigh = (high - current) / range < 0.1;
+            const nearLow = (current - low) / range < 0.1;
+            
+            if (nearHigh || nearLow) {
+              shouldTrade = true;
+              tradeDirection = nearHigh ? 'PUT' : 'CALL';
+              setBotStatus(s => ({ ...s, [bot.name]: `✅ ${nearHigh ? 'Resistance' : 'Support'} level reached` }));
+            } else {
+              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Mid-range — waiting for edges` }));
+              return;
+            }
+          } else {
+            // Generic fallback for other bots with basic trend checking
+            let gains = 0; let losses = 0;
+            for (let t = 1; t <= 10; t++) {
+              const delta = priceFor(0, currentTick - t + 1) - priceFor(0, currentTick - t);
+              if (delta > 0) gains++; else losses++;
+            }
+            const trendStrength = Math.abs(gains - losses) / 10;
+            
+            if (trendStrength < 0.2) {
+              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Weak trend ${((trendStrength || 0) * 100).toFixed(0)}% — waiting` }));
+              return;
+            }
+            
+            shouldTrade = true;
+            tradeDirection = gains > losses ? 'CALL' : 'PUT';
+            setBotStatus(s => ({ ...s, [bot.name]: `✅ Trend ${tradeDirection === 'CALL' ? 'UP' : 'DOWN'} (${((trendStrength || 0) * 100).toFixed(0)}%)` }));
+          }
+          
+          if (!shouldTrade) return;
+          
           instrument = instruments[(currentTick + i) % instruments.length];
-          direction  = (currentTick + i) % 2 ? 'CALL' : 'PUT';
+          direction  = tradeDirection;
           stake      = Math.max(1, cfg.stake);
 
           // Add execution status for default bots
