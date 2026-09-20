@@ -2859,7 +2859,7 @@ function PageView({
     trades={trades} 
     tick={tick} 
     botBuilderState={botBuilderState || undefined}
-    onBotBuilderStateChange={handleBotBuilderStateChange}
+    onBotBuilderStateChange={onBotBuilderStateChange}
   />;
   if (page === 'ai-builder') return <AIBotBuilder onPageChange={setPage} />;
   if (page === 'scanner') return <MarketScanner />;
