@@ -3507,7 +3507,7 @@ function MarketScanner() {
       <div className={`scanner-command-center ${scannerConnected ? 'scanner-active' : 'scanner-idle'}`}>
         <div className="scanner-radar"><span className="radar-ring ring-one" /><span className="radar-ring ring-two" /><span className="radar-sweep" /><span className="radar-core"><Activity size={18} /></span></div>
         <div className="scanner-command-copy"><span className="eyebrow">LIVE RESEARCH ENGINE</span><h2>{scannerConnected ? 'Scanning Volatility 75' : 'Scanner on standby'}</h2><p>{scannerConnected ? 'Incoming Deriv ticks are being evaluated against the active V1 model.' : 'Connect a Deriv account to begin live analysis.'}</p></div>
-        <div className="scanner-readout"><span>Ticks processed</span><strong>{scanPulse.toLocaleString()}</strong><small>{marketLive ? `Last quote ${marketLive.quote}` : 'Standby'}</small></div>
+        <div className="scanner-readout"><span>Ticks processed</span><strong>{scanPulse?.toLocaleString() ?? '0'}</strong><small>{marketLive ? `Last quote ${marketLive.quote}` : 'Standby'}</small></div>
       </div>
       
       <div className="scanner-toolbar"><span className="eyebrow">Opportunity state</span>{(['ALL', 'QUALIFIED', 'WATCH', 'NO SIGNAL'] as const).map((status) => <button key={status} className={statusFilter === status ? 'secondary active-filter' : 'secondary'} onClick={() => setStatusFilter(status)}>{status}</button>)}</div>
@@ -3571,7 +3571,7 @@ function MarketScanner() {
           {mostActive.map((row, i) => (
             <div key={i} className="top-item">
               <span>{row.symbol}</span>
-              <strong>{row.volume.toLocaleString()}</strong>
+              <strong>{row.volume?.toLocaleString() ?? '0'}</strong>
             </div>
           ))}
           {mostActive.length === 0 && <small className="muted">No data available</small>}
