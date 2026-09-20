@@ -113,7 +113,7 @@ export function DerivConnectionPanel({
                       {isSwitchingThis && <Loader2 size={13} className="spin" />}
                     </div>
                     <strong className="account-card-id">{acc.loginid}</strong>
-                    <span className="account-card-bal">{acc.currency} {acc.balance.toFixed(2)}</span>
+                    <span className="account-card-bal">{acc.currency} {acc.balance?.toFixed(2) ?? '0.00'}</span>
                   </button>
                 );
               })}

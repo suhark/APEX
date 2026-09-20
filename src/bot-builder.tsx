@@ -1842,7 +1842,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                           <span>○ {t.exit_price?.toFixed(2) ?? '—'}</span>
                         </div>
                         <div className="bb-tx-pnl">
-                          <span>${t.stake.toFixed(2)}</span>
+                          <span>${t.stake?.toFixed(2) ?? '0.00'}</span>
                           <b className={t.result === 'won' ? 'positive' : 'negative'}>
                             {t.result === 'won' ? '+' : '-'}${Math.abs(t.profit).toFixed(2)} USD
                           </b>

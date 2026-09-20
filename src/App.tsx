@@ -198,7 +198,7 @@ function computeSessionLoss(
   trades: Trade[] = [],
   sessionStartedAt: string | null = null,
 ) {
-  const balanceLoss = Math.max(0, Number((sessionStart - currentBalance).toFixed(2)));
+  const balanceLoss = Math.max(0, Number(((sessionStart || 0) - (currentBalance || 0)).toFixed(2)));
   if (!sessionStartedAt) return balanceLoss;
 
   const startMs = new Date(sessionStartedAt).getTime();
@@ -3517,10 +3517,10 @@ function MarketScanner() {
         <div className="scanner-table">{visible.map((row) => <div className="scanner-row" key={`${row.duration}-${row.status}`}>
           <div><b>{row.symbol}</b><span>{row.market_family} · {row.contract_type === 'CALL' ? 'Rise/Fall' : 'Rise/Fall'} · {row.duration} ticks</span></div>
           <span className={`scanner-status ${row.status.toLowerCase().replace(' ', '-')}`}>{row.status}</span>
-          <div><span>Price</span><strong>{row.price.toFixed(2)}</strong></div>
-          <div><span>24h Change</span><strong className={row.change24h >= 0 ? 'positive' : 'negative'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</strong></div>
-          <div><span>Volume</span><strong>{row.volume.toLocaleString()}</strong></div>
-          <div><span>RSI</span><strong>{row.rsi.toFixed(1)}</strong></div>
+          <div><span>Price</span><strong>{row.price?.toFixed(2) ?? '0.00'}</strong></div>
+          <div><span>24h Change</span><strong className={row.change24h >= 0 ? 'positive' : 'negative'}>{row.change24h >= 0 ? '+' : ''}{row.change24h?.toFixed(2) ?? '0.00'}%</strong></div>
+          <div><span>Volume</span><strong>{row.volume?.toLocaleString() ?? '0'}</strong></div>
+          <div><span>RSI</span><strong>{row.rsi?.toFixed(1) ?? '0.0'}</strong></div>
           <div><span>Score</span><strong>{Number(row.score ?? 0)}/100</strong></div>
           <div><span>Probability</span><strong>{(Number(row.estimated_probability ?? 0) * 100).toFixed(1)}%</strong></div>
           <div><span>Edge</span><strong className={row.edge > 0 ? 'positive' : 'negative'}>{row.edge > 0 ? '+' : ''}{(row.edge * 100).toFixed(1)}%</strong></div>
@@ -3556,7 +3556,7 @@ function MarketScanner() {
           {topGainers.map((row, i) => (
             <div key={i} className="top-item">
               <span>{row.symbol}</span>
-              <strong className="positive">+{row.change24h.toFixed(2)}%</strong>
+              <strong className="positive">+{row.change24h?.toFixed(2) ?? '0.00'}%</strong>
             </div>
           ))}
           {topGainers.length === 0 && <small className="muted">No data available</small>}
@@ -4859,7 +4859,7 @@ function Settings({
                       {acc.is_virtual ? 'DEMO' : 'REAL'}
                     </span>
                     <b>{acc.loginid}</b>
-                    <small>{acc.currency} {acc.balance.toFixed(2)}</small>
+                    <small>{acc.currency} {acc.balance?.toFixed(2) ?? '0.00'}</small>
                   </button>
                 ))}
               </div>
