@@ -1052,6 +1052,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   const [sessionStart, setSessionStart] = useState<string | null>(null);
   const [showPanel, setShowPanel] = useState(false);
   const [panelTab, setPanelTab] = useState<'summary' | 'transactions' | 'journal'>('summary');
+  const [scanStatus, setScanStatus] = useState<string>('');
   const intervalRef = useRef<number | null>(null);
   const cfgRef = useRef(cfg);
   cfgRef.current = cfg;
@@ -1069,6 +1070,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   const stopBot = useCallback(() => {
     if (intervalRef.current) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
     setIsRunning(false);
+    setScanStatus('');
   }, []);
 
   const startBot = useCallback(() => {
@@ -1091,9 +1093,13 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
       const conditionsMet = evaluateConditions(c.purchaseConditions, tickRef.current);
       
       if (!conditionsMet) {
-        // Skip this cycle if conditions aren't met
+        // Show scanning status when conditions aren't met
+        setScanStatus(`🔍 Scanning — conditions not met (trades: ${tradeCountRef.current})`);
         return;
       }
+      
+      // Clear scan status when conditions are met
+      setScanStatus('');
       
       let dir: string;
       if (c.direction === 'both') {
@@ -1126,6 +1132,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
       }
 
       try {
+        setScanStatus(`🔄 Executing trade ${tradeCountRef.current + 1}...`);
         await runTrade({
           instrument: c.market,
           direction: dir,
@@ -1136,7 +1143,11 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
         });
         tradeCountRef.current += 1;
         setTradeCount(tradeCountRef.current);
+        setScanStatus(`✅ Trade ${tradeCountRef.current} executed successfully`);
+        setTimeout(() => setScanStatus(''), 2000); // Clear success message after 2 seconds
       } catch {
+        setScanStatus('❌ Trade execution failed');
+        setTimeout(() => setScanStatus(''), 2000);
         // runTrade handles its own notices
       }
     }, 5000);
@@ -2057,7 +2068,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
             <div className="bb-running-card">
               <div className="bb-running-header">
                 <span className="live-dot" />
-                <span className="bb-running-label">Bot running</span>
+                <span className="bb-running-label">{scanStatus || 'Bot running'}</span>
                 <button type="button" className="bb-stop-btn-sm" onClick={stopBot}>
                   <Square size={11} fill="currentColor" /> Stop
                 </button>
@@ -2078,6 +2089,10 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
 
           {/* Quick stats */}
           <div className="bb-quick-stats">
+            <div className="bb-qs-item">
+              <span>Status</span>
+              <b>{isRunning ? (scanStatus || 'Running') : 'Stopped'}</b>
+            </div>
             <div className="bb-qs-item">
               <span>Conditions</span>
               <b>{cfg.purchaseConditions.length}</b>
@@ -2118,7 +2133,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
               {isRunning ? (
                 <>
                   <span className="live-dot" />
-                  <span className="bb-journal-status-label">Contract bought</span>
+                  <span className="bb-journal-status-label">{scanStatus || 'Waiting for conditions...'}</span>
                   <div className="bb-journal-progress">
                     <div className="bb-journal-progress-fill" />
                   </div>
