@@ -1073,6 +1073,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   // Sync state with parent when it changes from props
   useEffect(() => {
     if (botBuilderState) {
+      console.log('Syncing bot builder state from parent:', botBuilderState);
       setIsRunning(botBuilderState.isRunning);
       setTradeCount(botBuilderState.tradeCount);
       setConsecLosses(botBuilderState.consecLosses);
@@ -1084,7 +1085,14 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   
   // Notify parent of state changes
   useEffect(() => {
-    if (onBotBuilderStateChange && botBuilderState !== undefined) {
+    if (onBotBuilderStateChange) {
+      console.log('Notifying parent of state change:', {
+        isRunning,
+        tradeCount,
+        consecLosses,
+        sessionStart,
+        configName: cfg.name
+      });
       onBotBuilderStateChange({
         isRunning,
         tradeCount,
@@ -1093,7 +1101,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
         config: cfg
       });
     }
-  }, [isRunning, tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange, botBuilderState]);
+  }, [isRunning, tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange]);
 
   // Keep tick ref updated
   useEffect(() => {
@@ -1105,7 +1113,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     setIsRunning(false);
     setScanStatus('');
     // Notify parent to stop tracking this bot
-    if (onBotBuilderStateChange && botBuilderState !== undefined) {
+    if (onBotBuilderStateChange) {
       onBotBuilderStateChange({
         isRunning: false,
         tradeCount,
@@ -1114,7 +1122,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
         config: cfg
       });
     }
-  }, [tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange, botBuilderState]);
+  }, [tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange]);
 
   const startBot = useCallback(() => {
     console.log('Bot Builder startBot called', { derivConnected, warnings: warningsRef.current.length });
@@ -1137,7 +1145,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     
     // Bot execution is now handled by parent App.tsx
     // Just update state to notify parent to start tracking this bot
-    if (onBotBuilderStateChange && botBuilderState !== undefined) {
+    if (onBotBuilderStateChange) {
       onBotBuilderStateChange({
         isRunning: true,
         tradeCount: 0,
@@ -1146,27 +1154,22 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
         config: cfg
       });
     } else {
-      console.error('Bot Builder state change failed', { 
-        hasCallback: !!onBotBuilderStateChange, 
-        botBuilderStateDefined: botBuilderState !== undefined 
-      });
+      console.error('Bot Builder state change failed - no callback available');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [derivConnected, onBotBuilderStateChange, botBuilderState, cfg]);
+  }, [derivConnected, onBotBuilderStateChange, cfg]);
 
   // Stop bot when component unmounts or Deriv disconnects
   useEffect(() => {
-    if (!derivConnected && isRunning && botBuilderState !== undefined) {
+    if (!derivConnected && isRunning) {
       stopBot();
       setNotice('Bot stopped — Deriv disconnected.');
     }
-  }, [derivConnected, isRunning, stopBot, setNotice, botBuilderState]);
+  }, [derivConnected, isRunning, stopBot, setNotice]);
 
   useEffect(() => {
-    if (botBuilderState !== undefined) {
-      return () => stopBot();
-    }
-  }, [stopBot, botBuilderState]);
+    return () => stopBot();
+  }, [stopBot]);
 
   // Derive this session's trades from the trades prop (filtered by bot name + session start)
   const sessionTrades = sessionStart
@@ -1179,7 +1182,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
 
   // Keep consecLossesRef in sync with real settled trades
   useEffect(() => {
-    if (!sessionStart || botBuilderState === undefined) return;
+    if (!sessionStart) return;
     let streak = 0;
     for (const t of [...sessionTrades].reverse()) {
       if (t.result === 'lost') streak++;
@@ -1187,7 +1190,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     }
     consecLossesRef.current = streak;
     setConsecLosses(streak);
-  }, [sessionTrades.length, sessionStart, botBuilderState]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionTrades.length, sessionStart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sessionWins   = sessionTrades.filter(t => t.result === 'won').length;
   const sessionLosses = sessionTrades.filter(t => t.result === 'lost').length;
