@@ -155,7 +155,8 @@
 .analysis-icon { display: grid; place-items: center; width: 32px; height: 32px; margin-bottom: 14px; border: 1px solid #286255; border-radius: 8px; color: var(--accent-pink); background: #12352e; }.analysis-grid-three h2 { margin-bottom: 8px; }.tool-row { display: flex; justify-content: space-between; margin-top: 18px; padding-top: 12px; border-top: 1px solid #1a302b; color: #829c95; font-size: 11px; }.analysis-evidence, .score-breakdown, .validation-panel { margin-bottom: 14px; }.evidence-row { display: grid; grid-template-columns: 25px 1fr auto; gap: 10px; align-items: center; padding: 11px 0; border-bottom: 1px solid #1a302b; font-size: 11px; }.evidence-row span { color: var(--accent-pink); font-size: 16px; }.evidence-row em { color: #708780; font-style: normal; font: 9px 'DM Mono', monospace; }.validation-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin: 18px 0; }.validation-grid div { padding: 12px; border: 1px solid #1c332e; border-radius: 7px; }.validation-grid span { display: block; color: #708780; font-size: 10px; }.validation-grid strong { display: block; margin-top: 6px; font: 600 12px 'DM Mono', monospace; }
 .risk-calculator { display: grid; grid-template-columns: 1fr 2fr; gap: 24px; align-items: start; }.risk-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }.risk-result { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 @media (max-width: 850px) { .analysis-identity { grid-template-columns: repeat(2, 1fr); }.analysis-identity > div:not(:first-child) { border-left: 0; padding-left: 0; }.validation-grid { grid-template-columns: repeat(3, 1fr); }.analysis-grid, .analysis-grid-three, .analysis-grid-multi-tf, .risk-calculator { grid-template-columns: 1fr; }.risk-fields { grid-template-columns: repeat(2, 1fr); }.risk-result { grid-column: auto; } }
-@media (max-width: 500px) { .risk-fields, .risk-result { grid-template-columns: 1fr; }.analysis-live { margin-left: 0; } }
+@media (max-width: 500px) { .risk-fields { grid-template-columns: repeat(2, 1fr); } .risk-result { grid-template-columns: 1fr; }.analysis-live { margin-left: 0; } }
+@media (max-width: 380px) { .risk-fields { grid-template-columns: 1fr; } }
 .scanner-radar { position: relative; width: 92px; height: 92px; flex: 0 0 92px; border: 1px solid #2e7464; border-radius: 50%; background: radial-gradient(circle, #1c6454 0 3%, transparent 4% 100%), repeating-radial-gradient(circle, transparent 0 17px, #2e746455 18px 19px); box-shadow: 0 0 28px var(--accent-orange)20; }
 .radar-ring { position: absolute; inset: 50%; width: 5px; height: 5px; border: 1px solid var(--accent-orange); border-radius: 50%; transform: translate(-50%, -50%); }
 .ring-one { animation: radar-ping 2.2s ease-out infinite; }.ring-two { animation: radar-ping 2.2s .8s ease-out infinite; }
@@ -399,11 +400,11 @@
 .notification-settings {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 .settings-section h3 {
-  margin: 0 0 16px;
+  margin: 0 0 10px;
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
@@ -413,22 +414,58 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
-.toggle-label {
+.notification-settings .toggle-label {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   cursor: pointer;
   font-size: 13px;
   color: var(--text-secondary);
 }
 
-.toggle-label input[type="checkbox"] {
+.notification-settings .toggle-label input[type="checkbox"] {
   width: 18px;
   height: 18px;
   accent-color: var(--accent-orange);
+  flex-shrink: 0;
+}
+
+@media (max-width: 650px) {
+  .notification-settings {
+    gap: 12px;
+  }
+  
+  .settings-section h3 {
+    margin: 0 0 8px;
+    font-size: 13px;
+  }
+  
+  .settings-row {
+    margin-bottom: 6px;
+  }
+  
+  .notification-settings .toggle-label {
+    font-size: 12px;
+    gap: 12px;
+  }
+  
+  .time-range {
+    gap: 8px;
+  }
+  
+  .notification-settings .save-settings-btn {
+    padding: 10px 16px;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  
+  .settings-row button.secondary {
+    padding: 6px 12px;
+    font-size: 11px;
+  }
 }
 
 .permission-status {

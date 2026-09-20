@@ -307,7 +307,7 @@ export function NotificationPanel({
             <div className="notification-empty">
               <Bell size={32} className="notification-empty-icon" />
               <p>No notifications yet</p>
-              <small>Stay tuned for updates</small>
+              <small>You're all caught up</small>
             </div>
           ) : (
             <div className="notification-list">
@@ -495,7 +495,7 @@ export function NotificationSettings({
         )}
       </div>
 
-      <button className="primary" onClick={handleSave}>
+      <button className="primary save-settings-btn" onClick={handleSave}>
         Save Settings
       </button>
     </div>

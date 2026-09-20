@@ -608,6 +608,14 @@ function App() {
     const baseline = deriv.account?.balance ?? workspace?.balance ?? workspace?.starting_balance ?? 0;
     syncSessionStartBalance(baseline);
     setNotice(`Session baseline reset to ${money(baseline)}. Loss counter cleared.`);
+    // Reset notification flags so warnings can be triggered again
+    lossLimitNotifiedRef.current = { '75': false, '90': false, '100': false };
+    // Clear localStorage
+    try {
+      localStorage.removeItem('apex_loss_limit_notified');
+    } catch (e) {
+      console.warn('Failed to clear loss limit notification flags:', e);
+    }
   };
 
   const setAllowBotLiveTrading = (allowed: boolean) => {
@@ -723,11 +731,24 @@ function App() {
         .from('trading_workspace')
         .select('*')
         .eq('user_id', currentUser.id)
+        .limit(1)
         .maybeSingle();
 
       if (!error && data) {
         ws = data as Workspace;
         wsLoaded = true;
+      } else if (error && error.code === 'PGRST116') {
+        // Multiple rows returned - take the first one
+        const { data: multipleData } = await supabase
+          .from('trading_workspace')
+          .select('*')
+          .eq('user_id', currentUser.id)
+          .limit(1);
+        
+        if (multipleData && multipleData.length > 0) {
+          ws = multipleData[0] as Workspace;
+          wsLoaded = true;
+        }
       } else if (!error && !data) {
         // Create new isolated workspace for user
         const initWs = {
@@ -1872,8 +1893,37 @@ function App() {
   // Session loss limit notifications
   const lossLimitNotifiedRef = useRef<{ '75': boolean; '90': boolean; '100': boolean }>({ '75': false, '90': false, '100': false });
   
+  // Load notification flags from localStorage to persist across refreshes
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('apex_loss_limit_notified');
+      if (saved) {
+        lossLimitNotifiedRef.current = JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('Failed to load loss limit notification flags:', e);
+    }
+    
+    // Clear any existing unrealistic notification flags on app load
+    try {
+      localStorage.removeItem('apex_loss_limit_notified');
+      lossLimitNotifiedRef.current = { '75': false, '90': false, '100': false };
+    } catch (e) {
+      console.warn('Failed to clear loss limit notification flags:', e);
+    }
+  }, []);
+  
   useEffect(() => {
     if (!lossLimit) return;
+    
+    // Only trigger notifications if there's actual loss (not just initial state)
+    if (sessionLossUsed <= 0) return;
+    
+    // Also check if the values are realistic (not default initialization values)
+    if (sessionLossUsed > 1000 && lossLimit < 100) {
+      // This looks like initialization values, skip notification
+      return;
+    }
     
     const thresholds = [
       { percent: 75, key: '75' as const },
@@ -1884,6 +1934,13 @@ function App() {
     thresholds.forEach(({ percent, key }) => {
       if (guardPercent >= percent && !lossLimitNotifiedRef.current[key]) {
         lossLimitNotifiedRef.current[key] = true;
+        
+        // Save to localStorage
+        try {
+          localStorage.setItem('apex_loss_limit_notified', JSON.stringify(lossLimitNotifiedRef.current));
+        } catch (e) {
+          console.warn('Failed to save loss limit notification flags:', e);
+        }
         
         const priority = key === '100' ? 'high' : 'medium';
         const title = key === '100' 
