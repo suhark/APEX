@@ -2441,7 +2441,7 @@ function PageView({
       />
     );
   }
-  if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} trades={trades} />;
+  if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} trades={trades} tick={tick} />;
   if (page === 'ai-builder') return <AIBotBuilder onPageChange={setPage} />;
   if (page === 'scanner') return <MarketScanner />;
   if (page === 'analysis') return <AnalysisLab />;

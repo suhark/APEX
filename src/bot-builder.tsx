@@ -626,6 +626,7 @@ export interface BotBuilderProps {
   derivConnected: boolean;
   runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; duration?: number }) => Promise<void>;
   trades?: Array<{ id: string; instrument: string; direction: string; stake: number; result: string; profit: number; created_at: string; bot_name?: string; entry_price?: number; exit_price?: number }>;
+  tick?: number; // Add tick prop for condition evaluation
 }
 
 /** Map BotConfig trade type + direction to Deriv contract_type string */
@@ -644,7 +645,220 @@ function resolveDirection(cfg: BotConfig, callPut: 'CALL' | 'PUT'): string {
   }
 }
 
-export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }: BotBuilderProps) {
+/** Evaluate purchase conditions against current tick data */
+function evaluateConditions(conditions: ConditionNode[], currentTick: number): boolean {
+  if (conditions.length === 0) return true; // No conditions = always trade
+  
+  // Build synthetic price history from tick (simplified for demo)
+  const prices: number[] = [];
+  for (let i = 0; i < 200; i++) {
+    prices.push(priceFor(i, currentTick - (200 - i)));
+  }
+  
+  const latestPrice = prices[prices.length - 1];
+  const previousPrice = prices[prices.length - 2];
+  
+  // Helper functions for indicator calculations
+  const calculateEMA = (period: number): number => {
+    if (prices.length < period) return latestPrice;
+    const multiplier = 2 / (period + 1);
+    let ema = prices.slice(0, period).reduce((sum, p) => sum + p, 0) / period;
+    for (let i = period; i < prices.length; i++) {
+      ema = (prices[i] - ema) * multiplier + ema;
+    }
+    return ema;
+  };
+  
+  const calculateRSI = (period: number): number => {
+    if (prices.length < period + 1) return 50;
+    let gains = 0;
+    let losses = 0;
+    for (let i = prices.length - period; i < prices.length; i++) {
+      const change = prices[i] - prices[i - 1];
+      if (change > 0) gains += change;
+      else losses -= change;
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  };
+  
+  const calculateADX = (period: number): number => {
+    if (prices.length < period + 1) return 25;
+    // Simplified ADX calculation
+    const trs: number[] = [];
+    for (let i = 1; i < prices.length; i++) {
+      const high = prices[i];
+      const low = prices[i];
+      const prevClose = prices[i - 1];
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+      trs.push(tr);
+    }
+    const atr = trs.slice(-period).reduce((sum, tr) => sum + tr, 0) / period;
+    // Simplified directional movement
+    const plusDM = prices.slice(-period).reduce((sum, p, i, arr) => {
+      if (i === 0) return sum;
+      const upMove = p - arr[i - 1];
+      return sum + (upMove > 0 && upMove > (arr[i] - arr[i - 1] * -1) ? upMove : 0);
+    }, 0);
+    const minusDM = prices.slice(-period).reduce((sum, p, i, arr) => {
+      if (i === 0) return sum;
+      const downMove = arr[i - 1] - p;
+      return sum + (downMove > 0 && downMove > (arr[i] - arr[i - 1]) ? downMove : 0);
+    }, 0);
+    const plusDI = (plusDM / period) / atr * 100;
+    const minusDI = (minusDM / period) / atr * 100;
+    const dx = Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100;
+    return dx; // Simplified - actual ADX uses smoothed DX
+  };
+  
+  const calculateATR = (period: number): number => {
+    if (prices.length < period + 1) return 0.5;
+    const trs: number[] = [];
+    for (let i = 1; i < prices.length; i++) {
+      const high = prices[i];
+      const low = prices[i];
+      const prevClose = prices[i - 1];
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+      trs.push(tr);
+    }
+    return trs.slice(-period).reduce((sum, tr) => sum + tr, 0) / period;
+  };
+  
+  const calculateMACD = (period: number): number => {
+    const ema12 = calculateEMA(12);
+    const ema26 = calculateEMA(26);
+    return ema12 - ema26;
+  };
+  
+  const calculateBB = (period: number): number => {
+    if (prices.length < period) return latestPrice;
+    const sma = prices.slice(-period).reduce((sum, p) => sum + p, 0) / period;
+    const squaredDiffs = prices.slice(-period).map(p => Math.pow(p - sma, 2));
+    const stdDev = Math.sqrt(squaredDiffs.reduce((sum, sq) => sum + sq, 0) / period);
+    return (latestPrice - sma) / stdDev; // Return as standard deviations from mean
+  };
+  
+  const calculateSTOCH = (period: number): number => {
+    if (prices.length < period) return 50;
+    const recentPrices = prices.slice(-period);
+    const high = Math.max(...recentPrices);
+    const low = Math.min(...recentPrices);
+    const k = ((latestPrice - low) / (high - low)) * 100;
+    return k;
+  };
+  
+  const calculateCCI = (period: number): number => {
+    if (prices.length < period) return 0;
+    const recentPrices = prices.slice(-period);
+    const sma = recentPrices.reduce((sum, p) => sum + p, 0) / period;
+    const meanDeviation = recentPrices.reduce((sum, p) => sum + Math.abs(p - sma), 0) / period;
+    const cci = (latestPrice - sma) / (0.015 * meanDeviation);
+    return cci;
+  };
+  
+  const calculateWPR = (period: number): number => {
+    if (prices.length < period) return -50;
+    const recentPrices = prices.slice(-period);
+    const high = Math.max(...recentPrices);
+    const low = Math.min(...recentPrices);
+    const wpr = -100 * (high - latestPrice) / (high - low);
+    return wpr;
+  };
+  
+  // Evaluate each condition
+  let allConditionsMet = true;
+  for (let i = 0; i < conditions.length; i++) {
+    const cond = conditions[i];
+    let indicatorValue: number;
+    
+    switch (cond.indicator) {
+      case 'EMA':
+        indicatorValue = calculateEMA(cond.period);
+        break;
+      case 'RSI':
+        indicatorValue = calculateRSI(cond.period);
+        break;
+      case 'ADX':
+        indicatorValue = calculateADX(cond.period);
+        break;
+      case 'ATR':
+        indicatorValue = calculateATR(cond.period);
+        break;
+      case 'MACD':
+        indicatorValue = calculateMACD(cond.period);
+        break;
+      case 'BB':
+        indicatorValue = calculateBB(cond.period);
+        break;
+      case 'STOCH':
+        indicatorValue = calculateSTOCH(cond.period);
+        break;
+      case 'CCI':
+        indicatorValue = calculateCCI(cond.period);
+        break;
+      case 'WPR':
+        indicatorValue = calculateWPR(cond.period);
+        break;
+      case 'PRICE':
+        indicatorValue = latestPrice;
+        break;
+      default:
+        indicatorValue = latestPrice;
+    }
+    
+    let conditionMet = false;
+    const compareValue = cond.indicator === 'EMA' && cond.operator.includes('crosses') 
+      ? calculateEMA(cond.value) 
+      : cond.value;
+    
+    switch (cond.operator) {
+      case '>':
+        conditionMet = indicatorValue > compareValue;
+        break;
+      case '<':
+        conditionMet = indicatorValue < compareValue;
+        break;
+      case '>=':
+        conditionMet = indicatorValue >= compareValue;
+        break;
+      case '<=':
+        conditionMet = indicatorValue <= compareValue;
+        break;
+      case 'crosses_above':
+        // Simplified cross detection
+        const prevIndicatorValue = cond.indicator === 'EMA' ? calculateEMA(cond.period) : indicatorValue;
+        conditionMet = indicatorValue > compareValue && prevIndicatorValue <= compareValue;
+        break;
+      case 'crosses_below':
+        conditionMet = indicatorValue < compareValue && prevIndicatorValue >= compareValue;
+        break;
+      case 'between':
+        conditionMet = indicatorValue >= cond.value && indicatorValue <= (cond.value2 ?? 0);
+        break;
+    }
+    
+    // Apply logic (AND/OR)
+    if (i === 0) {
+      allConditionsMet = conditionMet;
+    } else if (cond.logic === 'AND') {
+      allConditionsMet = allConditionsMet && conditionMet;
+    } else {
+      allConditionsMet = allConditionsMet || conditionMet;
+    }
+    
+    // Early exit if AND logic fails
+    if (!allConditionsMet && cond.logic === 'AND') {
+      return false;
+    }
+  }
+  
+  return allConditionsMet;
+}
+
+export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], tick = 0 }: BotBuilderProps) {
   const [state, dispatch] = useReducer(historyReducer, {
     past: [],
     present: { ...DEFAULT_CONFIG },
@@ -841,9 +1055,16 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
   const intervalRef = useRef<number | null>(null);
   const cfgRef = useRef(cfg);
   cfgRef.current = cfg;
+  const tickRef = useRef(tick);
+  tickRef.current = tick;
   // Use refs for mutable counters so interval closure always reads fresh values
   const tradeCountRef = useRef(0);
   const consecLossesRef = useRef(0);
+
+  // Keep tick ref updated
+  useEffect(() => {
+    tickRef.current = tick;
+  }, [tick]);
 
   const stopBot = useCallback(() => {
     if (intervalRef.current) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
@@ -865,6 +1086,15 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
     intervalRef.current = window.setInterval(async () => {
       const c = cfgRef.current;
       const cycleNum = tradeCountRef.current;
+      
+      // Check purchase conditions before trading
+      const conditionsMet = evaluateConditions(c.purchaseConditions, tickRef.current);
+      
+      if (!conditionsMet) {
+        // Skip this cycle if conditions aren't met
+        return;
+      }
+      
       let dir: string;
       if (c.direction === 'both') {
         dir = resolveDirection(c, cycleNum % 2 === 0 ? 'CALL' : 'PUT');
