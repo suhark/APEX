@@ -2442,7 +2442,7 @@ function PageView({
     );
   }
   if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} trades={trades} />;
-  if (page === 'ai-builder') return <AIBotBuilder />;
+  if (page === 'ai-builder') return <AIBotBuilder onPageChange={setPage} />;
   if (page === 'scanner') return <MarketScanner />;
   if (page === 'analysis') return <AnalysisLab />;
   if (page === 'bulk') return <BulkTrader runTrade={runTrade} trades={trades} />;

@@ -68,7 +68,13 @@ if (!OPENROUTER_API_KEY) {
   console.error('OpenRouter API key is missing. Please set OPENROUTER_API_KEY environment variable.');
 }
 
-export function AIBotBuilder() {
+type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'scanner' | 'analysis' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift' | 'ai-builder';
+
+interface AIBotBuilderProps {
+  onPageChange?: (page: Page) => void;
+}
+
+export function AIBotBuilder({ onPageChange }: AIBotBuilderProps) {
   const [conversation, setConversation] = useState<ConversationState>(() => {
     // Load conversation from localStorage on mount
     try {
@@ -368,12 +374,10 @@ RESPONSE GUIDELINES:
       setImportSuccess(true);
       setTimeout(() => setImportSuccess(false), 2000);
       
-      // Navigate to bot builder page
-      window.location.hash = '#builder';
-      // Force page reload to ensure the bot builder picks up the localStorage data
-      setTimeout(() => {
-        window.location.reload();
-      }, 100);
+      // Navigate to bot builder page using the app's navigation
+      if (onPageChange) {
+        onPageChange('builder' as Page);
+      }
     }
   };
 
