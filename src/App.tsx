@@ -133,7 +133,7 @@ const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
 ];
 
 function priceFor(index: number, tick: number) { return Number((100 + Math.sin((tick + index * 7) / 4) * 2.5 + Math.cos((tick + index) / 8) * 1.4).toFixed(2)); }
-function money(value: number) { return `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`; }
+function money(value: number) { return `${value < 0 ? '-' : ''}$${Math.abs(value || 0).toFixed(2)}`; }
 function timeAgo(date: string) { const minutes = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 60000)); return minutes < 1 ? 'just now' : `${minutes}m ago`; }
 function getStatsContext(derivConnected: boolean, account: { loginid: string } | null): string {
   if (derivConnected && account) return `deriv_${account.loginid}`;
@@ -904,9 +904,9 @@ function App() {
           ...bot,
           total_trades: userBotTrades.length,
           wins: botWins,
-          pnl: Number(botPnl.toFixed(2)),
-          won_amount: Number(wonAmount.toFixed(2)),
-          lost_amount: Number(lostAmount.toFixed(2)),
+          pnl: Number((botPnl || 0).toFixed(2)),
+          won_amount: Number((wonAmount || 0).toFixed(2)),
+          lost_amount: Number((lostAmount || 0).toFixed(2)),
           active: userActiveBots.includes(bot.name),
         };
       });
@@ -1052,7 +1052,7 @@ function App() {
           body: `You are currently on Demo (${deriv?.account?.loginid}). This will switch to your Real account and arm live execution.`,
           rows: [
             { label: 'Real account', value: realAcc.loginid },
-            { label: 'Balance', value: `${realAcc.currency} ${realAcc.balance.toFixed(2)}` },
+            { label: 'Balance', value: `${realAcc.currency} ${(realAcc.balance || 0).toFixed(2)}` },
           ],
           danger: true,
           onConfirm: () => {
@@ -1071,13 +1071,13 @@ function App() {
       }
     }
 
-    const maxStake = ((deriv?.account.balance * maxBalancePercent) / 100).toFixed(2);
+    const maxStake = ((deriv?.account.balance || 0) * maxBalancePercent / 100).toFixed(2);
     setConfirmModal({
       title: 'Arm live real-money trading?',
       body: 'Real funds will be moved on Deriv. All trades execute immediately at market price.',
       rows: [
         { label: 'Account', value: `${deriv?.account.loginid} (Real)` },
-        { label: 'Balance', value: `${deriv?.account.currency} ${deriv?.account.balance.toFixed(2)}` },
+        { label: 'Balance', value: `${deriv?.account.currency} ${(deriv?.account.balance || 0).toFixed(2)}` },
         { label: 'Session loss limit', value: money(workspace?.loss_limit ?? 50) },
         { label: 'Max stake cap', value: `${maxBalancePercent}% (${money(Number(maxStake))})` },
         { label: 'Bot trading', value: allowBotLiveTrading ? 'ALLOWED' : 'Blocked (default)' },
@@ -1280,7 +1280,7 @@ function App() {
         }
 
         // Stake cap (% of balance)
-        const maxAllowedStake = Math.max(1, Number(((deriv?.account.balance * maxPercent) / 100).toFixed(2)));
+        const maxAllowedStake = Math.max(1, Number(((deriv?.account.balance || 0) * maxPercent / 100).toFixed(2)));
         if (details.stake > maxAllowedStake) {
           const errorMsg = `Trade blocked: Stake (${money(details.stake)}) exceeds maximum allowed risk cap of ${maxPercent}% of balance (${money(maxAllowedStake)}).`;
           console.error('runTrade:', errorMsg);
