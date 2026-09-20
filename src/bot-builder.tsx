@@ -39,7 +39,7 @@ interface ConditionNode {
 }
 
 type TradeType = 'rise_fall' | 'higher_lower' | 'touch_no_touch' | 'in_out' | 'asians' | 'digits_even' | 'digits_odd' | 'digits_over' | 'digits_under';
-type StakeMode = 'fixed' | 'percent' | 'martingale' | 'score_scaled';
+type StakeMode = 'fixed' | 'percent' | 'percent_of_account_balance' | 'martingale' | 'score_scaled';
 type DurationUnit = 'ticks' | 'seconds' | 'minutes' | 'hours';
 
 interface DrawdownGovernor {
@@ -50,6 +50,15 @@ interface DrawdownGovernor {
   afterWins3StakeOverlay: number;     // stake multiplier after 3 consec wins (bankroll protection)
   reverseOnLoss: boolean;             // flip direction after a loss
   noMartingale: boolean;              // hard block martingale stake escalation
+}
+
+interface AsianStrategy {
+  enabled: boolean;
+  priceDriftThreshold: number;
+  checkInterval: 'tick' | 'minute' | 'second';
+  emaPeriod: number;
+  durationUnit: DurationUnit;
+  duration: number;
 }
 
 interface RegimeFilter {
@@ -109,6 +118,7 @@ interface BotConfig {
   drawdownGovernor: DrawdownGovernor;
   regimeFilter: RegimeFilter;
   entryScoring: EntryScoring;
+  asianStrategy: AsianStrategy;
 }
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -166,6 +176,14 @@ const DEFAULT_CONFIG: BotConfig = {
     confirmationCandleWeight: 20,
     adxStrengthWeight: 15,
     atrRegimeWeight: 15,
+  },
+  asianStrategy: {
+    enabled: false,
+    priceDriftThreshold: 0.15,
+    checkInterval: 'tick',
+    emaPeriod: 20,
+    durationUnit: 'minutes',
+    duration: 120,
   },
 };
 
@@ -389,6 +407,7 @@ function buildSummary(cfg: BotConfig): string {
   let stakeStr = '';
   if (cfg.stakeMode === 'fixed')        stakeStr = `$${cfg.stake} fixed stake`;
   else if (cfg.stakeMode === 'percent') stakeStr = `${cfg.stakePercent}% of balance`;
+  else if (cfg.stakeMode === 'percent_of_account_balance') stakeStr = `${cfg.stakePercent}% of account balance`;
   else if (cfg.stakeMode === 'score_scaled') stakeStr = `$${cfg.minStake}–$${cfg.maxStake} score-scaled`;
   else                                  stakeStr = `$${cfg.minStake}–$${cfg.maxStake} martingale ×${cfg.martingaleMultiplier}`;
 
@@ -448,7 +467,7 @@ function runBacktest(cfg: BotConfig): { trades: number; wins: number; losses: nu
 
     // Stake computation
     let stake = cfg.stake;
-    if (cfg.stakeMode === 'percent') {
+    if (cfg.stakeMode === 'percent' || cfg.stakeMode === 'percent_of_account_balance') {
       stake = Math.max(0.35, (balance * cfg.stakePercent) / 100);
     } else if (cfg.stakeMode === 'score_scaled') {
       const t = cfg.entryScoring.enabled
@@ -498,7 +517,7 @@ function validate(cfg: BotConfig): ValidationWarning[] {
   if (cfg.maxConsecLosses < 1) w.push({ field: 'maxConsecLosses', message: 'Max consecutive losses must be ≥ 1.' });
   if (cfg.stakeMode === 'martingale' && cfg.martingaleMultiplier < 1)
     w.push({ field: 'martingaleMultiplier', message: 'Martingale multiplier must be ≥ 1.' });
-  if (cfg.stakeMode === 'percent' && (cfg.stakePercent <= 0 || cfg.stakePercent > 100))
+  if ((cfg.stakeMode === 'percent' || cfg.stakeMode === 'percent_of_account_balance') && (cfg.stakePercent <= 0 || cfg.stakePercent > 100))
     w.push({ field: 'stakePercent', message: 'Percent stake must be between 0 and 100.' });
   if (cfg.stakeMode === 'score_scaled' && cfg.minStake >= cfg.maxStake)
     w.push({ field: 'stake', message: 'Score-scaled: min stake must be less than max stake.' });
@@ -509,6 +528,8 @@ function validate(cfg: BotConfig): ValidationWarning[] {
   }
   if (cfg.regimeFilter.enabled && cfg.regimeFilter.activeRangeMin >= cfg.regimeFilter.activeRangeMax)
     w.push({ field: 'regimeFilter', message: 'Regime filter: min range must be less than max range.' });
+  if (cfg.asianStrategy.enabled && cfg.asianStrategy.priceDriftThreshold < 0 || cfg.asianStrategy.priceDriftThreshold > 1)
+    w.push({ field: 'asianStrategy', message: 'Asian strategy: price drift threshold must be between 0 and 1.' });
   // Duplicate conditions check
   const condKeys = cfg.purchaseConditions.map(c => `${c.indicator}-${c.operator}-${c.value}`);
   const dupes = condKeys.filter((k, i) => condKeys.indexOf(k) !== i);
@@ -679,12 +700,12 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
             return {
               name: bot.getAttribute('name') || 'AI Generated Bot',
               market: getText('market') || 'Volatility 75 Index',
-              tradeType: (getText('tradeType') || 'rise_fall') as TradeType,
+              tradeType: normalizeTradeType(getText('tradeType') || 'rise_fall'),
               direction: (getText('direction') || 'CALL') as 'CALL' | 'PUT' | 'both',
               durationUnit: (bot.querySelector('duration')?.getAttribute('unit') || 'ticks') as DurationUnit,
               duration: parseInt(bot.querySelector('duration')?.textContent || '5'),
               stake: parseFloat(getText('stake') || '5'),
-              stakeMode: (bot.querySelector('stake')?.getAttribute('mode') || 'fixed') as StakeMode,
+              stakeMode: normalizeStakeMode(bot.querySelector('stake')?.getAttribute('mode') || 'fixed'),
               purchaseConditions: parseConditions(bot.querySelector('purchaseConditions')),
               sellConditions: parseConditions(bot.querySelector('exitConditions')),
               maxConsecLosses: parseInt(bot.querySelector('riskManagement maxConsecLosses')?.textContent || '3'),
@@ -694,7 +715,46 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
               enableDailyLoss: true,
               enableTakeProfit: false,
               takeProfitAmount: 100,
+              asianStrategy: {
+                enabled: Boolean(bot.querySelector('asianStrategy')?.getAttribute('enabled')),
+                priceDriftThreshold: parseFloat(bot.querySelector('asianStrategy')?.getAttribute('priceDriftThreshold') || '0.15'),
+                checkInterval: (bot.querySelector('asianStrategy')?.getAttribute('checkInterval') || 'tick') as 'tick' | 'minute' | 'second',
+                emaPeriod: parseInt(bot.querySelector('asianStrategy')?.getAttribute('emaPeriod') || '20'),
+                durationUnit: (bot.querySelector('asianStrategy')?.getAttribute('durationUnit') || 'minutes') as DurationUnit,
+                duration: parseInt(bot.querySelector('asianStrategy')?.getAttribute('duration') || '120'),
+              },
             };
+
+            function normalizeTradeType(type: string): TradeType {
+              const typeStr = type.toLowerCase().replace(/[-_]/g, '');
+              const typeMap: Record<string, TradeType> = {
+                'risefall': 'rise_fall', 'rise/fall': 'rise_fall', 'rise_fall': 'rise_fall',
+                'higherlower': 'higher_lower', 'higher/lower': 'higher_lower', 'higher_lower': 'higher_lower',
+                'touchnotouch': 'touch_no_touch', 'touch/no touch': 'touch_no_touch', 'touch_no_touch': 'touch_no_touch',
+                'inout': 'in_out', 'in/out': 'in_out', 'in_out': 'in_out',
+                'asians': 'asians', 'asian': 'asians',
+                'digitseven': 'digits_even', 'digits/even': 'digits_even', 'digits_even': 'digits_even',
+                'digitsodd': 'digits_odd', 'digits/odd': 'digits_odd', 'digits_odd': 'digits_odd',
+                'digitsover': 'digits_over', 'digits/over': 'digits_over', 'digits_over': 'digits_over',
+                'digitsunder': 'digits_under', 'digits/under': 'digits_under', 'digits_under': 'digits_under',
+              };
+              return typeMap[typeStr] || 'rise_fall';
+            }
+
+            function normalizeStakeMode(mode: string): StakeMode {
+              const modeStr = mode.toLowerCase().replace(/[-_]/g, '');
+              const modeMap: Record<string, StakeMode> = {
+                'fixed': 'fixed',
+                'percent': 'percent',
+                'percentofaccountbalance': 'percent_of_account_balance',
+                'percentofbalance': 'percent_of_account_balance',
+                'percent_of_account_balance': 'percent_of_account_balance',
+                'martingale': 'martingale',
+                'scorescaled': 'score_scaled',
+                'score_scaled': 'score_scaled',
+              };
+              return modeMap[modeStr] || 'fixed';
+            }
           };
           
           const importedConfig = parseBotConfig(xmlDoc);
@@ -815,7 +875,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
       // Stake computation with all modes + drawdown governor overlays
       let stake = c.stake;
       const cl = consecLossesRef.current;
-      if (c.stakeMode === 'percent') {
+      if (c.stakeMode === 'percent' || c.stakeMode === 'percent_of_account_balance') {
         stake = c.stakePercent; // App.tsx runTrade computes % of balance
       } else if (c.stakeMode === 'score_scaled') {
         // No live score available — use midpoint
@@ -959,10 +1019,10 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
       }
 
       // ── Normalise stakeMode ───────────────────────────────────────────────
-      const VALID_STAKE_MODES: StakeMode[] = ['fixed', 'percent', 'martingale'];
+      const VALID_STAKE_MODES: StakeMode[] = ['fixed', 'percent', 'percent_of_account_balance', 'martingale', 'score_scaled'];
       const stakeMode: StakeMode = VALID_STAKE_MODES.includes(raw.stakeMode)
         ? raw.stakeMode as StakeMode
-        : 'fixed'; // anything exotic (score_scaled, linear_by_score, etc.) → fixed
+        : 'fixed'; // anything exotic → fixed
 
       // ── Normalise riskManagement fields ──────────────────────────────────
       const rm = raw.riskManagement ?? {};
@@ -1013,6 +1073,17 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
         atrRegimeWeight:           Number(components.atrRegime         ?? es.atrRegimeWeight         ?? DEFAULT_CONFIG.entryScoring.atrRegimeWeight),
       };
 
+      // Asian strategy
+      const as = raw.asianStrategy ?? {};
+      const asianStrategy: AsianStrategy = {
+        enabled: Boolean(as.enabled),
+        priceDriftThreshold: Number(as.priceDriftThreshold ?? DEFAULT_CONFIG.asianStrategy.priceDriftThreshold),
+        checkInterval: (as.checkInterval === 'tick' || as.checkInterval === 'minute' || as.checkInterval === 'second') ? as.checkInterval : 'tick',
+        emaPeriod: Number(as.emaPeriod ?? DEFAULT_CONFIG.asianStrategy.emaPeriod),
+        durationUnit: (as.durationUnit && ['ticks', 'seconds', 'minutes', 'hours'].includes(as.durationUnit)) ? as.durationUnit as DurationUnit : DEFAULT_CONFIG.asianStrategy.durationUnit,
+        duration: Number(as.duration ?? DEFAULT_CONFIG.asianStrategy.duration),
+      };
+
       // ── Stake values ──────────────────────────────────────────────────────
       const stake = raw.stake ?? raw.minStake ?? raw.baseStake ?? DEFAULT_CONFIG.stake;
 
@@ -1024,7 +1095,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
         ...DEFAULT_CONFIG,
         name:              raw.name        || 'Imported Bot',
         market:            raw.market      || DEFAULT_CONFIG.market,
-        tradeType:         raw.tradeType   || DEFAULT_CONFIG.tradeType,
+        tradeType:         normalizeTradeType(raw.tradeType),
         direction:         raw.direction   || DEFAULT_CONFIG.direction,
         durationUnit:      raw.durationUnit || DEFAULT_CONFIG.durationUnit,
         duration:          Number(raw.duration)  || DEFAULT_CONFIG.duration,
@@ -1055,7 +1126,46 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
         drawdownGovernor,
         regimeFilter,
         entryScoring,
+        asianStrategy,
       };
+
+      // Helper function to normalize trade type
+      function normalizeTradeType(type: any): TradeType {
+        if (!type) return DEFAULT_CONFIG.tradeType;
+        const typeStr = String(type).toLowerCase().replace(/[-_]/g, '');
+        
+        // Map various possible formats to our TradeType
+        const typeMap: Record<string, TradeType> = {
+          'risefall': 'rise_fall',
+          'rise/fall': 'rise_fall',
+          'rise_fall': 'rise_fall',
+          'higherlower': 'higher_lower',
+          'higher/lower': 'higher_lower',
+          'higher_lower': 'higher_lower',
+          'touchnotouch': 'touch_no_touch',
+          'touch/no touch': 'touch_no_touch',
+          'touch_no_touch': 'touch_no_touch',
+          'inout': 'in_out',
+          'in/out': 'in_out',
+          'in_out': 'in_out',
+          'asians': 'asians',
+          'asian': 'asians',
+          'digitseven': 'digits_even',
+          'digits/even': 'digits_even',
+          'digits_even': 'digits_even',
+          'digitsodd': 'digits_odd',
+          'digits/odd': 'digits_odd',
+          'digits_odd': 'digits_odd',
+          'digitsover': 'digits_over',
+          'digits/over': 'digits_over',
+          'digits_over': 'digits_over',
+          'digitsunder': 'digits_under',
+          'digits/under': 'digits_under',
+          'digits_under': 'digits_under',
+        };
+        
+        return typeMap[typeStr] || DEFAULT_CONFIG.tradeType;
+      }
 
       dispatch({ type: 'RESET', payload: normalised });
       setShowImport(false);
@@ -1230,7 +1340,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                 <div key={b.name} className="bb-saved-row">
                   <div className="bb-saved-info">
                     <strong>{b.name}</strong>
-                    <span>{b.market.replace('Volatility ', 'V').replace(' Index', '')} · {b.tradeType.replace('_','/')} · {b.stakeMode}</span>
+                    <span>{b.market.replace('Volatility ', 'V').replace(' Index', '')} · {b.tradeType.replace('_','/')} · {b.stakeMode.replace('_',' ')}</span>
                   </div>
                   <div className="bb-saved-actions">
                     <button type="button" className="bb-radio-btn active" style={{ fontSize: 10, padding: '3px 10px' }}
@@ -1370,11 +1480,11 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                 <div className="bb-field">
                   <label className="bb-label">Stake mode</label>
                   <div className="bb-radio-group">
-                    {(['fixed','percent','martingale','score_scaled'] as const).map(m => (
+                    {(['fixed','percent','percent_of_account_balance','martingale','score_scaled'] as const).map(m => (
                       <button key={m} type="button"
                         className={`bb-radio-btn ${cfg.stakeMode === m ? 'active' : ''}`}
                         onClick={() => update({ stakeMode: m })}>
-                        {m === 'fixed' ? 'Fixed $' : m === 'percent' ? '% Balance' : m === 'martingale' ? 'Martingale' : 'Score Scaled'}
+                        {m === 'fixed' ? 'Fixed $' : m === 'percent' ? '% Balance' : m === 'percent_of_account_balance' ? '% Account' : m === 'martingale' ? 'Martingale' : 'Score Scaled'}
                       </button>
                     ))}
                   </div>
@@ -1389,6 +1499,12 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                 {cfg.stakeMode === 'percent' && (
                   <>
                     {num('% of balance per trade', cfg.stakePercent, v => update({ stakePercent: v }), 0.01, 100, 0.1)}
+                    {warnFor('stakePercent') && <p className="bb-warn-inline"><AlertTriangle size={11} /> {warnFor('stakePercent')!.message}</p>}
+                  </>
+                )}
+                {cfg.stakeMode === 'percent_of_account_balance' && (
+                  <>
+                    {num('% of account balance per trade', cfg.stakePercent, v => update({ stakePercent: v }), 0.01, 100, 0.1)}
                     {warnFor('stakePercent') && <p className="bb-warn-inline"><AlertTriangle size={11} /> {warnFor('stakePercent')!.message}</p>}
                   </>
                 )}
@@ -1591,6 +1707,45 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                         ? <p className="bb-warn-inline"><AlertTriangle size={11} /> Weights sum to {total} — should be 100.</p>
                         : <p className="bb-field-hint" style={{ color: '#34d399' }}>✓ Weights sum to 100.</p>;
                     })()}
+                  </>
+                )}
+
+                <div className="bb-divider" />
+                {/* ── Asian Strategy ── */}
+                <p className="bb-section-label">Asian strategy settings</p>
+                {tog('Enable Asian strategy', 'Configure specialized parameters for Asian-type contracts.', cfg.asianStrategy.enabled,
+                  v => update({ asianStrategy: { ...cfg.asianStrategy, enabled: v } }))}
+                {cfg.asianStrategy.enabled && (
+                  <>
+                    {num('Price drift threshold (0–1)', cfg.asianStrategy.priceDriftThreshold,
+                      v => update({ asianStrategy: { ...cfg.asianStrategy, priceDriftThreshold: Math.min(1, Math.max(0, v)) } }), 0, 1, 0.01)}
+                    <div className="bb-field">
+                      <label className="bb-label">Check interval</label>
+                      <div className="bb-radio-group">
+                        {(['tick', 'minute', 'second'] as const).map(interval => (
+                          <button key={interval} type="button"
+                            className={`bb-radio-btn ${cfg.asianStrategy.checkInterval === interval ? 'active' : ''}`}
+                            onClick={() => update({ asianStrategy: { ...cfg.asianStrategy, checkInterval: interval } })}>
+                            {interval.charAt(0).toUpperCase() + interval.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {num('EMA period', cfg.asianStrategy.emaPeriod,
+                      v => update({ asianStrategy: { ...cfg.asianStrategy, emaPeriod: Math.max(1, v) } }), 1, 200)}
+                    <div className="bb-field-row">
+                      {num('Strategy duration', cfg.asianStrategy.duration,
+                        v => update({ asianStrategy: { ...cfg.asianStrategy, duration: Math.max(1, v) } }), 1, 1000)}
+                      <div className="bb-select-wrap" style={{ flex: 1 }}>
+                        <select className="bb-select" value={cfg.asianStrategy.durationUnit}
+                          onChange={e => update({ asianStrategy: { ...cfg.asianStrategy, durationUnit: e.target.value as DurationUnit } })}>
+                          {(['ticks','seconds','minutes','hours'] as const).map(u =>
+                            <option key={u} value={u}>{u}</option>
+                          )}
+                        </select>
+                        <ChevronDown size={12} className="bb-select-arrow" />
+                      </div>
+                    </div>
                   </>
                 )}
 
@@ -1953,7 +2108,7 @@ function RiskGauge({ cfg }: { cfg: BotConfig }) {
   let score = 0;
   if (cfg.stakeMode === 'martingale' && !cfg.drawdownGovernor.noMartingale) score += 35;
   else if (cfg.stakeMode === 'score_scaled') score += 10;
-  else if (cfg.stakeMode === 'percent') score += 15;
+  else if (cfg.stakeMode === 'percent' || cfg.stakeMode === 'percent_of_account_balance') score += 15;
   else score += 5;
   if (cfg.maxConsecLosses >= 5) score += 10;
   else if (cfg.maxConsecLosses <= 2) score += 25;
