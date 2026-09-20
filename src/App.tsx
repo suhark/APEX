@@ -763,9 +763,11 @@ function App() {
     config: BotConfig | null;
   } | null>(null);
   const botBuilderStateRef = useRef(botBuilderState);
+  const setBotBuilderStateRef = useRef(setBotBuilderState);
   useEffect(() => {
     botBuilderStateRef.current = botBuilderState;
-  }, [botBuilderState]);
+    setBotBuilderStateRef.current = setBotBuilderState;
+  }, [botBuilderState, setBotBuilderState]);
   const deriv = useDerivConnection();
 
   // Prevent background scrolling when mobile sidebar is open
@@ -800,6 +802,10 @@ function App() {
   const botConfigRef = useRef<Record<string, BotConfig>>({});
   // Live signal status per bot — shown on the dedicated pages
   const [botStatus, setBotStatus] = useState<Record<string, string>>({});
+  const setBotStatusRef = useRef(setBotStatus);
+  useEffect(() => {
+    setBotStatusRef.current = setBotStatus;
+  }, [setBotStatus]);
 
   // Safety & Arming controls
   const [liveArmed, setLiveArmed] = useState(false);
@@ -1494,7 +1500,7 @@ function App() {
           console.error('runTrade:', errorMsg);
           setNotice(errorMsg);
           if (details.botName) {
-            setBotStatus(s => ({ ...s, [details.botName]: `🔒 Disarmed` }));
+            currentSetBotStatus(s => ({ ...s, [details.botName]: `🔒 Disarmed` }));
           }
           return {};
         }
@@ -1504,7 +1510,7 @@ function App() {
           console.error('runTrade:', errorMsg);
           setNotice(errorMsg);
           if (details.botName) {
-            setBotStatus(s => ({ ...s, [details.botName]: `🔒 Bot trading blocked` }));
+            currentSetBotStatus(s => ({ ...s, [details.botName]: `🔒 Bot trading blocked` }));
           }
           return {};
         }
@@ -1516,7 +1522,7 @@ function App() {
           console.error('runTrade:', errorMsg);
           setNotice(errorMsg);
           if (details.botName) {
-            setBotStatus(s => ({ ...s, [details.botName]: `💰 Stake too high` }));
+            currentSetBotStatus(s => ({ ...s, [details.botName]: `💰 Stake too high` }));
           }
           return {};
         }
@@ -1658,7 +1664,7 @@ function App() {
               
               // Bot Builder consecutive loss tracking
               if (details.botName === 'Bot Builder') {
-                setBotBuilderState(prev => {
+                setBotBuilderStateRef.current?.(prev => {
                   if (!prev) return null;
                   const newConsecLosses = !win ? prev.consecLosses + 1 : 0;
                   return { ...prev, consecLosses: newConsecLosses };
@@ -1710,7 +1716,7 @@ function App() {
               console.log('runTrade:', resultMsg);
               setNotice(resultMsg);
               if (details.botName) {
-                setBotStatus(s => ({ ...s, [details.botName]: `${poc.status === 'won' ? '✅' : '❌'} ${poc.status.toUpperCase()} ${money(finalProfit)}` }));
+                currentSetBotStatus(s => ({ ...s, [details.botName]: `${poc.status === 'won' ? '✅' : '❌'} ${poc.status.toUpperCase()} ${money(finalProfit)}` }));
               }
             }
           }
@@ -1784,7 +1790,7 @@ function App() {
       void updateWorkspace({ active_bots: [] }).catch(() => {});
       return stopped;
     });
-    setBotBuilderState(prev => prev ? { ...prev, isRunning: false } : null);
+    setBotBuilderStateRef.current?.(prev => prev ? { ...prev, isRunning: false } : null);
     botPendingTradesRef.current.clear();
   };
 
@@ -1846,6 +1852,7 @@ function App() {
       }
 
       const currentTick = tickRef.current;
+      const currentSetBotStatus = setBotStatusRef.current;
       activeBots.forEach((bot, i) => {
         if (botPendingTradesRef.current.has(bot.name)) return;
 
@@ -1889,19 +1896,19 @@ function App() {
           if (recentLosses >= cfg.lossFadeAt && recentWins === 0) {
             instrument = 'Volatility 50 Index';
             stake      = Math.max(1, cfg.baseStake - 4);
-            setBotStatus(s => ({ ...s, 'Phantom Scalper': '⚠️ Recovery mode — V50' }));
+            currentSetBotStatus(s => ({ ...s, 'Phantom Scalper': '⚠️ Recovery mode — V50' }));
           } else if (recentWins >= cfg.winStepAt) {
             instrument = 'Volatility 100 Index';
             stake      = cfg.baseStake + 3;
-            setBotStatus(s => ({ ...s, 'Phantom Scalper': '🔥 Hot streak — V100' }));
+            currentSetBotStatus(s => ({ ...s, 'Phantom Scalper': '🔥 Hot streak — V100' }));
           } else if (inPrimeWindow) {
             instrument = 'Volatility 75 Index';
             stake      = cfg.baseStake;
-            setBotStatus(s => ({ ...s, 'Phantom Scalper': '✅ Prime window — V75' }));
+            currentSetBotStatus(s => ({ ...s, 'Phantom Scalper': '✅ Prime window — V75' }));
           } else {
             instrument = 'Volatility 25 Index';
             stake      = Math.max(1, cfg.baseStake - 4);
-            setBotStatus(s => ({ ...s, 'Phantom Scalper': '😴 Off-peak — V25' }));
+            currentSetBotStatus(s => ({ ...s, 'Phantom Scalper': '😴 Off-peak — V25' }));
           }
 
           // Direction
@@ -1926,7 +1933,7 @@ function App() {
           const msSinceLoss = Date.now() - stpState.lastLossTime;
           if (stpState.consecutiveLosses >= 3 && msSinceLoss < STP_COOLDOWN_MS) {
             const remaining = Math.ceil((STP_COOLDOWN_MS - msSinceLoss) / 60000);
-            setBotStatus(s => ({ ...s, 'Trend Pullback V3': `⏸ Cooldown — ${remaining}m remaining` }));
+            currentSetBotStatus(s => ({ ...s, 'Trend Pullback V3': `⏸ Cooldown — ${remaining}m remaining` }));
             return;
           }
           if (stpState.consecutiveLosses >= 3 && msSinceLoss >= STP_COOLDOWN_MS) {
@@ -1937,14 +1944,14 @@ function App() {
           const candles = buildSyntheticCandles(3, currentTick, 60);
           const ind = calcStpIndicators(candles);
           if (!ind) {
-            setBotStatus(s => ({ ...s, 'Trend Pullback V3': '⏳ Building candle history…' }));
+            currentSetBotStatus(s => ({ ...s, 'Trend Pullback V3': '⏳ Building candle history…' }));
             return;
           }
 
           // Pass user-configured thresholds into the signal evaluator
           const signal = evalStpV3Signal(ind, cfg.scoreThreshold, cfg.adxMin);
           if (!signal) {
-            setBotStatus(s => ({ ...s, 'Trend Pullback V3': `🔍 Scanning — score ${ind ? '' : '—'} below ${cfg.scoreThreshold}` }));
+            currentSetBotStatus(s => ({ ...s, 'Trend Pullback V3': `🔍 Scanning — score ${ind ? '' : '—'} below ${cfg.scoreThreshold}` }));
             return;
           }
 
@@ -1967,7 +1974,7 @@ function App() {
 
           // Use a ref-based counter so it resets cleanly when the bot is restarted
           if (digitSurgeLossRef.current >= cfg.maxConsecLosses) {
-            setBotStatus(s => ({ ...s, 'Digit Surge': `🛑 Stopped — ${digitSurgeLossRef.current} consecutive losses. Restart to resume.` }));
+            currentSetBotStatus(s => ({ ...s, 'Digit Surge': `🛑 Stopped — ${digitSurgeLossRef.current} consecutive losses. Restart to resume.` }));
             // Deactivate the bot so the UI shows Start instead of Pause
             setBots(prev => prev.map(b => b.name === 'Digit Surge' ? { ...b, active: false } : b));
             botPendingTradesRef.current.delete('Digit Surge');
@@ -1986,7 +1993,7 @@ function App() {
           const oddBias  = oddCount / total;
 
           if (Math.max(evenBias, oddBias) < cfg.biasThreshold) {
-            setBotStatus(s => ({ ...s, 'Digit Surge': `🔍 Scanning — bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% < ${(cfg.biasThreshold * 100).toFixed(0)}%` }));
+            currentSetBotStatus(s => ({ ...s, 'Digit Surge': `🔍 Scanning — bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% < ${(cfg.biasThreshold * 100).toFixed(0)}%` }));
             return;
           }
 
@@ -2010,7 +2017,7 @@ function App() {
           const bcState = boomCrashStateRef.current;
           if (Date.now() - bcState.lastTradeTime < cfg.cooldownMs) {
             const remain = Math.ceil((cfg.cooldownMs - (Date.now() - bcState.lastTradeTime)) / 1000);
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `⏸ Cooldown — ${remain}s` }));
+            currentSetBotStatus(s => ({ ...s, 'Boom/Crash Rider': `⏸ Cooldown — ${remain}s` }));
             return;
           }
 
@@ -2027,15 +2034,15 @@ function App() {
           const strongRise = risingTicks  >= Math.ceil(cfg.trendTicks * 0.70);
 
           if (strongFall) {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ BOOM setup — ${fallingTicks}/${cfg.trendTicks} falling ticks` }));
+            currentSetBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ BOOM setup — ${fallingTicks}/${cfg.trendTicks} falling ticks` }));
             instrument = 'Boom 1000 Index';
             direction  = 'CALL';
           } else if (strongRise) {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ CRASH setup — ${risingTicks}/${cfg.trendTicks} rising ticks` }));
+            currentSetBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ CRASH setup — ${risingTicks}/${cfg.trendTicks} rising ticks` }));
             instrument = 'Crash 1000 Index';
             direction  = 'PUT';
           } else {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔍 Scanning — fall:${fallingTicks} rise:${risingTicks}/${cfg.trendTicks}` }));
+            currentSetBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔍 Scanning — fall:${fallingTicks} rise:${risingTicks}/${cfg.trendTicks}` }));
             return;
           }
 
@@ -2060,7 +2067,7 @@ function App() {
           const drift = (close - ma) / (ma || 1);
 
           if (Math.abs(drift) < cfg.driftThreshold) {
-            setBotStatus(s => ({ ...s, 'Asian Drift': `🔍 Scanning — drift ${((drift || 0) * 100).toFixed(3)}%` }));
+            currentSetBotStatus(s => ({ ...s, 'Asian Drift': `🔍 Scanning — drift ${((drift || 0) * 100).toFixed(3)}%` }));
             return;
           }
 
@@ -2078,7 +2085,7 @@ function App() {
           // Bot Builder bot - use the config from botBuilderState
           const bbState = botBuilderStateRef.current;
           if (!bbState || !bbState.isRunning || !bbState.config) {
-            setBotStatus(s => ({ ...s, [bot.name]: '⏸ Not configured or not running' }));
+            currentSetBotStatus(s => ({ ...s, [bot.name]: '⏸ Not configured or not running' }));
             return;
           }
           
@@ -2088,7 +2095,7 @@ function App() {
           const conditionsMet = evaluateBotBuilderConditions(cfg.purchaseConditions, currentTick);
           
           if (!conditionsMet) {
-            setBotStatus(s => ({ ...s, [bot.name]: `🔍 Scanning — conditions not met (trades: ${bbState.tradeCount})` }));
+            currentSetBotStatus(s => ({ ...s, [bot.name]: `🔍 Scanning — conditions not met (trades: ${bbState.tradeCount})` }));
             return;
           }
           
@@ -2113,7 +2120,7 @@ function App() {
           
           // Check consecutive loss limit
           if (cl >= cfg.maxConsecLosses) {
-            setBotStatus(s => ({ ...s, [bot.name]: `⏸ Paused — ${cl} consecutive losses` }));
+            currentSetBotStatus(s => ({ ...s, [bot.name]: `⏸ Paused — ${cl} consecutive losses` }));
             return;
           }
           
@@ -2124,7 +2131,7 @@ function App() {
           setBotStatus(s => ({ ...s, [bot.name]: `🔄 ${dir} on ${cfg.market} (${money(stake)})` }));
           
           // Update trade count in state
-          setBotBuilderState(prev => prev ? { ...prev, tradeCount: prev.tradeCount + 1 } : null);
+          setBotBuilderStateRef.current?.(prev => prev ? { ...prev, tradeCount: prev.tradeCount + 1 } : null);
         } else {
           // Default strategy for all other bots — with basic condition checking
           const cfg = (botConfigRef.current[bot.name] ?? DEFAULT_BOT_DEFAULTS) as DefaultBotConfig;
@@ -2147,9 +2154,9 @@ function App() {
             if (Math.abs(momentum) > 0.3 && volatility > 0.5 && volatility < 2.0) {
               shouldTrade = true;
               tradeDirection = momentum > 0 ? 'CALL' : 'PUT';
-              setBotStatus(s => ({ ...s, [bot.name]: `✅ Momentum ${momentum > 0 ? 'UP' : 'DOWN'} (${(Math.abs(momentum) * 100).toFixed(0)}%) Vol: ${(volatility * 100).toFixed(1)}%` }));
+              currentSetBotStatus(s => ({ ...s, [bot.name]: `✅ Momentum ${momentum > 0 ? 'UP' : 'DOWN'} (${(Math.abs(momentum) * 100).toFixed(0)}%) Vol: ${(volatility * 100).toFixed(1)}%` }));
             } else {
-              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Momentum ${(momentum * 100).toFixed(0)}% Vol: ${(volatility * 100).toFixed(1)}% — waiting` }));
+              currentSetBotStatus(s => ({ ...s, [bot.name]: `🔍 Momentum ${(momentum * 100).toFixed(0)}% Vol: ${(volatility * 100).toFixed(1)}% — waiting` }));
               return;
             }
           } else if (bot.name === 'Reverse Signal') {
@@ -2164,7 +2171,7 @@ function App() {
             // Trade against the recent trend
             shouldTrade = true;
             tradeDirection = recentTrend === 'UP' ? 'PUT' : 'CALL';
-            setBotStatus(s => ({ ...s, [bot.name]: `✅ Reversing ${recentTrend} trend` }));
+            currentSetBotStatus(s => ({ ...s, [bot.name]: `✅ Reversing ${recentTrend} trend` }));
           } else if (bot.name === 'Momentum Pulse') {
             // Momentum Pulse: strong directional move
             let gains = 0; let losses = 0;
@@ -2178,9 +2185,9 @@ function App() {
             if (Math.abs(momentum) > 0.4) {
               shouldTrade = true;
               tradeDirection = momentum > 0 ? 'CALL' : 'PUT';
-              setBotStatus(s => ({ ...s, [bot.name]: `✅ Strong ${momentum > 0 ? 'UP' : 'DOWN'} momentum (${(Math.abs(momentum) * 100).toFixed(0)}%)` }));
+              currentSetBotStatus(s => ({ ...s, [bot.name]: `✅ Strong ${momentum > 0 ? 'UP' : 'DOWN'} momentum (${(Math.abs(momentum) * 100).toFixed(0)}%)` }));
             } else {
-              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Weak momentum ${(Math.abs(momentum) * 100).toFixed(0)}% — waiting` }));
+              currentSetBotStatus(s => ({ ...s, [bot.name]: `🔍 Weak momentum ${(Math.abs(momentum) * 100).toFixed(0)}% — waiting` }));
               return;
             }
           } else if (bot.name === 'Range Scout') {
@@ -2198,9 +2205,9 @@ function App() {
             if (nearHigh || nearLow) {
               shouldTrade = true;
               tradeDirection = nearHigh ? 'PUT' : 'CALL';
-              setBotStatus(s => ({ ...s, [bot.name]: `✅ ${nearHigh ? 'Resistance' : 'Support'} level reached` }));
+              currentSetBotStatus(s => ({ ...s, [bot.name]: `✅ ${nearHigh ? 'Resistance' : 'Support'} level reached` }));
             } else {
-              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Mid-range — waiting for edges` }));
+              currentSetBotStatus(s => ({ ...s, [bot.name]: `🔍 Mid-range — waiting for edges` }));
               return;
             }
           } else {
@@ -2213,13 +2220,13 @@ function App() {
             const trendStrength = Math.abs(gains - losses) / 10;
             
             if (trendStrength < 0.2) {
-              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Weak trend ${((trendStrength || 0) * 100).toFixed(0)}% — waiting` }));
+              currentSetBotStatus(s => ({ ...s, [bot.name]: `🔍 Weak trend ${((trendStrength || 0) * 100).toFixed(0)}% — waiting` }));
               return;
             }
             
             shouldTrade = true;
             tradeDirection = gains > losses ? 'CALL' : 'PUT';
-            setBotStatus(s => ({ ...s, [bot.name]: `✅ Trend ${tradeDirection === 'CALL' ? 'UP' : 'DOWN'} (${((trendStrength || 0) * 100).toFixed(0)}%)` }));
+            currentSetBotStatus(s => ({ ...s, [bot.name]: `✅ Trend ${tradeDirection === 'CALL' ? 'UP' : 'DOWN'} (${((trendStrength || 0) * 100).toFixed(0)}%)` }));
           }
           
           if (!shouldTrade) return;
@@ -2236,7 +2243,7 @@ function App() {
         runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name, duration: botDuration })
           .catch((err) => {
             console.error(`Bot ${bot.name} trade failed:`, err);
-            setBotStatus(s => ({ ...s, [bot.name]: `❌ Error: ${err instanceof Error ? err.message : 'Unknown error'}` }));
+            currentSetBotStatus(s => ({ ...s, [bot.name]: `❌ Error: ${err instanceof Error ? err.message : 'Unknown error'}` }));
           });
       });
     }, 3000); // Reduced from 5000ms to 3000ms for faster response
