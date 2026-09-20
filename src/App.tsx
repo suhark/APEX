@@ -661,7 +661,7 @@ function App() {
     if (deriv.account) {
       syncSessionStartBalance(deriv.account.balance);
     } else if (workspace && user) {
-      syncSessionStartBalance(workspace.starting_balance);
+      syncSessionStartBalance(workspace?.starting_balance);
     }
   }, [deriv.account?.loginid, workspace?.id, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1031,7 +1031,7 @@ function App() {
       saveUserWorkspaceToStorage(userRef.current.id, next);
     }
     try {
-      const { error } = await supabase.from('trading_workspace').update(changes).eq('id', workspace.id);
+      const { error } = await supabase.from('trading_workspace').update(changes).eq('id', workspace?.id);
       if (error && import.meta.env.DEV) console.warn('Supabase workspace update fallback to local:', error.message);
     } catch { /* ignore */ }
   };
@@ -3281,6 +3281,9 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
 
 function MarketScanner() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'>('ALL');
+  const [quickFilter, setQuickFilter] = useState<'ALL' | 'GAINERS' | 'VOLUME' | 'MOMENTUM' | 'OVERSOLD' | 'OVERBOUGHT'>('ALL');
+  const [marketFilter, setMarketFilter] = useState<'ALL' | 'VOLATILITY' | 'FOREX'>('ALL');
+  const [timeframeFilter, setTimeframeFilter] = useState<'ALL' | '1m' | '5m' | '15m'>('ALL');
   const [lastRefresh, setLastRefresh] = useState(() => new Date());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -3290,7 +3293,7 @@ function MarketScanner() {
   const [scannerConnected, setScannerConnected] = useState(false);
   const [scannerRunning, setScannerRunning] = useState(false);
   const scannerTicksRef = useRef<DerivTick[]>([]);
-  const [rows, setRows] = useState<Array<{ symbol: string; market_family: string; contract_type: string; duration: number; status: 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'; score: number; estimated_probability: number; break_even_probability: number; edge: number; sample_size: number }>>([]);
+  const [rows, setRows] = useState<Array<{ symbol: string; market_family: string; contract_type: string; duration: number; status: 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'; score: number; estimated_probability: number; break_even_probability: number; edge: number; sample_size: number; price: number; change24h: number; volume: number; rsi: number }>>([]);
   const updateRowsFromTicks = (ticks: DerivTick[]) => {
     if (ticks.length < 2) return;
     const quotes = ticks.map((tick) => Number(tick.quote));
@@ -3337,7 +3340,7 @@ function MarketScanner() {
             const trendBonus = fast !== null && slow !== null && fast !== slow ? 0.025 : 0;
                   const probability = Math.min(0.7, Math.max(0.3, 0.5 + trendBonus + rsiBonus + trendQuality + pullbackBonus + structureBonus + Math.min(0.04, movement * 6) - Math.min(0.03, volatility * 20) - atrPenalty - index * 0.01));
       const breakEven = 0.55; const edge = probability - breakEven;
-      return { symbol: 'Volatility 75 Index', market_family: 'Volatility', contract_type: direction, duration, status: ticks.length < 20 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', score: Math.min(100, Math.round((ticks.length / 12) + (fast !== null && slow !== null ? 20 : 0) + Math.min(20, adxProxy) + (structure === 'RANGE' ? 0 : 10))), estimated_probability: probability, break_even_probability: breakEven, edge, sample_size: ticks.length };
+      return { symbol: 'Volatility 75 Index', market_family: 'Volatility', contract_type: direction, duration, status: ticks.length < 20 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', score: Math.min(100, Math.round((ticks.length / 12) + (fast !== null && slow !== null ? 20 : 0) + Math.min(20, adxProxy) + (structure === 'RANGE' ? 0 : 10))), estimated_probability: probability, break_even_probability: breakEven, edge, sample_size: ticks.length, price: latest, change24h: (latest - quotes[0]) / quotes[0] * 100, volume: scanPulse, rsi };
     }));
     setLastRefresh(new Date());
   };
@@ -3365,6 +3368,10 @@ function MarketScanner() {
           break_even_probability: 0.55,
           edge: -0.05,
           sample_size: 0,
+          price: 1000,
+          change24h: 0,
+          volume: 0,
+          rsi: 50,
         })));
         setLastRefresh(new Date());
         return;
@@ -3402,8 +3409,175 @@ function MarketScanner() {
     const unsubscribe = subscribe();
     return unsubscribe;
   }, [scannerRunning]);
-  const visible = rows.filter((row) => statusFilter === 'ALL' || row.status === statusFilter);
-  return <><PageHeader eyebrow="Research-first scanner" title="APEX Market Scanner" description="V1 scope: Volatility 75 Rise/Fall only. This dashboard ranks compact research snapshots; it does not use an LLM or execute trades." action={<div style={{ display: 'flex', gap: 8 }}><button className="secondary" disabled={loading || !scannerConnected} onClick={runScanner}><Activity size={16} /> {!scannerConnected ? 'Waiting for Deriv' : scannerRunning ? 'Stop scanner' : 'Start scanner'}</button><button className="primary" disabled={loading} onClick={() => void loadSnapshot()}>{loading ? <><RefreshCw className="spin" size={16} /> Loading…</> : <><RefreshCw size={16} /> Refresh</>}</button></div>} />{(error || runMessage) && <div className="scanner-error">{runMessage || error}</div>}<div className={`scanner-command-center ${scannerConnected ? 'scanner-active' : 'scanner-idle'}`}><div className="scanner-radar"><span className="radar-ring ring-one" /><span className="radar-ring ring-two" /><span className="radar-sweep" /><span className="radar-core"><Activity size={18} /></span></div><div className="scanner-command-copy"><span className="eyebrow">LIVE RESEARCH ENGINE</span><h2>{scannerConnected ? 'Scanning Volatility 75' : 'Scanner on standby'}</h2><p>{scannerConnected ? 'Incoming Deriv ticks are being evaluated against the active V1 model.' : 'Connect a Deriv account to begin live analysis.'}</p></div><div className="scanner-readout"><span>Ticks processed</span><strong>{scanPulse.toLocaleString()}</strong><small>{marketLive ? `Last quote ${marketLive.quote}` : 'Standby'}</small></div></div><div className="scanner-gate"><ShieldCheck size={18} /><div><b>Research gate active</b><span>Expand markets only after out-of-sample validation supports the model.</span></div></div><div className="scanner-toolbar"><span className="eyebrow">Opportunity state</span>{(['ALL', 'QUALIFIED', 'WATCH', 'NO SIGNAL'] as const).map((status) => <button key={status} className={statusFilter === status ? 'secondary active-filter' : 'secondary'} onClick={() => setStatusFilter(status)}>{status}</button>)}</div><section className="panel scanner-table-wrap"><div className="panel-title"><div><span className="eyebrow">Current research configurations</span><h2>V75 directional evidence</h2></div><span className="muted">Updated {lastRefresh.toLocaleTimeString()}</span></div><div className="scanner-table">{visible.map((row) => <div className="scanner-row" key={`${row.duration}-${row.status}`}><div><b>{row.symbol}</b><span>{row.market_family} · {row.contract_type === 'CALL' ? 'Rise/Fall' : 'Rise/Fall'} · {row.duration} ticks</span></div><span className={`scanner-status ${row.status.toLowerCase().replace(' ', '-')}`}>{row.status}</span><div><span>Score</span><strong>{Number(row.score ?? 0)}/100</strong></div><div><span>Probability</span><strong>{(Number(row.estimated_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Break-even</span><strong>{(Number(row.break_even_probability ?? 0) * 100).toFixed(1)}%</strong></div><div><span>Edge</span><strong className={row.edge > 0 ? 'positive' : 'negative'}>{row.edge > 0 ? '+' : ''}{(row.edge * 100).toFixed(1)}%</strong></div><div><span>Sample</span><strong>{Number(row.sample_size ?? 0).toLocaleString()}</strong></div></div>)}{!visible.length && <EmptyState title="No matching opportunities" text="The scanner is behaving conservatively. No configuration currently meets this filter." />}</div></section><div className="scanner-cards"><section className="panel"><span className="eyebrow">Methodology</span><h2>How qualification works</h2><p className="muted">Technical quality, statistical quality, historical validation, contract economics and data quality are tracked separately. The score is a ranking score, not a probability.</p></section><section className="panel"><span className="eyebrow">V1 boundaries</span><h2>Free-tier safe by design</h2><p className="muted">Rolling state stays in the scanner process. Supabase is reserved for compact opportunities, signal history and aggregated statistics — never raw tick storage.</p></section></div></>;
+  const visible = rows.filter((row) => {
+    const statusMatch = statusFilter === 'ALL' || row.status === statusFilter;
+    const quickMatch = quickFilter === 'ALL' || 
+      (quickFilter === 'GAINERS' && row.change24h > 0) ||
+      (quickFilter === 'VOLUME' && row.volume > 100) ||
+      (quickFilter === 'MOMENTUM' && row.score > 50) ||
+      (quickFilter === 'OVERSOLD' && row.rsi < 30) ||
+      (quickFilter === 'OVERBOUGHT' && row.rsi > 70);
+    return statusMatch && quickMatch;
+  });
+
+  const marketSentiment = rows.length > 0 ? {
+    bullish: rows.filter(r => r.contract_type === 'CALL').length / rows.length * 100,
+    bearish: rows.filter(r => r.contract_type === 'PUT').length / rows.length * 100,
+    neutral: rows.filter(r => r.status === 'NO SIGNAL').length / rows.length * 100
+  } : { bullish: 0, bearish: 0, neutral: 100 };
+
+  const topGainers = [...rows].sort((a, b) => b.change24h - a.change24h).slice(0, 5);
+  const mostActive = [...rows].sort((a, b) => b.volume - a.volume).slice(0, 5);
+
+  return <><PageHeader eyebrow="Research-first scanner" title="APEX Market Scanner" description="V1 scope: Volatility 75 Rise/Fall only. This dashboard ranks compact research snapshots; it does not use an LLM or execute trades." action={<div style={{ display: 'flex', gap: 8 }}><button className="secondary" disabled={loading || !scannerConnected} onClick={runScanner}><Activity size={16} /> {!scannerConnected ? 'Waiting for Deriv' : scannerRunning ? 'Stop scanner' : 'Start scanner'}</button><button className="primary" disabled={loading} onClick={() => void loadSnapshot()}>{loading ? <><RefreshCw className="spin" size={16} /> Loading…</> : <><RefreshCw size={16} /> Refresh</>}</button></div>} />{(error || runMessage) && <div className="scanner-error">{runMessage || error}</div>}
+  
+  {/* Feature Cards */}
+  <div className="scanner-features">
+    <div className="feature-card">
+      <Activity size={20} />
+      <h3>Real-time Scans</h3>
+      <p>Live market analysis powered by Deriv tick data</p>
+    </div>
+    <div className="feature-card">
+      <Settings size={20} />
+      <h3>Advanced Filters</h3>
+      <p>Customize scan parameters for your strategy</p>
+    </div>
+    <div className="feature-card">
+      <Target size={20} />
+      <h3>AI Insights</h3>
+      <p>Machine learning powered signal detection</p>
+    </div>
+    <div className="feature-card">
+      <Bell size={20} />
+      <h3>Smart Alerts</h3>
+      <p>Get notified when opportunities arise</p>
+    </div>
+  </div>
+
+  {/* Scanner Filters */}
+  <section className="panel scanner-filters">
+    <div className="filter-row">
+      <label>Market
+        <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value as any)}>
+          <option value="ALL">All Markets</option>
+          <option value="VOLATILITY">Volatility Indices</option>
+          <option value="FOREX">Forex</option>
+        </select>
+      </label>
+      <label>Timeframe
+        <select value={timeframeFilter} onChange={(e) => setTimeframeFilter(e.target.value as any)}>
+          <option value="ALL">All Timeframes</option>
+          <option value="1m">1 Minute</option>
+          <option value="5m">5 Minutes</option>
+          <option value="15m">15 Minutes</option>
+        </select>
+      </label>
+      <label>Strategy
+        <select>
+          <option>Momentum</option>
+          <option>Mean Reversion</option>
+          <option>Breakout</option>
+        </select>
+      </label>
+    </div>
+    <div className="filter-actions">
+      <button className="secondary">Save Preset</button>
+      <button className="secondary">Custom Scan</button>
+      <button className="primary" onClick={runScanner}>Scan Markets</button>
+    </div>
+  </section>
+
+  {/* Quick Filter Tabs */}
+  <div className="scanner-quick-filters">
+    <button className={quickFilter === 'ALL' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('ALL')}>All</button>
+    <button className={quickFilter === 'GAINERS' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('GAINERS')}>Top Gainers</button>
+    <button className={quickFilter === 'VOLUME' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('VOLUME')}>High Volume</button>
+    <button className={quickFilter === 'MOMENTUM' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('MOMENTUM')}>Strong Momentum</button>
+    <button className={quickFilter === 'OVERSOLD' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('OVERSOLD')}>Oversold</button>
+    <button className={quickFilter === 'OVERBOUGHT' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('OVERBOUGHT')}>Overbought</button>
+  </div>
+
+  <div className="scanner-layout">
+    {/* Main Scanner Area */}
+    <div className="scanner-main">
+      <div className={`scanner-command-center ${scannerConnected ? 'scanner-active' : 'scanner-idle'}`}>
+        <div className="scanner-radar"><span className="radar-ring ring-one" /><span className="radar-ring ring-two" /><span className="radar-sweep" /><span className="radar-core"><Activity size={18} /></span></div>
+        <div className="scanner-command-copy"><span className="eyebrow">LIVE RESEARCH ENGINE</span><h2>{scannerConnected ? 'Scanning Volatility 75' : 'Scanner on standby'}</h2><p>{scannerConnected ? 'Incoming Deriv ticks are being evaluated against the active V1 model.' : 'Connect a Deriv account to begin live analysis.'}</p></div>
+        <div className="scanner-readout"><span>Ticks processed</span><strong>{scanPulse.toLocaleString()}</strong><small>{marketLive ? `Last quote ${marketLive.quote}` : 'Standby'}</small></div>
+      </div>
+      
+      <div className="scanner-toolbar"><span className="eyebrow">Opportunity state</span>{(['ALL', 'QUALIFIED', 'WATCH', 'NO SIGNAL'] as const).map((status) => <button key={status} className={statusFilter === status ? 'secondary active-filter' : 'secondary'} onClick={() => setStatusFilter(status)}>{status}</button>)}</div>
+      
+      <section className="panel scanner-table-wrap">
+        <div className="panel-title"><div><span className="eyebrow">Current research configurations</span><h2>V75 directional evidence</h2></div><span className="muted">Updated {lastRefresh.toLocaleTimeString()}</span></div>
+        <div className="scanner-table">{visible.map((row) => <div className="scanner-row" key={`${row.duration}-${row.status}`}>
+          <div><b>{row.symbol}</b><span>{row.market_family} · {row.contract_type === 'CALL' ? 'Rise/Fall' : 'Rise/Fall'} · {row.duration} ticks</span></div>
+          <span className={`scanner-status ${row.status.toLowerCase().replace(' ', '-')}`}>{row.status}</span>
+          <div><span>Price</span><strong>{row.price.toFixed(2)}</strong></div>
+          <div><span>24h Change</span><strong className={row.change24h >= 0 ? 'positive' : 'negative'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</strong></div>
+          <div><span>Volume</span><strong>{row.volume.toLocaleString()}</strong></div>
+          <div><span>RSI</span><strong>{row.rsi.toFixed(1)}</strong></div>
+          <div><span>Score</span><strong>{Number(row.score ?? 0)}/100</strong></div>
+          <div><span>Probability</span><strong>{(Number(row.estimated_probability ?? 0) * 100).toFixed(1)}%</strong></div>
+          <div><span>Edge</span><strong className={row.edge > 0 ? 'positive' : 'negative'}>{row.edge > 0 ? '+' : ''}{(row.edge * 100).toFixed(1)}%</strong></div>
+        </div>)}{!visible.length && <EmptyState title="No matching opportunities" text="The scanner is behaving conservatively. No configuration currently meets this filter." />}</div>
+      </section>
+    </div>
+
+    {/* Right Sidebar */}
+    <div className="scanner-sidebar">
+      {/* Market Sentiment */}
+      <section className="panel">
+        <span className="eyebrow">Market Sentiment</span>
+        <h2>Overall Trend</h2>
+        <div className="sentiment-display">
+          <div className="sentiment-bar">
+            <div className="sentiment-segment bullish" style={{ width: `${marketSentiment.bullish}%` }} />
+            <div className="sentiment-segment bearish" style={{ width: `${marketSentiment.bearish}%` }} />
+            <div className="sentiment-segment neutral" style={{ width: `${marketSentiment.neutral}%` }} />
+          </div>
+          <div className="sentiment-legend">
+            <span><div className="legend-dot bullish" /> Bullish {marketSentiment.bullish.toFixed(0)}%</span>
+            <span><div className="legend-dot bearish" /> Bearish {marketSentiment.bearish.toFixed(0)}%</span>
+            <span><div className="legend-dot neutral" /> Neutral {marketSentiment.neutral.toFixed(0)}%</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Top Gainers */}
+      <section className="panel">
+        <span className="eyebrow">Top Opportunities</span>
+        <h2>Top Gainers (24h)</h2>
+        <div className="top-list">
+          {topGainers.map((row, i) => (
+            <div key={i} className="top-item">
+              <span>{row.symbol}</span>
+              <strong className="positive">+{row.change24h.toFixed(2)}%</strong>
+            </div>
+          ))}
+          {topGainers.length === 0 && <small className="muted">No data available</small>}
+        </div>
+      </section>
+
+      {/* Most Active */}
+      <section className="panel">
+        <span className="eyebrow">Activity</span>
+        <h2>Most Active Pairs</h2>
+        <div className="top-list">
+          {mostActive.map((row, i) => (
+            <div key={i} className="top-item">
+              <span>{row.symbol}</span>
+              <strong>{row.volume.toLocaleString()}</strong>
+            </div>
+          ))}
+          {mostActive.length === 0 && <small className="muted">No data available</small>}
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div className="scanner-cards"><section className="panel"><span className="eyebrow">Methodology</span><h2>How qualification works</h2><p className="muted">Technical quality, statistical quality, historical validation, contract economics and data quality are tracked separately. The score is a ranking score, not a probability.</p></section><section className="panel"><span className="eyebrow">V1 boundaries</span><h2>Free-tier safe by design</h2><p className="muted">Rolling state stays in the scanner process. Supabase is reserved for compact opportunities, signal history and aggregated statistics — never raw tick storage.</p></section></div></>;
 }
 
 function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; batchId?: string; duration?: number }) => Promise<void> }) {
@@ -4618,14 +4792,14 @@ function Settings({
   onSaveBotConfig: (botName: string, config: any) => void;
   user: User | null;
 }) {
-  const [limitInput, setLimitInput] = useState(String(Math.max(1, Number(workspace.loss_limit ?? 50))));
+  const [limitInput, setLimitInput] = useState(String(Math.max(1, Number(workspace?.loss_limit ?? 50))));
   const [limitSaved, setLimitSaved] = useState(false);
   const activeBalance = derivConnected && deriv.account ? deriv.account.balance : null;
-  const parsedLimit = Math.max(1, Math.min(100000, Number(limitInput) || lossLimit));
+  const parsedLimit = Math.max(1, Math.min(100000, Number(limitInput) || workspace?.loss_limit || 50));
 
   useEffect(() => {
-    setLimitInput(String(Math.max(1, Number(workspace.loss_limit ?? 50))));
-  }, [workspace.loss_limit]);
+    setLimitInput(String(Math.max(1, Number(workspace?.loss_limit ?? 50))));
+  }, [workspace?.loss_limit]);
 
   const saveLossLimit = (value: number) => {
     const validated = Math.max(1, Math.min(100000, value));
@@ -4871,7 +5045,7 @@ function Settings({
           <StrategyExportImport
             botConfigs={botConfig}
             workspaceSettings={{
-              lossLimit: workspace.loss_limit,
+              lossLimit: workspace?.loss_limit,
               allowBotLiveTrading,
               maxBalancePercent,
             }}

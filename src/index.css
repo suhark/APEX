@@ -189,6 +189,249 @@
 .scanner-cards p { margin-top: 10px; line-height: 1.6; }
 @media (max-width: 800px) { .scanner-cards { grid-template-columns: 1fr; } }
 
+/* Scanner Feature Cards */
+.scanner-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.feature-card {
+  padding: 16px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feature-card svg {
+  color: var(--accent-orange);
+  margin-bottom: 4px;
+}
+
+.feature-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.feature-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* Scanner Filters */
+.scanner-filters {
+  margin-bottom: 16px;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.filter-row label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.filter-row select {
+  width: 100%;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 8px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  outline: none;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Scanner Quick Filters */
+.scanner-quick-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.scanner-quick-filters button {
+  padding: 8px 16px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.scanner-quick-filters button:hover {
+  background: var(--bg-secondary);
+  border-color: #3a6a5f;
+}
+
+.scanner-quick-filters button.active-filter {
+  background: linear-gradient(135deg, #102a24, #0c1816);
+  border-color: var(--accent-orange);
+  color: var(--accent-orange);
+}
+
+/* Scanner Layout */
+.scanner-layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.scanner-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.scanner-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .scanner-layout {
+    grid-template-columns: 1fr;
+  }
+  
+  .scanner-sidebar {
+    order: -1;
+  }
+}
+
+/* Market Sentiment */
+.sentiment-display {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sentiment-bar {
+  height: 24px;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  background: var(--bg-secondary);
+}
+
+.sentiment-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.sentiment-segment.bullish {
+  background: linear-gradient(90deg, var(--accent-orange), #ffab5c);
+}
+
+.sentiment-segment.bearish {
+  background: linear-gradient(90deg, var(--danger), #fca5a5);
+}
+
+.sentiment-segment.neutral {
+  background: linear-gradient(90deg, #94a3b8, #cbd5e1);
+}
+
+.sentiment-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.sentiment-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.legend-dot.bullish {
+  background: var(--accent-orange);
+}
+
+.legend-dot.bearish {
+  background: var(--danger);
+}
+
+.legend-dot.neutral {
+  background: #94a3b8;
+}
+
+/* Top Lists */
+.top-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.top-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
+}
+
+.top-item span {
+  color: var(--text-secondary);
+}
+
+.top-item strong {
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+}
+
+/* Updated Scanner Row */
+.scanner-row { 
+  display: grid; 
+  grid-template-columns: 2fr 1fr repeat(6, minmax(70px, .7fr)); 
+  align-items: center; 
+  gap: 12px; 
+  padding: 16px 0; 
+  border-top: 1px solid #1a2b27; 
+}
+
+@media (max-width: 1200px) {
+  .scanner-row {
+    grid-template-columns: 2fr 1fr repeat(3, minmax(70px, .7fr));
+  }
+  
+  .scanner-row > div:nth-child(n+8) {
+    display: none;
+  }
+}
+
 /* ── Notification System Styles ─────────────────────────────────────────── */
 .notification-panel-overlay {
   position: fixed;
