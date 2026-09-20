@@ -112,6 +112,7 @@ export function AIBotBuilder({ onPageChange }: AIBotBuilderProps) {
   const [selectedFormat, setSelectedFormat] = useState<'json' | 'xml'>('json');
   const [copySuccess, setCopySuccess] = useState(false);
   const [importSuccess, setImportSuccess] = useState(false);
+  const [showConfigPanel, setShowConfigPanel] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom of messages
@@ -490,7 +491,7 @@ RESPONSE GUIDELINES:
           <div ref={messagesEndRef} />
         </div>
 
-        {conversation.generatedConfig && (
+        {conversation.generatedConfig && showConfigPanel && (
           <div className="generated-config-panel">
             <div className="config-header">
               <div>
@@ -517,11 +518,29 @@ RESPONSE GUIDELINES:
                   {importSuccess ? <CheckCircle2 size={16} /> : <ChevronRight size={16} />} 
                   {importSuccess ? 'Imported!' : 'Import to Bot Builder'}
                 </button>
+                <button 
+                  className="secondary" 
+                  onClick={() => setShowConfigPanel(false)}
+                  title="Hide panel"
+                >
+                  <X size={16} />
+                </button>
               </div>
             </div>
             <div className="config-preview">
               <pre><code>{conversation.generatedConfig}</code></pre>
             </div>
+          </div>
+        )}
+
+        {conversation.generatedConfig && !showConfigPanel && (
+          <div className="config-panel-toggle">
+            <button 
+              className="secondary" 
+              onClick={() => setShowConfigPanel(true)}
+            >
+              <ChevronRight size={16} /> Show Configuration
+            </button>
           </div>
         )}
 
