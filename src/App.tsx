@@ -547,11 +547,11 @@ function App() {
     }
   }, [mobileNav]);
 
-  const derivConnected = deriv.authState === 'connected' && deriv.account !== null;
-  const isDerivReal = derivConnected && !deriv.account?.is_virtual;
-  const isDerivDemo = derivConnected && Boolean(deriv.account?.is_virtual);
-  const linkedRealAccount = deriv.accounts.find((a) => !a.is_virtual);
-  const linkedDemoAccount = deriv.accounts.find((a) => a.is_virtual);
+  const derivConnected = deriv?.authState === 'connected' && deriv?.account !== null;
+  const isDerivReal = derivConnected && !deriv?.account?.is_virtual;
+  const isDerivDemo = derivConnected && Boolean(deriv?.account?.is_virtual);
+  const linkedRealAccount = deriv?.accounts?.find((a) => !a.is_virtual);
+  const linkedDemoAccount = deriv?.accounts?.find((a) => a.is_virtual);
   const botPendingTradesRef = useRef<Set<string>>(new Set());
   // Prevents load() auto-reconnect from racing with an OAuth callback
   const oauthConnectingRef = useRef(false);
@@ -4822,9 +4822,9 @@ function Settings({
             <div><span className="eyebrow">Deriv connection</span><h2>Linked Deriv Accounts</h2></div>
           </div>
           <DerivConnectionPanel
-            authState={deriv.authState}
-            account={deriv.account}
-            accounts={deriv.accounts}
+            authState={deriv?.authState}
+            account={deriv?.account}
+            accounts={deriv?.accounts}
             onConnect={onDerivConnect}
             onDisconnect={onDerivDisconnect}
             onSwitchAccount={onDerivSwitchAccount}
