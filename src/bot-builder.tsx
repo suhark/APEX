@@ -1104,7 +1104,17 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     if (intervalRef.current) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
     setIsRunning(false);
     setScanStatus('');
-  }, []);
+    // Notify parent to stop tracking this bot
+    if (onBotBuilderStateChange) {
+      onBotBuilderStateChange({
+        isRunning: false,
+        tradeCount,
+        consecLosses,
+        sessionStart,
+        config: cfg
+      });
+    }
+  }, [tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange]);
 
   const startBot = useCallback(() => {
     if (!derivConnected) { setNotice('Connect a Deriv account before running your bot.'); return; }
@@ -1116,76 +1126,21 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     setSessionStart(new Date().toISOString());
     setShowPanel(true); // auto-open panel when bot starts
     setIsRunning(true);
-    setNotice(`Bot "${cfgRef.current.name}" started — trading every 5 seconds.`);
-
-    intervalRef.current = window.setInterval(async () => {
-      const c = cfgRef.current;
-      const cycleNum = tradeCountRef.current;
-      
-      // Check purchase conditions before trading
-      const conditionsMet = evaluateConditions(c.purchaseConditions, tickRef.current);
-      
-      if (!conditionsMet) {
-        // Show scanning status when conditions aren't met
-        setScanStatus(`🔍 Scanning — conditions not met (trades: ${tradeCountRef.current})`);
-        return;
-      }
-      
-      // Clear scan status when conditions are met
-      setScanStatus('');
-      
-      let dir: string;
-      if (c.direction === 'both') {
-        dir = resolveDirection(c, cycleNum % 2 === 0 ? 'CALL' : 'PUT');
-      } else {
-        dir = resolveDirection(c, c.direction as 'CALL' | 'PUT');
-      }
-
-      // Stake computation with all modes + drawdown governor overlays
-      let stake = c.stake;
-      const cl = consecLossesRef.current;
-      if (c.stakeMode === 'percent' || c.stakeMode === 'percent_of_account_balance') {
-        stake = c.stakePercent; // App.tsx runTrade computes % of balance
-      } else if (c.stakeMode === 'score_scaled') {
-        // No live score available — use midpoint
-        stake = Math.max(c.minStake, Math.min(c.maxStake, (c.minStake + c.maxStake) / 2));
-      } else if (c.stakeMode === 'martingale' && !c.drawdownGovernor.noMartingale && cl > 0) {
-        stake = Math.min(c.maxStake, c.stake * Math.pow(c.martingaleMultiplier, cl));
-      }
-      // Drawdown governor overlays
-      if (cl >= 2) stake *= c.drawdownGovernor.afterLosses2StakeOverlay;
-      stake = Math.max(0.35, Number(stake.toFixed(2)));
-
-      // Pause if consecutive loss limit hit
-      if (consecLossesRef.current >= c.maxConsecLosses) {
-        setNotice(`⏸ Bot paused — ${consecLossesRef.current} consecutive losses. Cooldown: ${c.cooldownMinutes}min.`);
-        if (intervalRef.current) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
-        setIsRunning(false);
-        return;
-      }
-
-      try {
-        setScanStatus(`🔄 Executing trade ${tradeCountRef.current + 1}...`);
-        await runTrade({
-          instrument: c.market,
-          direction: dir,
-          stake,
-          source: 'builder',
-          botName: c.name,
-          duration: c.durationUnit === 'ticks' ? c.duration : undefined,
-        });
-        tradeCountRef.current += 1;
-        setTradeCount(tradeCountRef.current);
-        setScanStatus(`✅ Trade ${tradeCountRef.current} executed successfully`);
-        setTimeout(() => setScanStatus(''), 2000); // Clear success message after 2 seconds
-      } catch {
-        setScanStatus('❌ Trade execution failed');
-        setTimeout(() => setScanStatus(''), 2000);
-        // runTrade handles its own notices
-      }
-    }, 5000);
+    setNotice(`Bot "${cfgRef.current.name}" started — now running in background even when you navigate away.`);
+    
+    // Bot execution is now handled by parent App.tsx
+    // Just update state to notify parent to start tracking this bot
+    if (onBotBuilderStateChange) {
+      onBotBuilderStateChange({
+        isRunning: true,
+        tradeCount: 0,
+        consecLosses: 0,
+        sessionStart: new Date().toISOString(),
+        config: cfg
+      });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [derivConnected, runTrade]);
+  }, [derivConnected, onBotBuilderStateChange]);
 
   // Stop bot when component unmounts or Deriv disconnects
   useEffect(() => {

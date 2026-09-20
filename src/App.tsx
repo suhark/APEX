@@ -116,6 +116,225 @@ type TradeAlert = {
 };
 
 const instruments = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
+
+// Bot Builder helper functions - copied from bot-builder.tsx for use in main bot loop
+function resolveBotBuilderDirection(cfg: any, callPut: 'CALL' | 'PUT'): string {
+  switch (cfg.tradeType) {
+    case 'rise_fall':      return callPut;
+    case 'higher_lower':   return callPut;
+    case 'touch_no_touch': return callPut === 'CALL' ? 'ONETOUCH' : 'NOTOUCH';
+    case 'in_out':         return callPut === 'CALL' ? 'EXPIRYRANGE' : 'EXPIRYMISS';
+    case 'asians':         return callPut === 'CALL' ? 'ASIANU' : 'ASIAND';
+    case 'digits_even':    return 'DIGITEVEN';
+    case 'digits_odd':     return 'DIGITODD';
+    case 'digits_over':    return 'DIGITOVER';
+    case 'digits_under':   return 'DIGITUNDER';
+    default:               return callPut;
+  }
+}
+
+function evaluateBotBuilderConditions(conditions: any[], currentTick: number): boolean {
+  if (conditions.length === 0) return true;
+  
+  const prices: number[] = [];
+  for (let i = 0; i < 200; i++) {
+    prices.push(priceFor(i, currentTick - (200 - i)));
+  }
+  
+  const latestPrice = prices[prices.length - 1];
+  
+  const calculateEMA = (period: number): number => {
+    if (prices.length < period) return latestPrice;
+    const multiplier = 2 / (period + 1);
+    let ema = prices.slice(0, period).reduce((sum, p) => sum + p, 0) / period;
+    for (let i = period; i < prices.length; i++) {
+      ema = (prices[i] - ema) * multiplier + ema;
+    }
+    return ema;
+  };
+  
+  const calculateRSI = (period: number): number => {
+    if (prices.length < period + 1) return 50;
+    let gains = 0;
+    let losses = 0;
+    for (let i = prices.length - period; i < prices.length; i++) {
+      const change = prices[i] - prices[i - 1];
+      if (change > 0) gains += change;
+      else losses -= change;
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  };
+  
+  const calculateADX = (period: number): number => {
+    if (prices.length < period + 1) return 25;
+    const trs: number[] = [];
+    for (let i = 1; i < prices.length; i++) {
+      const high = prices[i];
+      const low = prices[i];
+      const prevClose = prices[i - 1];
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+      trs.push(tr);
+    }
+    const atr = trs.slice(-period).reduce((sum, tr) => sum + tr, 0) / period;
+    const plusDM = prices.slice(-period).reduce((sum, p, i, arr) => {
+      if (i === 0) return sum;
+      const upMove = p - arr[i - 1];
+      return sum + (upMove > 0 && upMove > (arr[i] - arr[i - 1] * -1) ? upMove : 0);
+    }, 0);
+    const minusDM = prices.slice(-period).reduce((sum, p, i, arr) => {
+      if (i === 0) return sum;
+      const downMove = arr[i - 1] - p;
+      return sum + (downMove > 0 && downMove > (arr[i] - arr[i - 1]) ? downMove : 0);
+    }, 0);
+    const plusDI = (plusDM / period) / atr * 100;
+    const minusDI = (minusDM / period) / atr * 100;
+    const dx = Math.abs(plusDI - minusDI) / (plusDI + minusDI) * 100;
+    return dx;
+  };
+  
+  const calculateATR = (period: number): number => {
+    if (prices.length < period + 1) return 0.5;
+    const trs: number[] = [];
+    for (let i = 1; i < prices.length; i++) {
+      const high = prices[i];
+      const low = prices[i];
+      const prevClose = prices[i - 1];
+      const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+      trs.push(tr);
+    }
+    return trs.slice(-period).reduce((sum, tr) => sum + tr, 0) / period;
+  };
+  
+  const calculateMACD = (period: number): number => {
+    const ema12 = calculateEMA(12);
+    const ema26 = calculateEMA(26);
+    return ema12 - ema26;
+  };
+  
+  const calculateBB = (period: number): number => {
+    if (prices.length < period) return latestPrice;
+    const sma = prices.slice(-period).reduce((sum, p) => sum + p, 0) / period;
+    const squaredDiffs = prices.slice(-period).map(p => Math.pow(p - sma, 2));
+    const stdDev = Math.sqrt(squaredDiffs.reduce((sum, sq) => sum + sq, 0) / period);
+    return (latestPrice - sma) / stdDev;
+  };
+  
+  const calculateSTOCH = (period: number): number => {
+    if (prices.length < period) return 50;
+    const recentPrices = prices.slice(-period);
+    const high = Math.max(...recentPrices);
+    const low = Math.min(...recentPrices);
+    const k = ((latestPrice - low) / (high - low)) * 100;
+    return k;
+  };
+  
+  const calculateCCI = (period: number): number => {
+    if (prices.length < period) return 0;
+    const recentPrices = prices.slice(-period);
+    const sma = recentPrices.reduce((sum, p) => sum + p, 0) / period;
+    const meanDeviation = recentPrices.reduce((sum, p) => sum + Math.abs(p - sma), 0) / period;
+    const cci = (latestPrice - sma) / (0.015 * meanDeviation);
+    return cci;
+  };
+  
+  const calculateWPR = (period: number): number => {
+    if (prices.length < period) return -50;
+    const recentPrices = prices.slice(-period);
+    const high = Math.max(...recentPrices);
+    const low = Math.min(...recentPrices);
+    const wpr = -100 * (high - latestPrice) / (high - low);
+    return wpr;
+  };
+  
+  let allConditionsMet = true;
+  for (let i = 0; i < conditions.length; i++) {
+    const cond = conditions[i];
+    let indicatorValue: number;
+    
+    switch (cond.indicator) {
+      case 'EMA':
+        indicatorValue = calculateEMA(cond.period);
+        break;
+      case 'RSI':
+        indicatorValue = calculateRSI(cond.period);
+        break;
+      case 'ADX':
+        indicatorValue = calculateADX(cond.period);
+        break;
+      case 'ATR':
+        indicatorValue = calculateATR(cond.period);
+        break;
+      case 'MACD':
+        indicatorValue = calculateMACD(cond.period);
+        break;
+      case 'BB':
+        indicatorValue = calculateBB(cond.period);
+        break;
+      case 'STOCH':
+        indicatorValue = calculateSTOCH(cond.period);
+        break;
+      case 'CCI':
+        indicatorValue = calculateCCI(cond.period);
+        break;
+      case 'WPR':
+        indicatorValue = calculateWPR(cond.period);
+        break;
+      case 'PRICE':
+        indicatorValue = latestPrice;
+        break;
+      default:
+        indicatorValue = latestPrice;
+    }
+    
+    let conditionMet = false;
+    const compareValue = cond.indicator === 'EMA' && cond.operator.includes('crosses') 
+      ? calculateEMA(cond.value) 
+      : cond.value;
+    
+    switch (cond.operator) {
+      case '>':
+        conditionMet = indicatorValue > compareValue;
+        break;
+      case '<':
+        conditionMet = indicatorValue < compareValue;
+        break;
+      case '>=':
+        conditionMet = indicatorValue >= compareValue;
+        break;
+      case '<=':
+        conditionMet = indicatorValue <= compareValue;
+        break;
+      case 'crosses_above':
+        const prevIndicatorValue = cond.indicator === 'EMA' ? calculateEMA(cond.period) : indicatorValue;
+        conditionMet = indicatorValue > compareValue && prevIndicatorValue <= compareValue;
+        break;
+      case 'crosses_below':
+        conditionMet = indicatorValue < compareValue && prevIndicatorValue >= compareValue;
+        break;
+      case 'between':
+        conditionMet = indicatorValue >= cond.value && indicatorValue <= (cond.value2 ?? 0);
+        break;
+    }
+    
+    if (i === 0) {
+      allConditionsMet = conditionMet;
+    } else if (cond.logic === 'AND') {
+      allConditionsMet = allConditionsMet && conditionMet;
+    } else {
+      allConditionsMet = allConditionsMet || conditionMet;
+    }
+    
+    if (!allConditionsMet && cond.logic === 'AND') {
+      return false;
+    }
+  }
+  
+  return allConditionsMet;
+}
 const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { key: 'bots',      label: 'Free Bots',      icon: Bot },
@@ -543,6 +762,10 @@ function App() {
     sessionStart: string | null;
     config: BotConfig | null;
   } | null>(null);
+  const botBuilderStateRef = useRef(botBuilderState);
+  useEffect(() => {
+    botBuilderStateRef.current = botBuilderState;
+  }, [botBuilderState]);
   const deriv = useDerivConnection();
 
   // Prevent background scrolling when mobile sidebar is open
@@ -1432,6 +1655,15 @@ function App() {
                   digitSurgeLossRef.current = 0;
                 }
               }
+              
+              // Bot Builder consecutive loss tracking
+              if (details.botName === 'Bot Builder') {
+                setBotBuilderState(prev => {
+                  if (!prev) return null;
+                  const newConsecLosses = !win ? prev.consecLosses + 1 : 0;
+                  return { ...prev, consecLosses: newConsecLosses };
+                });
+              }
             } else {
               // Add notification for manual trade completion
               notificationSystem?.addNotification({
@@ -1552,6 +1784,7 @@ function App() {
       void updateWorkspace({ active_bots: [] }).catch(() => {});
       return stopped;
     });
+    setBotBuilderState(prev => prev ? { ...prev, isRunning: false } : null);
     botPendingTradesRef.current.clear();
   };
 
@@ -1590,6 +1823,11 @@ function App() {
   useEffect(() => {
     const interval = window.setInterval(() => {
       const activeBots = botsRef.current.filter((bot) => bot.active);
+      const bbState = botBuilderStateRef.current;
+      // Include Bot Builder bot if it's running
+      if (bbState?.isRunning && bbState.config) {
+        activeBots.push({ name: 'Bot Builder', active: true, total_trades: bbState.tradeCount, wins: 0, pnl: 0, won_amount: 0, lost_amount: 0 });
+      }
       const ws = workspaceRef.current;
       if (!activeBots.length || !ws) return;
 
@@ -1836,6 +2074,57 @@ function App() {
           // Add execution status
           setBotStatus(s => ({ ...s, 'Asian Drift': `🔄 ${asianDir} on V50 (${money(stake)})` }));
 
+        } else if (bot.name === 'Bot Builder') {
+          // Bot Builder bot - use the config from botBuilderState
+          const bbState = botBuilderStateRef.current;
+          if (!bbState || !bbState.isRunning || !bbState.config) {
+            setBotStatus(s => ({ ...s, [bot.name]: '⏸ Not configured or not running' }));
+            return;
+          }
+          
+          const cfg = bbState.config;
+          
+          // Check purchase conditions
+          const conditionsMet = evaluateBotBuilderConditions(cfg.purchaseConditions, currentTick);
+          
+          if (!conditionsMet) {
+            setBotStatus(s => ({ ...s, [bot.name]: `🔍 Scanning — conditions not met (trades: ${bbState.tradeCount})` }));
+            return;
+          }
+          
+          // Determine direction
+          let dir: string;
+          if (cfg.direction === 'both') {
+            dir = resolveBotBuilderDirection(cfg, bbState.tradeCount % 2 === 0 ? 'CALL' : 'PUT');
+          } else {
+            dir = resolveBotBuilderDirection(cfg, cfg.direction as 'CALL' | 'PUT');
+          }
+          
+          // Stake computation
+          let stake = cfg.stake;
+          const cl = bbState.consecLosses;
+          if (cfg.stakeMode === 'percent' || cfg.stakeMode === 'percent_of_account_balance') {
+            stake = cfg.stakePercent;
+          } else if (cfg.stakeMode === 'martingale' && !cfg.drawdownGovernor.noMartingale && cl > 0) {
+            stake = Math.min(cfg.maxStake, cfg.stake * Math.pow(cfg.martingaleMultiplier, cl));
+          }
+          if (cl >= 2) stake *= cfg.drawdownGovernor.afterLosses2StakeOverlay;
+          stake = Math.max(0.35, Number(stake.toFixed(2)));
+          
+          // Check consecutive loss limit
+          if (cl >= cfg.maxConsecLosses) {
+            setBotStatus(s => ({ ...s, [bot.name]: `⏸ Paused — ${cl} consecutive losses` }));
+            return;
+          }
+          
+          instrument = cfg.market;
+          direction = dir;
+          botDuration = cfg.durationUnit === 'ticks' ? cfg.duration : undefined;
+          
+          setBotStatus(s => ({ ...s, [bot.name]: `🔄 ${dir} on ${cfg.market} (${money(stake)})` }));
+          
+          // Update trade count in state
+          setBotBuilderState(prev => prev ? { ...prev, tradeCount: prev.tradeCount + 1 } : null);
         } else {
           // Default strategy for all other bots — with basic condition checking
           const cfg = (botConfigRef.current[bot.name] ?? DEFAULT_BOT_DEFAULTS) as DefaultBotConfig;
