@@ -2417,6 +2417,8 @@ function App() {
       botConfig={botConfigRef.current}
       notificationSystem={notificationSystem}
       user={user}
+      botBuilderState={botBuilderState}
+      onBotBuilderStateChange={handleBotBuilderStateChange}
     />
   );
 
@@ -2779,6 +2781,8 @@ function PageView({
   botConfig,
   notificationSystem,
   user,
+  botBuilderState,
+  onBotBuilderStateChange,
 }: {
   page: Page;
   workspace: Workspace | null;
@@ -2817,6 +2821,14 @@ function PageView({
   botConfig: Record<string, any>;
   notificationSystem: any;
   user: User | null;
+  botBuilderState: {
+    isRunning: boolean;
+    tradeCount: number;
+    consecLosses: number;
+    sessionStart: string | null;
+    config: BotConfig | null;
+  } | null;
+  onBotBuilderStateChange: (state: { isRunning: boolean; tradeCount: number; consecLosses: number; sessionStart: string | null; config: BotConfig | null }) => void;
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
   if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv?.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} />;
