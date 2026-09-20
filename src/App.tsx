@@ -1827,6 +1827,9 @@ function App() {
   };
 
   const handleBotBuilderStateChange = (state: { isRunning: boolean; tradeCount: number; consecLosses: number; sessionStart: string | null; config: BotConfig | null }) => {
+    if (import.meta.env.DEV) {
+      console.log('Bot Builder State Change:', state);
+    }
     setBotBuilderState(state);
   };
 
@@ -1860,12 +1863,31 @@ function App() {
     const interval = window.setInterval(() => {
       const activeBots = botsRef.current.filter((bot) => bot.active);
       const bbState = botBuilderStateRef.current;
+      
+      // Debug logging
+      if (import.meta.env.DEV) {
+        console.log('Bot Loop Debug:', {
+          activeBotsCount: activeBots.length,
+          botBuilderState: bbState,
+          isRunning: bbState?.isRunning,
+          hasConfig: !!bbState?.config
+        });
+      }
+      
       // Include Bot Builder bot if it's running
       if (bbState?.isRunning && bbState.config) {
         activeBots.push({ name: 'Bot Builder', active: true, total_trades: bbState.tradeCount, wins: 0, pnl: 0, won_amount: 0, lost_amount: 0 });
+        if (import.meta.env.DEV) {
+          console.log('Bot Builder added to active bots');
+        }
       }
       const ws = workspaceRef.current;
-      if (!activeBots.length || !ws) return;
+      if (!activeBots.length || !ws) {
+        if (import.meta.env.DEV) {
+          console.log('No active bots or workspace');
+        }
+        return;
+      }
 
       // Stop all bots immediately if the session loss limit has been reached
       const loopStartBal = sessionStartingBalRef.current ?? ws.starting_balance;
@@ -1883,8 +1905,18 @@ function App() {
 
       const currentTick = tickRef.current;
       const currentSetBotStatus = setBotStatusRef.current;
+      
+      if (import.meta.env.DEV) {
+        console.log('Processing active bots:', activeBots.map(b => b.name));
+      }
+      
       activeBots.forEach((bot, i) => {
-        if (botPendingTradesRef.current.has(bot.name)) return;
+        if (botPendingTradesRef.current.has(bot.name)) {
+          if (import.meta.env.DEV && bot.name === 'Bot Builder') {
+            console.log('Bot Builder has pending trade, skipping');
+          }
+          return;
+        }
 
         let instrument: string;
         let direction: 'CALL' | 'PUT' | string;

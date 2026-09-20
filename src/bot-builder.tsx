@@ -1117,6 +1117,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   }, [tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange, botBuilderState]);
 
   const startBot = useCallback(() => {
+    console.log('Bot Builder startBot called', { derivConnected, warnings: warningsRef.current.length });
     if (!derivConnected) { setNotice('Connect a Deriv account before running your bot.'); return; }
     if (warningsRef.current.length > 0) { setNotice(`Fix ${warningsRef.current.length} validation issue(s) before starting.`); return; }
     tradeCountRef.current = 0;
@@ -1128,6 +1129,12 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     setIsRunning(true);
     setNotice(`Bot "${cfgRef.current.name}" started — now running in background even when you navigate away.`);
     
+    console.log('Bot Builder calling state change', { 
+      hasCallback: !!onBotBuilderStateChange, 
+      botBuilderStateDefined: botBuilderState !== undefined,
+      config: cfg 
+    });
+    
     // Bot execution is now handled by parent App.tsx
     // Just update state to notify parent to start tracking this bot
     if (onBotBuilderStateChange && botBuilderState !== undefined) {
@@ -1138,9 +1145,14 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
         sessionStart: new Date().toISOString(),
         config: cfg
       });
+    } else {
+      console.error('Bot Builder state change failed', { 
+        hasCallback: !!onBotBuilderStateChange, 
+        botBuilderStateDefined: botBuilderState !== undefined 
+      });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [derivConnected, onBotBuilderStateChange, botBuilderState]);
+  }, [derivConnected, onBotBuilderStateChange, botBuilderState, cfg]);
 
   // Stop bot when component unmounts or Deriv disconnects
   useEffect(() => {
