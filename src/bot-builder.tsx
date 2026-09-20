@@ -1084,7 +1084,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   
   // Notify parent of state changes
   useEffect(() => {
-    if (onBotBuilderStateChange) {
+    if (onBotBuilderStateChange && botBuilderState !== undefined) {
       onBotBuilderStateChange({
         isRunning,
         tradeCount,
@@ -1093,7 +1093,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
         config: cfg
       });
     }
-  }, [isRunning, tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange]);
+  }, [isRunning, tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange, botBuilderState]);
 
   // Keep tick ref updated
   useEffect(() => {

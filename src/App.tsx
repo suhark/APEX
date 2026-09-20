@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient, type User } from '@supabase/supabase-js';
 import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bell, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, FolderOpen, Ghost, Globe, Hash, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, MessageSquare, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
@@ -763,11 +763,10 @@ function App() {
     config: BotConfig | null;
   } | null>(null);
   const botBuilderStateRef = useRef(botBuilderState);
-  const setBotBuilderStateRef = useRef(setBotBuilderState);
   useEffect(() => {
     botBuilderStateRef.current = botBuilderState;
-    setBotBuilderStateRef.current = setBotBuilderState;
-  }, [botBuilderState, setBotBuilderState]);
+  }, [botBuilderState]);
+  
   const deriv = useDerivConnection();
 
   // Prevent background scrolling when mobile sidebar is open
@@ -1664,10 +1663,10 @@ function App() {
               
               // Bot Builder consecutive loss tracking
               if (details.botName === 'Bot Builder') {
-                setBotBuilderStateRef.current?.(prev => {
+                setBotBuilderState(prev => {
                   if (!prev) return null;
                   const newConsecLosses = !win ? prev.consecLosses + 1 : 0;
-                  return { ...prev, consecLosses: newConsecLosses };
+                  return { ...prev, consecLosses: newConsecLosses, tradeCount: prev.tradeCount + 1 };
                 });
               }
             } else {
@@ -1790,7 +1789,7 @@ function App() {
       void updateWorkspace({ active_bots: [] }).catch(() => {});
       return stopped;
     });
-    setBotBuilderStateRef.current?.(prev => prev ? { ...prev, isRunning: false } : null);
+    setBotBuilderState(prev => prev ? { ...prev, isRunning: false } : null);
     botPendingTradesRef.current.clear();
   };
 
@@ -1798,6 +1797,10 @@ function App() {
     const uid = userRef.current?.id || user?.id || 'guest';
     saveBotConfig(uid, botName, config);
     botConfigRef.current = { ...botConfigRef.current, [botName]: config };
+  };
+
+  const handleBotBuilderStateChange = (state: { isRunning: boolean; tradeCount: number; consecLosses: number; sessionStart: string | null; config: BotConfig | null }) => {
+    setBotBuilderState(state);
   };
 
   const toggleBot = async (bot: BotRow) => {
@@ -1924,7 +1927,7 @@ function App() {
           }
 
           // Add status update for Phantom Scalper
-          setBotStatus(s => ({ ...s, 'Phantom Scalper': `🔄 ${direction} on ${instrument} (${money(stake)})` }));
+          currentSetBotStatus(s => ({ ...s, 'Phantom Scalper': `🔄 ${direction} on ${instrument} (${money(stake)})` }));
         } else if (bot.name === 'Trend Pullback V3') {
           // ── STP-V3: Six-stage Trend Pullback strategy on V75 ─────────────
           const cfg = (botConfigRef.current['Trend Pullback V3'] ?? STP_DEFAULTS) as StpConfig;
@@ -1955,7 +1958,7 @@ function App() {
             return;
           }
 
-          setBotStatus(s => ({ ...s, 'Trend Pullback V3': `✅ Signal: ${signal.direction} (score ${signal.score})` }));
+          currentSetBotStatus(s => ({ ...s, 'Trend Pullback V3': `✅ Signal: ${signal.direction} (score ${signal.score})` }));
           instrument = 'Volatility 75 Index';
           direction  = signal.direction;
           const stpBal = derivConnectedRef.current && derivAccountRef.current
@@ -1968,7 +1971,7 @@ function App() {
           }
 
           // Add execution status
-          setBotStatus(s => ({ ...s, 'Trend Pullback V3': `🔄 ${signal.direction} V75 (${money(stake)})` }));
+          currentSetBotStatus(s => ({ ...s, 'Trend Pullback V3': `🔄 ${signal.direction} V75 (${money(stake)})` }));
         } else if (bot.name === 'Digit Surge') {
           const cfg = (botConfigRef.current['Digit Surge'] ?? DIGIT_SURGE_DEFAULTS) as DigitSurgeConfig;
 
@@ -1998,13 +2001,13 @@ function App() {
           }
 
           const digitDir = evenBias >= oddBias ? 'DIGITEVEN' : 'DIGITODD';
-          setBotStatus(s => ({ ...s, 'Digit Surge': `✅ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% — losses: ${digitSurgeLossRef.current}/${cfg.maxConsecLosses}` }));
+          currentSetBotStatus(s => ({ ...s, 'Digit Surge': `✅ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% — losses: ${digitSurgeLossRef.current}/${cfg.maxConsecLosses}` }));
           instrument = 'Volatility 10 (1s) Index';
           direction  = digitDir;
           stake      = Math.max(0.35, cfg.stake);
 
           // Add execution status
-          setBotStatus(s => ({ ...s, 'Digit Surge': `🔄 ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} on V10 (${money(stake)})` }));
+          currentSetBotStatus(s => ({ ...s, 'Digit Surge': `🔄 ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} on V10 (${money(stake)})` }));
 
         } else if (bot.name === 'Boom/Crash Rider') {
           // ── Boom/Crash Rider: pre-spike setup on Boom/Crash indices ──────
@@ -2050,7 +2053,7 @@ function App() {
           boomCrashStateRef.current.lastTradeTime = Date.now();
 
           // Add execution status
-          setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔄 ${direction} on ${instrument} (${money(stake)})` }));
+          currentSetBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔄 ${direction} on ${instrument} (${money(stake)})` }));
 
         } else if (bot.name === 'Asian Drift') {
           // ── Asian Drift: MA drift → Asian Up/Down on V50 ─────────────────
@@ -2072,14 +2075,14 @@ function App() {
           }
 
           const asianDir = drift > 0 ? 'ASIANU' : 'ASIAND';
-          setBotStatus(s => ({ ...s, 'Asian Drift': `✅ ASIAN ${drift > 0 ? 'UP' : 'DOWN'} drift ${(Math.abs(drift || 0) * 100).toFixed(3)}%` }));
+          currentSetBotStatus(s => ({ ...s, 'Asian Drift': `✅ ASIAN ${drift > 0 ? 'UP' : 'DOWN'} drift ${(Math.abs(drift || 0) * 100).toFixed(3)}%` }));
           instrument = 'Volatility 50 Index';
           direction  = asianDir;
           stake      = Math.max(0.35, cfg.stake);
           botDuration = cfg.durationTicks;
 
           // Add execution status
-          setBotStatus(s => ({ ...s, 'Asian Drift': `🔄 ${asianDir} on V50 (${money(stake)})` }));
+          currentSetBotStatus(s => ({ ...s, 'Asian Drift': `🔄 ${asianDir} on V50 (${money(stake)})` }));
 
         } else if (bot.name === 'Bot Builder') {
           // Bot Builder bot - use the config from botBuilderState
@@ -2128,10 +2131,7 @@ function App() {
           direction = dir;
           botDuration = cfg.durationUnit === 'ticks' ? cfg.duration : undefined;
           
-          setBotStatus(s => ({ ...s, [bot.name]: `🔄 ${dir} on ${cfg.market} (${money(stake)})` }));
-          
-          // Update trade count in state
-          setBotBuilderStateRef.current?.(prev => prev ? { ...prev, tradeCount: prev.tradeCount + 1 } : null);
+          currentSetBotStatus(s => ({ ...s, [bot.name]: `🔄 ${dir} on ${cfg.market} (${money(stake)})` }));
         } else {
           // Default strategy for all other bots — with basic condition checking
           const cfg = (botConfigRef.current[bot.name] ?? DEFAULT_BOT_DEFAULTS) as DefaultBotConfig;
@@ -2236,7 +2236,7 @@ function App() {
           stake      = Math.max(1, cfg.stake);
 
           // Add execution status for default bots
-          setBotStatus(s => ({ ...s, [bot.name]: `🔄 ${direction} on ${instrument} (${money(stake)})` }));
+          currentSetBotStatus(s => ({ ...s, [bot.name]: `🔄 ${direction} on ${instrument} (${money(stake)})` }));
         }
 
         // Execute trade and handle errors properly
@@ -2847,7 +2847,7 @@ function PageView({
     trades={trades} 
     tick={tick} 
     botBuilderState={botBuilderState || undefined}
-    onBotBuilderStateChange={setBotBuilderState}
+    onBotBuilderStateChange={handleBotBuilderStateChange}
   />;
   if (page === 'ai-builder') return <AIBotBuilder onPageChange={setPage} />;
   if (page === 'scanner') return <MarketScanner />;
