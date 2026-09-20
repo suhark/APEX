@@ -10,6 +10,11 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  server: {
+    headers: {
+      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://openrouter.ai https://*.openrouter.ai https://*.supabase.co https://*.deriv.com; font-src 'self' data:;"
+    }
+  },
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
