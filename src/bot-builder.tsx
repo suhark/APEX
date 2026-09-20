@@ -371,7 +371,18 @@ function describeCondition(c: ConditionNode): string {
 
 /** Generate a plain-English strategy summary from the current config. */
 function buildSummary(cfg: BotConfig): string {
-  const dir = cfg.direction === 'both' ? 'Rise or Fall' : cfg.direction === 'CALL' ? 'Rise' : 'Fall';
+  const isDigit = cfg.tradeType.startsWith('digits');
+  const isAsians = cfg.tradeType === 'asians';
+  
+  let dirStr = '';
+  if (isDigit) {
+    dirStr = 'digit prediction';
+  } else if (isAsians) {
+    dirStr = 'average tick comparison';
+  } else {
+    dirStr = cfg.direction === 'both' ? 'Rise or Fall' : cfg.direction === 'CALL' ? 'Rise' : 'Fall';
+  }
+  
   const tt  = TRADE_TYPES.find(t => t.key === cfg.tradeType)?.label ?? cfg.tradeType;
   const dur = `${cfg.duration} ${cfg.durationUnit}`;
 
@@ -381,7 +392,10 @@ function buildSummary(cfg: BotConfig): string {
   else if (cfg.stakeMode === 'score_scaled') stakeStr = `$${cfg.minStake}–$${cfg.maxStake} score-scaled`;
   else                                  stakeStr = `$${cfg.minStake}–$${cfg.maxStake} martingale ×${cfg.martingaleMultiplier}`;
 
-  const buyConds = cfg.purchaseConditions.length === 0
+  // For digit and Asian types, conditions are less relevant
+  const buyConds = (isDigit || isAsians) && cfg.purchaseConditions.length === 0
+    ? 'based on tick analysis'
+    : cfg.purchaseConditions.length === 0
     ? 'always (no conditions set)'
     : cfg.purchaseConditions.map((c, i) =>
         i === 0 ? describeCondition(c) : `${c.logic} ${describeCondition(c)}`
@@ -395,7 +409,7 @@ function buildSummary(cfg: BotConfig): string {
   if (cfg.regimeFilter.enabled) riskParts.push(`ATR regime filter (${cfg.regimeFilter.activeRangeMin}–${cfg.regimeFilter.activeRangeMax}×SMA)`);
   if (cfg.entryScoring.enabled) riskParts.push(`entry scoring ≥${cfg.entryScoring.threshold}/100`);
 
-  return `This bot trades ${tt} (${dir}) on ${cfg.market} for ${dur} contracts with ${stakeStr}. ` +
+  return `This bot trades ${tt} (${dirStr}) on ${cfg.market} for ${dur} contracts with ${stakeStr}. ` +
     `Entry fires when ${buyConds}. ` +
     `Risk controls: ${riskParts.join(', ')}.`;
 }
@@ -700,6 +714,23 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
       }
     }
   }, [setNotice]);
+
+  // Auto-adjust settings when trade type changes
+  useEffect(() => {
+    const isDigit = cfg.tradeType.startsWith('digits');
+    const isAsians = cfg.tradeType === 'asians';
+    
+    if (isDigit || isAsians) {
+      // Clear direction as it's not applicable for these types
+      if (cfg.direction !== 'CALL') {
+        update({ direction: 'CALL' });
+      }
+      // Clear purchase conditions as they're less relevant for digit/Asian types
+      if (cfg.purchaseConditions.length > 0) {
+        update({ purchaseConditions: [] });
+      }
+    }
+  }, [cfg.tradeType, update]);
   const [backtestResult, setBacktestResult] = useState<ReturnType<typeof runBacktest> | null>(null);
   const [backtesting, setBacktesting] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1292,10 +1323,15 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                     <ChevronDown size={12} className="bb-select-arrow" />
                   </div>
                   <p className="bb-field-hint">{TRADE_TYPES.find(t => t.key === cfg.tradeType)?.desc}</p>
+                  {(cfg.tradeType.startsWith('digits') || cfg.tradeType === 'asians') && (
+                    <p className="bb-field-hint" style={{ color: '#fbbf24' }}>
+                      Direction and indicator conditions are not applicable for this trade type.
+                    </p>
+                  )}
                 </div>
 
-                {/* Direction — not relevant for digit bots */}
-                {!cfg.tradeType.startsWith('digits') && (
+                {/* Direction — not relevant for digit bots and Asians */}
+                {!cfg.tradeType.startsWith('digits') && cfg.tradeType !== 'asians' && (
                   <div className="bb-field">
                     <label className="bb-label">Direction</label>
                     <div className="bb-radio-group">
@@ -1331,20 +1367,6 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
                 </div>
 
                 {/* Stake */}
-                <div className="bb-field">
-                  <label className="bb-label">Stake mode</label>
-                  <div className="bb-radio-group">
-                    {(['fixed','percent','martingale'] as const).map(m => (
-                      <button key={m} type="button"
-                        className={`bb-radio-btn ${cfg.stakeMode === m ? 'active' : ''}`}
-                        onClick={() => update({ stakeMode: m })}>
-                        {m === 'fixed' ? 'Fixed $' : m === 'percent' ? '% Balance' : 'Martingale'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Stake mode */}
                 <div className="bb-field">
                   <label className="bb-label">Stake mode</label>
                   <div className="bb-radio-group">
@@ -1408,13 +1430,21 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
             </button>
             {activeBlock === 2 && (
               <div className="bb-block-body">
-                <p className="bb-section-label">Entry signal — all conditions must pass before a trade is placed.</p>
+                {(cfg.tradeType.startsWith('digits') || cfg.tradeType === 'asians') ? (
+                  <p className="bb-section-label" style={{ color: '#64748b' }}>
+                    Entry conditions are not typically used for {TRADE_TYPES.find(t => t.key === cfg.tradeType)?.label}. Trades are based on tick analysis.
+                  </p>
+                ) : (
+                  <p className="bb-section-label">Entry signal — all conditions must pass before a trade is placed.</p>
+                )}
                 {warnFor('purchaseConditions') && <p className="bb-warn-inline"><AlertTriangle size={11} /> {warnFor('purchaseConditions')!.message}</p>}
-                <ConditionEditor
-                  conditions={cfg.purchaseConditions}
-                  onChange={c => update({ purchaseConditions: c })}
-                  label="Entry"
-                />
+                {!(cfg.tradeType.startsWith('digits') || cfg.tradeType === 'asians') && (
+                  <ConditionEditor
+                    conditions={cfg.purchaseConditions}
+                    onChange={c => update({ purchaseConditions: c })}
+                    label="Entry"
+                  />
+                )}
                 <div className="bb-divider" />
                 {tog('Enable bulk trades', 'Open multiple contracts simultaneously on each signal.', cfg.bulkTrades, v => update({ bulkTrades: v }))}
                 {cfg.bulkTrades && num('Number of contracts', cfg.contractCount, v => update({ contractCount: Math.max(1, v) }), 1, 20)}
