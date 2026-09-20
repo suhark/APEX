@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient, type User } from '@supabase/supabase-js';
-import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bell, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, FolderOpen, Ghost, Globe, Hash, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
+import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bell, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, FolderOpen, Ghost, Globe, Hash, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, MessageSquare, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
 import { DerivConnectionPanel, DerivStatusBadge } from './deriv-connection';
 import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeContract, subscribeTicks, symbolMap, isLive as derivIsLive, type DerivSymbol, type DerivTradeResult, type DerivTick } from './deriv-client';
@@ -16,6 +16,7 @@ import { BulkTrader } from './bulk-trader';
 import { useNotificationSystem, NotificationPanel, NotificationSettings } from './notification-system';
 import { BotPerformanceDashboard } from './bot-performance-dashboard';
 import { StrategyExportImport, StrategyTemplateLibrary } from './strategy-export-import';
+import { AIBotBuilder } from './ai-bot-builder';
 
 const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
 
@@ -24,7 +25,7 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY ?? '',
 );
 
-type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'scanner' | 'analysis' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift';
+type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'scanner' | 'analysis' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift' | 'ai-builder';
 type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; batch_id?: string | null; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 
@@ -120,6 +121,7 @@ const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'bots',      label: 'Free Bots',      icon: Bot },
   { key: 'manual',    label: 'Manual Trader',   icon: Target },
   { key: 'builder',   label: 'Bot Builder',     icon: Code2 },
+  { key: 'ai-builder', label: 'AI Bot Builder',  icon: MessageSquare },
   { key: 'scanner',   label: 'Market Scanner',  icon: Activity },
   { key: 'analysis',  label: 'Analysis Lab',    icon: CandlestickChart },
   { key: 'bulk',      label: 'Bulk Trader',     icon: ListFilter },
@@ -507,7 +509,7 @@ function App() {
   const [authChecking, setAuthChecking] = useState(true);
   const [page, setPageState] = useState<Page>(() => {
     const saved = sessionStorage.getItem('apex_page');
-    const valid: Page[] = ['dashboard','bots','manual','builder','scanner','analysis','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
+    const valid: Page[] = ['dashboard','bots','manual','builder','ai-builder','scanner','analysis','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
     return (saved && valid.includes(saved as Page)) ? saved as Page : 'dashboard';
   });
   const setPage = (p: Page) => { sessionStorage.setItem('apex_page', p); setPageState(p); };
@@ -2440,6 +2442,7 @@ function PageView({
     );
   }
   if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} trades={trades} />;
+  if (page === 'ai-builder') return <AIBotBuilder />;
   if (page === 'scanner') return <MarketScanner />;
   if (page === 'analysis') return <AnalysisLab />;
   if (page === 'bulk') return <BulkTrader runTrade={runTrade} trades={trades} />;

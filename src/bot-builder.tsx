@@ -620,6 +620,86 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [] }:
 
   const [activeBlock, setActiveBlock] = useState<1 | 2 | 3 | 4>(1);
   const [showTemplates, setShowTemplates] = useState(false);
+
+  // Handle AI-generated config import
+  useEffect(() => {
+    // Check localStorage for AI-generated config on mount
+    const aiConfig = localStorage.getItem('ai_generated_bot_config');
+    const aiFormat = localStorage.getItem('ai_generated_config_format') || 'json';
+    
+    if (aiConfig) {
+      try {
+        if (aiFormat === 'json') {
+          const parsedConfig = JSON.parse(aiConfig);
+          // Validate and merge with defaults
+          const importedConfig = { ...DEFAULT_CONFIG, ...parsedConfig };
+          dispatch({ type: 'RESET', payload: importedConfig });
+          setNotice('AI-generated configuration imported successfully!');
+          // Clear the localStorage after importing
+          localStorage.removeItem('ai_generated_bot_config');
+          localStorage.removeItem('ai_generated_config_format');
+        } else if (aiFormat === 'xml') {
+          // Basic XML parsing (simplified - in production you'd want a proper XML parser)
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(aiConfig, 'text/xml');
+          
+          const parseBotConfig = (xml: Document): Partial<BotConfig> => {
+            const bot = xml.querySelector('bot');
+            if (!bot) return {};
+            
+            const getText = (selector: string) => bot.querySelector(selector)?.textContent || '';
+            const getAttr = (selector: string, attr: string) => bot.querySelector(selector)?.getAttribute(attr);
+            
+            const parseConditions = (parent: Element | null): ConditionNode[] => {
+              if (!parent) return [];
+              return Array.from(parent.querySelectorAll('condition')).map((cond, i) => ({
+                id: cond.getAttribute('id') || `ai_${i}`,
+                indicator: (cond.getAttribute('indicator') || 'RSI') as Indicator,
+                period: parseInt(cond.getAttribute('period') || '14'),
+                operator: (cond.getAttribute('operator') || '>') as ConditionNode['operator'],
+                value: parseFloat(cond.getAttribute('value') || '50'),
+                logic: (cond.getAttribute('logic') || 'AND') as 'AND' | 'OR',
+              }));
+            };
+            
+            return {
+              name: bot.getAttribute('name') || 'AI Generated Bot',
+              market: getText('market') || 'Volatility 75 Index',
+              tradeType: (getText('tradeType') || 'rise_fall') as TradeType,
+              direction: (getText('direction') || 'CALL') as 'CALL' | 'PUT' | 'both',
+              durationUnit: (bot.querySelector('duration')?.getAttribute('unit') || 'ticks') as DurationUnit,
+              duration: parseInt(bot.querySelector('duration')?.textContent || '5'),
+              stake: parseFloat(getText('stake') || '5'),
+              stakeMode: (bot.querySelector('stake')?.getAttribute('mode') || 'fixed') as StakeMode,
+              purchaseConditions: parseConditions(bot.querySelector('purchaseConditions')),
+              sellConditions: parseConditions(bot.querySelector('exitConditions')),
+              maxConsecLosses: parseInt(bot.querySelector('riskManagement maxConsecLosses')?.textContent || '3'),
+              dailyLossLimit: parseFloat(bot.querySelector('riskManagement dailyLossLimit')?.textContent || '50'),
+              cooldownMinutes: parseInt(bot.querySelector('riskManagement cooldownMinutes')?.textContent || '15'),
+              maxTradesPerDay: parseInt(bot.querySelector('riskManagement maxTradesPerDay')?.textContent || '50'),
+              enableDailyLoss: true,
+              enableTakeProfit: false,
+              takeProfitAmount: 100,
+            };
+          };
+          
+          const importedConfig = parseBotConfig(xmlDoc);
+          const fullConfig = { ...DEFAULT_CONFIG, ...importedConfig };
+          dispatch({ type: 'RESET', payload: fullConfig });
+          setNotice('AI-generated XML configuration imported successfully!');
+          // Clear the localStorage after importing
+          localStorage.removeItem('ai_generated_bot_config');
+          localStorage.removeItem('ai_generated_config_format');
+        }
+      } catch (error) {
+        console.error('Failed to import AI config:', error);
+        setNotice('Failed to import AI configuration. Invalid format.');
+        // Clear the localStorage even on error
+        localStorage.removeItem('ai_generated_bot_config');
+        localStorage.removeItem('ai_generated_config_format');
+      }
+    }
+  }, [setNotice]);
   const [backtestResult, setBacktestResult] = useState<ReturnType<typeof runBacktest> | null>(null);
   const [backtesting, setBacktesting] = useState(false);
   const [saved, setSaved] = useState(false);
