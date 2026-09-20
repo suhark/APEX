@@ -134,7 +134,7 @@ function resolveBotBuilderDirection(cfg: any, callPut: 'CALL' | 'PUT'): string {
 }
 
 function evaluateBotBuilderConditions(conditions: any[], currentTick: number): boolean {
-  if (conditions.length === 0) return true;
+  if (!conditions || conditions.length === 0) return true;
   
   const prices: number[] = [];
   for (let i = 0; i < 200; i++) {
@@ -2094,11 +2094,17 @@ function App() {
           
           const cfg = bbState.config;
           
+          // Ensure purchaseConditions is always an array
+          const purchaseConditions = cfg.purchaseConditions || [];
+          
           // Check purchase conditions
-          const conditionsMet = evaluateBotBuilderConditions(cfg.purchaseConditions, currentTick);
+          const conditionsMet = evaluateBotBuilderConditions(purchaseConditions, currentTick);
           
           if (!conditionsMet) {
-            currentSetBotStatus(s => ({ ...s, [bot.name]: `🔍 Scanning — conditions not met (trades: ${bbState.tradeCount})` }));
+            const conditionInfo = purchaseConditions && purchaseConditions.length > 0 
+              ? ` (${purchaseConditions.length} conditions)` 
+              : ' (no conditions set)';
+            currentSetBotStatus(s => ({ ...s, [bot.name]: `🔍 Scanning — conditions not met${conditionInfo} (trades: ${bbState.tradeCount})` }));
             return;
           }
           
