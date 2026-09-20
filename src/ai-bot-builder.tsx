@@ -80,10 +80,22 @@ export function AIBotBuilder({ onPageChange }: AIBotBuilderProps) {
     try {
       const saved = localStorage.getItem('ai_bot_conversation');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Validate the loaded data has the expected structure
+        if (parsed && Array.isArray(parsed.messages)) {
+          return {
+            messages: parsed.messages || [],
+            isComplete: parsed.isComplete || false,
+            generatedConfig: parsed.generatedConfig || null,
+            configFormat: parsed.configFormat || null,
+            needsClarification: parsed.needsClarification || false,
+          };
+        }
       }
     } catch (e) {
       console.warn('Failed to load saved conversation:', e);
+      // Clear corrupted data
+      localStorage.removeItem('ai_bot_conversation');
     }
     return {
       messages: [],
