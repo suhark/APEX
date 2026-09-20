@@ -315,7 +315,11 @@ export function StrategyExportImport({
 }
 
 // Template library component
-export function StrategyTemplateLibrary() {
+export function StrategyTemplateLibrary({
+  onApplyTemplate,
+}: {
+  onApplyTemplate: (template: any) => void;
+}) {
   const templates = [
     {
       id: 'conservative',
@@ -352,16 +356,16 @@ export function StrategyTemplateLibrary() {
     },
   ];
 
-  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [appliedTemplate, setAppliedTemplate] = useState<string | null>(null);
 
   const applyTemplate = (templateId: string) => {
     const template = templates.find(t => t.id === templateId);
     if (!template) return;
 
-    // This would typically call a prop function to apply the template
-    console.log('Applying template:', template);
-    setSelectedTemplate(templateId);
-    setTimeout(() => setSelectedTemplate(null), 2000);
+    // Call the parent function to actually apply the template
+    onApplyTemplate(template);
+    setAppliedTemplate(templateId);
+    // Keep the badge visible - don't clear it automatically
   };
 
   return (
@@ -371,7 +375,7 @@ export function StrategyTemplateLibrary() {
         {templates.map(template => (
           <div
             key={template.id}
-            className={`template-card ${selectedTemplate === template.id ? 'selected' : ''}`}
+            className={`template-card ${appliedTemplate === template.id ? 'selected' : ''}`}
             onClick={() => applyTemplate(template.id)}
           >
             <div className="template-icon">{template.icon}</div>
@@ -381,7 +385,7 @@ export function StrategyTemplateLibrary() {
               <span><FileText size={12} /> {Object.keys(template.configs).length} bots</span>
               <span><Settings size={12} /> Risk: {template.id}</span>
             </div>
-            {selectedTemplate === template.id && (
+            {appliedTemplate === template.id && (
               <div className="template-applied">
                 <Check size={14} /> Applied!
               </div>

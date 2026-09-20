@@ -4872,7 +4872,25 @@ function Settings({
             }}
             userId={user?.id}
           />
-          <StrategyTemplateLibrary />
+          <StrategyTemplateLibrary 
+            onApplyTemplate={(template) => {
+              console.log('Applying template:', template);
+              setNotice(`Template "${template.name}" applied successfully!`);
+              // Apply template configurations
+              Object.entries(template.configs).forEach(([botName, config]) => {
+                onSaveBotConfig(botName, config);
+              });
+              if (template.workspaceSettings) {
+                updateWorkspace({ loss_limit: template.workspaceSettings.lossLimit });
+                if (template.workspaceSettings.allowBotLiveTrading !== undefined) {
+                  setAllowBotLiveTrading(template.workspaceSettings.allowBotLiveTrading);
+                }
+                if (template.workspaceSettings.maxBalancePercent !== undefined) {
+                  setMaxBalancePercent(template.workspaceSettings.maxBalancePercent);
+                }
+              }
+            }}
+          />
         </section>
 
       </div>
