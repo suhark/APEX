@@ -79,7 +79,7 @@ interface EntryScoring {
   atrRegimeWeight: number;
 }
 
-interface BotConfig {
+export interface BotConfig {
   name: string;
   // Block 1 — Trade Parameters
   market: string;
@@ -627,6 +627,14 @@ export interface BotBuilderProps {
   runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string; duration?: number }) => Promise<void>;
   trades?: Array<{ id: string; instrument: string; direction: string; stake: number; result: string; profit: number; created_at: string; bot_name?: string; entry_price?: number; exit_price?: number }>;
   tick?: number; // Add tick prop for condition evaluation
+  botBuilderState?: {
+    isRunning: boolean;
+    tradeCount: number;
+    consecLosses: number;
+    sessionStart: string | null;
+    config: BotConfig | null;
+  };
+  onBotBuilderStateChange?: (state: { isRunning: boolean; tradeCount: number; consecLosses: number; sessionStart: string | null; config: BotConfig | null }) => void;
 }
 
 /** Map BotConfig trade type + direction to Deriv contract_type string */
@@ -858,7 +866,7 @@ function evaluateConditions(conditions: ConditionNode[], currentTick: number): b
   return allConditionsMet;
 }
 
-export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], tick = 0 }: BotBuilderProps) {
+export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], tick = 0, botBuilderState, onBotBuilderStateChange }: BotBuilderProps) {
   const [state, dispatch] = useReducer(historyReducer, {
     past: [],
     present: { ...DEFAULT_CONFIG },
@@ -1046,10 +1054,10 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   };
 
   // ── Bot running state ─────────────────────────────────────────────────────
-  const [isRunning, setIsRunning] = useState(false);
-  const [tradeCount, setTradeCount] = useState(0);
-  const [consecLosses, setConsecLosses] = useState(0);
-  const [sessionStart, setSessionStart] = useState<string | null>(null);
+  const [isRunning, setIsRunning] = useState(botBuilderState?.isRunning ?? false);
+  const [tradeCount, setTradeCount] = useState(botBuilderState?.tradeCount ?? 0);
+  const [consecLosses, setConsecLosses] = useState(botBuilderState?.consecLosses ?? 0);
+  const [sessionStart, setSessionStart] = useState<string | null>(botBuilderState?.sessionStart ?? null);
   const [showPanel, setShowPanel] = useState(false);
   const [panelTab, setPanelTab] = useState<'summary' | 'transactions' | 'journal'>('summary');
   const [scanStatus, setScanStatus] = useState<string>('');
@@ -1059,8 +1067,33 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   const tickRef = useRef(tick);
   tickRef.current = tick;
   // Use refs for mutable counters so interval closure always reads fresh values
-  const tradeCountRef = useRef(0);
-  const consecLossesRef = useRef(0);
+  const tradeCountRef = useRef(botBuilderState?.tradeCount ?? 0);
+  const consecLossesRef = useRef(botBuilderState?.consecLosses ?? 0);
+  
+  // Sync state with parent when it changes from props
+  useEffect(() => {
+    if (botBuilderState) {
+      setIsRunning(botBuilderState.isRunning);
+      setTradeCount(botBuilderState.tradeCount);
+      setConsecLosses(botBuilderState.consecLosses);
+      setSessionStart(botBuilderState.sessionStart);
+      tradeCountRef.current = botBuilderState.tradeCount;
+      consecLossesRef.current = botBuilderState.consecLosses;
+    }
+  }, [botBuilderState]);
+  
+  // Notify parent of state changes
+  useEffect(() => {
+    if (onBotBuilderStateChange) {
+      onBotBuilderStateChange({
+        isRunning,
+        tradeCount,
+        consecLosses,
+        sessionStart,
+        config: cfg
+      });
+    }
+  }, [isRunning, tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange]);
 
   // Keep tick ref updated
   useEffect(() => {

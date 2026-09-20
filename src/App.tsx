@@ -7,7 +7,7 @@ import { applyBalanceDelta, executeTrade, getAccountInfo, getBalance, subscribeC
 import { handleOAuthCallback } from './deriv-oauth';
 import { AuthModal } from './auth-modal';
 import { ManualTrader } from './manual-trader';
-import { BotBuilder } from './bot-builder';
+import { BotBuilder, type BotConfig } from './bot-builder';
 import { DigitsAnalyser } from './digits-analyser';
 import { LandingPage } from './landing-page';
 import { PolicyModal, getPolicyConsent, recordPolicyConsent, type PolicyTab } from './policy-modal';
@@ -536,6 +536,13 @@ function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [policyTab, setPolicyTab] = useState<PolicyTab | null>(null);
   const [consentGiven, setConsentGiven] = useState(() => getPolicyConsent() !== null);
+  const [botBuilderState, setBotBuilderState] = useState<{
+    isRunning: boolean;
+    tradeCount: number;
+    consecLosses: number;
+    sessionStart: string | null;
+    config: BotConfig | null;
+  } | null>(null);
   const deriv = useDerivConnection();
 
   // Prevent background scrolling when mobile sidebar is open
@@ -2537,7 +2544,15 @@ function PageView({
       />
     );
   }
-  if (page === 'builder') return <BotBuilder setNotice={setNotice} derivConnected={derivConnected} runTrade={runTrade} trades={trades} tick={tick} />;
+  if (page === 'builder') return <BotBuilder 
+    setNotice={setNotice} 
+    derivConnected={derivConnected} 
+    runTrade={runTrade} 
+    trades={trades} 
+    tick={tick} 
+    botBuilderState={botBuilderState || undefined}
+    onBotBuilderStateChange={setBotBuilderState}
+  />;
   if (page === 'ai-builder') return <AIBotBuilder onPageChange={setPage} />;
   if (page === 'scanner') return <MarketScanner />;
   if (page === 'analysis') return <AnalysisLab />;
