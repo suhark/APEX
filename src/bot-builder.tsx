@@ -1026,6 +1026,24 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   const warningsRef = useRef(warnings);
   warningsRef.current = warnings;
 
+  const [showPanel, setShowPanel] = useState(false);
+  const [panelTab, setPanelTab] = useState<'summary' | 'transactions' | 'journal'>('summary');
+  const [scanStatus, setScanStatus] = useState<string>('');
+  const intervalRef = useRef<number | null>(null);
+  const cfgRef = useRef(cfg);
+  cfgRef.current = cfg;
+  const tickRef = useRef(tick);
+  tickRef.current = tick;
+  // Use refs for mutable counters so interval closure always reads fresh values
+  const tradeCountRef = useRef(botBuilderState?.tradeCount ?? 0);
+  const consecLossesRef = useRef(botBuilderState?.consecLosses ?? 0);
+
+  // ── Bot running state ─────────────────────────────────────────────────────
+  const [isRunning, setIsRunning] = useState(botBuilderState?.isRunning ?? false);
+  const [tradeCount, setTradeCount] = useState(botBuilderState?.tradeCount ?? 0);
+  const [consecLosses, setConsecLosses] = useState(botBuilderState?.consecLosses ?? 0);
+  const [sessionStart, setSessionStart] = useState<string | null>(botBuilderState?.sessionStart ?? null);
+
   // ── Saved / favourite bots ────────────────────────────────────────────────
   const [savedBots, setSavedBots] = useState<BotConfig[]>(() => {
     try { const r = localStorage.getItem('apex_saved_bots'); return r ? JSON.parse(r) : []; } catch { return []; }
@@ -1053,23 +1071,6 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     try { localStorage.setItem('apex_saved_bots', JSON.stringify(next)); } catch { /* ignore */ }
   };
 
-  // ── Bot running state ─────────────────────────────────────────────────────
-  const [isRunning, setIsRunning] = useState(botBuilderState?.isRunning ?? false);
-  const [tradeCount, setTradeCount] = useState(botBuilderState?.tradeCount ?? 0);
-  const [consecLosses, setConsecLosses] = useState(botBuilderState?.consecLosses ?? 0);
-  const [sessionStart, setSessionStart] = useState<string | null>(botBuilderState?.sessionStart ?? null);
-  const [showPanel, setShowPanel] = useState(false);
-  const [panelTab, setPanelTab] = useState<'summary' | 'transactions' | 'journal'>('summary');
-  const [scanStatus, setScanStatus] = useState<string>('');
-  const intervalRef = useRef<number | null>(null);
-  const cfgRef = useRef(cfg);
-  cfgRef.current = cfg;
-  const tickRef = useRef(tick);
-  tickRef.current = tick;
-  // Use refs for mutable counters so interval closure always reads fresh values
-  const tradeCountRef = useRef(botBuilderState?.tradeCount ?? 0);
-  const consecLossesRef = useRef(botBuilderState?.consecLosses ?? 0);
-  
   // Disable parent-to-child sync to prevent infinite loop
   // Child controls all state, parent only receives notifications
 
@@ -1086,61 +1087,120 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     if (onBotBuilderStateChange) {
       onBotBuilderStateChange({
         isRunning: false,
-        tradeCount,
-        consecLosses,
+        tradeCount: tradeCountRef.current,
+        consecLosses: consecLossesRef.current,
         sessionStart,
-        config: cfg
+        config: cfgRef.current,
       });
     }
-  }, [tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange]);
+  }, [sessionStart, onBotBuilderStateChange]);
+
+  // Ref so the unmount-cleanup effect below always calls the *latest* stopBot
+  // without re-registering (and therefore re-firing) on every state change.
+  const stopBotRef = useRef(stopBot);
+  useEffect(() => {
+    stopBotRef.current = stopBot;
+  }, [stopBot]);
 
   const startBot = useCallback(() => {
-    console.log('Bot Builder startBot called', { derivConnected, warnings: warningsRef.current.length });
     if (!derivConnected) { setNotice('Connect a Deriv account before running your bot.'); return; }
     if (warningsRef.current.length > 0) { setNotice(`Fix ${warningsRef.current.length} validation issue(s) before starting.`); return; }
-    
+
     // Set local state first
     setTradeCount(0);
     setConsecLosses(0);
-    setSessionStart(new Date().toISOString());
+    const startedAt = new Date().toISOString();
+    setSessionStart(startedAt);
     setIsRunning(true);
-    
+
     tradeCountRef.current = 0;
     consecLossesRef.current = 0;
     setShowPanel(true); // auto-open panel when bot starts
     setNotice(`Bot "${cfgRef.current.name}" started — now running in background even when you navigate away.`);
-    
-    console.log('Bot Builder local state set, now notifying parent', { 
-      hasCallback: !!onBotBuilderStateChange, 
-      config: cfg
-    });
-    
-    // Directly notify parent after local state is set (no useEffect)
+
     if (onBotBuilderStateChange) {
       onBotBuilderStateChange({
         isRunning: true,
         tradeCount: 0,
         consecLosses: 0,
-        sessionStart: new Date().toISOString(),
-        config: cfg
+        sessionStart: startedAt,
+        config: cfgRef.current,
       });
-    } else {
-      console.error('Bot Builder state change failed - no callback available');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [derivConnected, onBotBuilderStateChange, cfg]);
 
-  // Stop bot when component unmounts or Deriv disconnects
+    // ── The actual scanning/trading loop ──────────────────────────────────
+    if (intervalRef.current) window.clearInterval(intervalRef.current);
+    const intervalMs = cfgRef.current.fastTrades ? 1000 : 3000;
+
+    intervalRef.current = window.setInterval(() => {
+      const currentCfg = cfgRef.current;
+
+      // Pause if we've hit the consecutive-loss cap — cooldown handled by
+      // the drawdown governor settings; here we just stop firing new trades.
+      if (consecLossesRef.current >= currentCfg.maxConsecLosses) {
+        setScanStatus(`Paused — ${consecLossesRef.current} consecutive losses (max ${currentCfg.maxConsecLosses})`);
+        return;
+      }
+
+      const isDigitOrAsian = currentCfg.tradeType.startsWith('digits') || currentCfg.tradeType === 'asians';
+      const shouldTrade = isDigitOrAsian || evaluateConditions(currentCfg.purchaseConditions, tickRef.current);
+
+      if (!shouldTrade) {
+        setScanStatus('Scanning — waiting for entry signal');
+        return;
+      }
+
+      const callPut: 'CALL' | 'PUT' =
+        currentCfg.direction === 'both'
+          ? (Math.random() < 0.5 ? 'CALL' : 'PUT')
+          : (currentCfg.direction as 'CALL' | 'PUT');
+      const direction = resolveDirection(currentCfg, callPut);
+
+      let stake = currentCfg.stake;
+      if (currentCfg.stakeMode === 'martingale' && !currentCfg.drawdownGovernor.noMartingale) {
+        stake = Math.min(
+          currentCfg.maxStake,
+          currentCfg.stake * Math.pow(currentCfg.martingaleMultiplier, consecLossesRef.current)
+        );
+      } else if (currentCfg.stakeMode === 'score_scaled') {
+        stake = currentCfg.minStake;
+      }
+      stake = Math.max(0.35, Number(stake.toFixed(2)));
+
+      setScanStatus(`Placing ${direction} trade on ${currentCfg.market}…`);
+
+      runTrade({
+        instrument: currentCfg.market,
+        direction,
+        stake,
+        source: 'bot-builder',
+        botName: currentCfg.name,
+        duration: currentCfg.duration,
+      }).catch(err => {
+        console.error('Bot Builder trade failed', err);
+        setNotice('A trade failed to execute — check the console for details.');
+      });
+
+      tradeCountRef.current += 1;
+      setTradeCount(tradeCountRef.current);
+    }, intervalMs);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [derivConnected, onBotBuilderStateChange, runTrade, setNotice]);
+
+  // Stop bot when Deriv disconnects
   useEffect(() => {
     if (!derivConnected && isRunning) {
-      stopBot();
+      stopBotRef.current();
       setNotice('Bot stopped — Deriv disconnected.');
     }
-  }, [derivConnected, isRunning, stopBot, setNotice]);
+  }, [derivConnected, isRunning, setNotice]);
 
+  // Stop bot ONLY on actual component unmount — empty deps so this effect's
+  // cleanup does not re-fire every time stopBot's identity changes.
   useEffect(() => {
-    return () => stopBot();
-  }, [stopBot]);
+    return () => stopBotRef.current();
+  }, []);
 
   // Derive this session's trades from the trades prop (filtered by bot name + session start)
   const sessionTrades = sessionStart
