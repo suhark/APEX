@@ -142,17 +142,7 @@ function evaluateBotBuilderConditions(conditions: any[], currentTick: number): b
   }
   
   const latestPrice = prices[prices.length - 1];
-  
-  // Debug logging
-  if (import.meta.env.DEV) {
-    console.log('Bot Builder Conditions Debug:', {
-      conditions,
-      currentTick,
-      latestPrice,
-      pricesCount: prices.length
-    });
-  }
-  
+
   const calculateEMA = (period: number): number => {
     if (prices.length < period) return latestPrice;
     const multiplier = 2 / (period + 1);
@@ -329,19 +319,8 @@ function evaluateBotBuilderConditions(conditions: any[], currentTick: number): b
         conditionMet = indicatorValue >= cond.value && indicatorValue <= (cond.value2 ?? 0);
         break;
     }
-    
-    // Debug logging for each condition
-    if (import.meta.env.DEV) {
-      console.log(`Condition ${i}:`, {
-        indicator: cond.indicator,
-        operator: cond.operator,
-        indicatorValue,
-        compareValue,
-        conditionMet,
-        logic: cond.logic
-      });
-    }
-    
+
+
     if (i === 0) {
       allConditionsMet = conditionMet;
     } else if (cond.logic === 'AND') {
@@ -354,12 +333,7 @@ function evaluateBotBuilderConditions(conditions: any[], currentTick: number): b
       return false;
     }
   }
-  
-  // Debug logging for final result
-  if (import.meta.env.DEV) {
-    console.log('Bot Builder Conditions Final Result:', allConditionsMet);
-  }
-  
+
   return allConditionsMet;
 }
 const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
@@ -1485,7 +1459,6 @@ function App() {
     }
 
     if (details.botName && botPendingTradesRef.current.has(details.botName)) {
-      console.log(`runTrade: Bot ${details.botName} has pending trade, skipping`);
       return {};
     }
 
@@ -1578,19 +1551,9 @@ function App() {
 
       if (details.botName) {
         botPendingTradesRef.current.add(details.botName);
-        console.log(`runTrade: Adding ${details.botName} to pending trades`);
       }
 
       try {
-        console.log(`runTrade: Executing trade`, { 
-          instrument: details.instrument, 
-          direction: details.direction, 
-          stake: details.stake, 
-          source: details.source,
-          stakeType: typeof details.stake,
-          stakeValue: details.stake
-        });
-        
         if (!details.stake || details.stake <= 0) {
           console.error('runTrade: Invalid stake value', { stake: details.stake });
           throw new Error('Invalid stake value');
@@ -1604,7 +1567,6 @@ function App() {
           barrier: details.barrier,
           growth_rate: details.growth_rate,
         });
-        console.log(`runTrade: Trade executed successfully`, { contractId: result.contractId, entryPrice: result.entryPrice });
 
         const tradeId = (typeof crypto !== 'undefined' && crypto.randomUUID)
           ? crypto.randomUUID()
@@ -1645,7 +1607,6 @@ function App() {
 
         // Subscribe to contract updates
         subscribeContract(result.contractId, (poc: DerivTradeResult) => {
-          console.log(`Contract update: ${tradeId}`, poc);
           if (poc.status === 'won' || poc.status === 'lost') {
             const finalProfit = poc.profit;
             const win = poc.status === 'won';
@@ -1752,7 +1713,6 @@ function App() {
               setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. All bots stopped.${isDerivReal ? ' Live trading disarmed.' : ''}`);
             } else {
               const resultMsg = `${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`;
-              console.log('runTrade:', resultMsg);
               setNotice(resultMsg);
               if (details.botName) {
                 currentSetBotStatus(s => ({ ...s, [details.botName]: `${poc.status === 'won' ? '✅' : '❌'} ${poc.status.toUpperCase()} ${money(finalProfit)}` }));
@@ -1761,7 +1721,6 @@ function App() {
           }
         }, (poc: DerivTradeResult) => {
           // Live P&L update for the open contracts bar
-          console.log(`Live P&L update: ${tradeId}`, poc);
           setOpenContractPnl(prev => ({
             ...prev,
             [tradeId]: {
@@ -1788,7 +1747,6 @@ function App() {
 
         // Return accurate Deriv payout data for manual trader to use
         const successMsg = `${details.direction} contract purchased on Deriv (${deriv?.account.loginid} · ${deriv?.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`;
-        console.log('runTrade:', successMsg);
         setNotice(successMsg);
         if (details.botName) {
           setBotStatus(s => ({ ...s, [details.botName]: `⏳ Trade placed: ${details.direction}` }));
@@ -1797,7 +1755,7 @@ function App() {
         return { contractId: result.contractId, derivPayout: result.proposal.payout };
       } catch (err) {
         const errorMsg = `Deriv trade failed: ${err instanceof Error ? err.message : String(err)}`;
-        console.error('runTrade:', errorMsg, err);
+        console.error(errorMsg, err);
         if (details.botName) {
           botPendingTradesRef.current.delete(details.botName);
           setBotStatus(s => ({ ...s, [details.botName]: `❌ Trade failed` }));
@@ -1840,10 +1798,7 @@ function App() {
   };
 
   const handleBotBuilderStateChange = (state: { isRunning: boolean; tradeCount: number; consecLosses: number; sessionStart: string | null; config: BotConfig | null }) => {
-    console.log('Parent received state change:', state);
-    console.log('Current parent state:', botBuilderState);
     setBotBuilderState(state);
-    console.log('Parent state after set:', state);
   };
 
   const toggleBot = async (bot: BotRow) => {
@@ -1873,37 +1828,25 @@ function App() {
   };
 
   useEffect(() => {
-    console.log('Bot Loop useEffect mounted', { workspace: !!workspace, bots: bots.length });
     const interval = window.setInterval(() => {
       const activeBots = botsRef.current.filter((bot) => bot.active);
       const bbState = botBuilderStateRef.current;
-      
-      // Debug logging
-      console.log('Bot Loop Debug:', {
-        activeBotsCount: activeBots.length,
-        botBuilderState: bbState,
-        isRunning: bbState?.isRunning,
-        hasConfig: !!bbState?.config,
-        workspaceAvailable: !!workspaceRef.current
-      });
-      
+
       // Include Bot Builder bot if it's running
       if (bbState?.isRunning && bbState.config) {
         activeBots.push({ name: 'Bot Builder', active: true, total_trades: bbState.tradeCount, wins: 0, pnl: 0, won_amount: 0, lost_amount: 0 });
-        console.log('Bot Builder added to active bots');
       }
       const ws = workspaceRef.current;
       
       // Allow bot builder to run even without workspace for demo purposes
       const hasBotBuilder = activeBots.some(b => b.name === 'Bot Builder');
       if (!activeBots.length || (!ws && !hasBotBuilder)) {
-        console.log('No active bots or workspace', { activeBotsLength: activeBots.length, workspaceAvailable: !!ws, hasBotBuilder });
         return;
       }
-      
+
       // For bot builder without workspace, use minimal session tracking
       if (!ws && hasBotBuilder) {
-        console.log('Bot Builder running without workspace - using minimal session tracking');
+        // Minimal session tracking for bot builder without workspace
       }
 
       // Stop all bots immediately if the session loss limit has been reached
@@ -1918,21 +1861,15 @@ function App() {
       const lossLimit = ws?.loss_limit ?? 1000; // fallback loss limit
       
       if (loopLossUsed >= lossLimit) {
-        console.log('Session loss limit reached', { loopLossUsed, lossLimit });
         stopAllBots();
         return;
       }
 
       const currentTick = tickRef.current;
       const currentSetBotStatus = setBotStatusRef.current;
-      
-      console.log('Processing active bots:', activeBots.map(b => b.name), { hasWorkspace: !!ws });
-      
+
       activeBots.forEach((bot, i) => {
         if (botPendingTradesRef.current.has(bot.name)) {
-          if (bot.name === 'Bot Builder') {
-            console.log('Bot Builder has pending trade, skipping');
-          }
           return;
         }
 
@@ -2168,19 +2105,9 @@ function App() {
             currentSetBotStatus(s => ({ ...s, [bot.name]: '⏸ Not configured or not running' }));
             return;
           }
-          
+
           const cfg = bbState.config;
-          
-          // Debug logging
-          console.log('Bot Builder Execution Debug:', {
-            botName: cfg.name,
-            market: cfg.market,
-            isRunning: bbState.isRunning,
-            tradeCount: bbState.tradeCount,
-            consecLosses: bbState.consecLosses,
-            currentTick
-          });
-          
+
           // Ensure purchaseConditions is always an array
           const purchaseConditions = cfg.purchaseConditions || [];
           
@@ -2224,18 +2151,7 @@ function App() {
             console.error('Invalid stake calculated, using fallback', { stake, cfg });
             stake = 1; // Minimum safe fallback
           }
-          
-          // Debug logging for stake calculation
-          console.log('Bot Builder Stake Calculation:', {
-            stakeMode: cfg.stakeMode,
-            baseStake: cfg.stake,
-            stakePercent: cfg.stakePercent,
-            currentBalance,
-            calculatedStake: stake,
-            consecLosses: cl,
-            isValid: !isNaN(stake) && stake > 0
-          });
-          
+
           // Check consecutive loss limit
           if (cl >= cfg.maxConsecLosses) {
             currentSetBotStatus(s => ({ ...s, [bot.name]: `⏸ Paused — ${cl} consecutive losses` }));
@@ -2245,17 +2161,7 @@ function App() {
           instrument = cfg.market;
           direction = dir;
           botDuration = cfg.durationUnit === 'ticks' ? cfg.duration : undefined;
-          
-          // Debug logging before trade execution
-          console.log('Bot Builder Trade Execution:', {
-            instrument,
-            direction,
-            stake,
-            botDuration,
-            market: cfg.market,
-            tradeType: cfg.tradeType
-          });
-          
+
           currentSetBotStatus(s => ({ ...s, [bot.name]: `🔄 ${dir} on ${cfg.market} (${money(stake)})` }));
         } else {
           // Default strategy for all other bots — with basic condition checking
@@ -2373,7 +2279,6 @@ function App() {
       });
     }, 3000); // Reduced from 5000ms to 3000ms for faster response
     return () => {
-      console.log('Bot Loop useEffect cleanup');
       window.clearInterval(interval);
     };
   }, []);
@@ -2385,7 +2290,6 @@ function App() {
   const manualContractMapRef = useRef<Map<number, string>>(new Map());
 
   const handleManualContractUpdate = (contractId: number, update: { status: 'won' | 'lost'; profit: number }) => {
-    console.log('Manual contract update:', contractId, update);
     // This will be used to update the manual trader's active contract
     // For now, we'll rely on the existing trade update mechanism
   };
@@ -5601,7 +5505,6 @@ function Settings({
             }}
             onImport={(strategy) => {
               // Handle strategy import
-              console.log('Importing strategy:', strategy);
               setNotice(`Strategy "${strategy.strategy.name}" imported successfully!`);
               // Apply imported configurations
               strategy.strategy.botConfigs.forEach(({ botName, config }) => {
@@ -5615,7 +5518,6 @@ function Settings({
           />
           <StrategyTemplateLibrary 
             onApplyTemplate={(template) => {
-              console.log('Applying template:', template);
               setNotice(`Template "${template.name}" applied successfully!`);
               // Apply template configurations
               Object.entries(template.configs).forEach(([botName, config]) => {
