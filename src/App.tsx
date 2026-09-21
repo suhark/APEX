@@ -2190,13 +2190,28 @@ function App() {
           // Stake computation
           let stake = cfg.stake;
           const cl = bbState.consecLosses;
+          const currentBalance = derivConnected && deriv?.account ? deriv.account.balance : (workspace?.balance ?? 0);
+          
           if (cfg.stakeMode === 'percent' || cfg.stakeMode === 'percent_of_account_balance') {
-            stake = cfg.stakePercent;
+            // Convert percentage to actual stake amount
+            stake = (cfg.stakePercent / 100) * currentBalance;
           } else if (cfg.stakeMode === 'martingale' && !cfg.drawdownGovernor.noMartingale && cl > 0) {
             stake = Math.min(cfg.maxStake, cfg.stake * Math.pow(cfg.martingaleMultiplier, cl));
           }
           if (cl >= 2) stake *= cfg.drawdownGovernor.afterLosses2StakeOverlay;
           stake = Math.max(0.35, Number(stake.toFixed(2)));
+          
+          // Debug logging for stake calculation
+          if (import.meta.env.DEV) {
+            console.log('Bot Builder Stake Calculation:', {
+              stakeMode: cfg.stakeMode,
+              baseStake: cfg.stake,
+              stakePercent: cfg.stakePercent,
+              currentBalance,
+              calculatedStake: stake,
+              consecLosses: cl
+            });
+          }
           
           // Check consecutive loss limit
           if (cl >= cfg.maxConsecLosses) {
