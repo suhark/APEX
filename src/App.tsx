@@ -1582,7 +1582,20 @@ function App() {
       }
 
       try {
-        console.log(`runTrade: Executing trade`, { instrument: details.instrument, direction: details.direction, stake: details.stake, source: details.source });
+        console.log(`runTrade: Executing trade`, { 
+          instrument: details.instrument, 
+          direction: details.direction, 
+          stake: details.stake, 
+          source: details.source,
+          stakeType: typeof details.stake,
+          stakeValue: details.stake
+        });
+        
+        if (!details.stake || details.stake <= 0) {
+          console.error('runTrade: Invalid stake value', { stake: details.stake });
+          throw new Error('Invalid stake value');
+        }
+        
         const result = await executeTrade({
           symbol: symbol as DerivSymbol,
           contract_type: details.direction as 'CALL' | 'PUT' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER' | 'DIGITMATCH' | 'DIGITDIFF' | 'ACCU',
@@ -2199,7 +2212,15 @@ function App() {
             stake = Math.min(cfg.maxStake, cfg.stake * Math.pow(cfg.martingaleMultiplier, cl));
           }
           if (cl >= 2) stake *= cfg.drawdownGovernor.afterLosses2StakeOverlay;
+          
+          // Ensure stake is a valid number and within Deriv limits
           stake = Math.max(0.35, Number(stake.toFixed(2)));
+          
+          // Fallback if stake calculation fails
+          if (!stake || stake <= 0 || isNaN(stake)) {
+            console.error('Invalid stake calculated, using fallback', { stake, cfg });
+            stake = 1; // Minimum safe fallback
+          }
           
           // Debug logging for stake calculation
           if (import.meta.env.DEV) {
@@ -2209,7 +2230,8 @@ function App() {
               stakePercent: cfg.stakePercent,
               currentBalance,
               calculatedStake: stake,
-              consecLosses: cl
+              consecLosses: cl,
+              isValid: !isNaN(stake) && stake > 0
             });
           }
           
@@ -2222,6 +2244,18 @@ function App() {
           instrument = cfg.market;
           direction = dir;
           botDuration = cfg.durationUnit === 'ticks' ? cfg.duration : undefined;
+          
+          // Debug logging before trade execution
+          if (import.meta.env.DEV) {
+            console.log('Bot Builder Trade Execution:', {
+              instrument,
+              direction,
+              stake,
+              botDuration,
+              market: cfg.market,
+              tradeType: cfg.tradeType
+            });
+          }
           
           currentSetBotStatus(s => ({ ...s, [bot.name]: `🔄 ${dir} on ${cfg.market} (${money(stake)})` }));
         } else {

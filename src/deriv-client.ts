@@ -499,6 +499,20 @@ export async function getProposal(params: {
   barrier?: number;   // digit 0–9 for digit contracts; not used for ACCU
   growth_rate?: number; // ACCU only: 0.01–0.05
 }): Promise<DerivProposal> {
+  console.log('getProposal called with:', {
+    symbol: params.symbol,
+    contract_type: params.contract_type,
+    stake: params.stake,
+    duration: params.duration,
+    barrier: params.barrier,
+    growth_rate: params.growth_rate
+  });
+  
+  if (!params.stake || params.stake <= 0) {
+    console.error('getProposal: Invalid stake value', { stake: params.stake });
+    throw new Error('Invalid stake value: must be greater than 0');
+  }
+  
   const payload: Record<string, unknown> = {
     proposal: 1,
     amount: params.stake,
@@ -507,6 +521,8 @@ export async function getProposal(params: {
     currency: accountInfo?.currency || 'USD',
     symbol: params.symbol,
   };
+  
+  console.log('getProposal payload:', payload);
 
   if (params.contract_type === 'ACCU') {
     // Accumulators use seconds not ticks, and need a growth_rate
