@@ -1069,53 +1069,19 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   // Use refs for mutable counters so interval closure always reads fresh values
   const tradeCountRef = useRef(botBuilderState?.tradeCount ?? 0);
   const consecLossesRef = useRef(botBuilderState?.consecLosses ?? 0);
-  const prevStateRef = useRef({ isRunning: false, tradeCount: 0, consecLosses: 0, sessionStart: null as string | null });
-  const isSyncingFromParentRef = useRef(false);
   
   // Sync state with parent when it changes from props (one-way sync: parent -> child)
-  // Only sync on initial mount or when explicitly stopped by parent, not during normal operation
   useEffect(() => {
-    if (botBuilderState && !isSyncingFromParentRef.current) {
-      // Only sync if parent has different running state and we're not already syncing
-      if (botBuilderState.isRunning !== isRunning) {
-        console.log('Syncing from parent:', { parentRunning: botBuilderState.isRunning, localRunning: isRunning });
-        isSyncingFromParentRef.current = true;
-        setIsRunning(botBuilderState.isRunning);
-        setTradeCount(botBuilderState.tradeCount);
-        setConsecLosses(botBuilderState.consecLosses);
-        setSessionStart(botBuilderState.sessionStart);
-        tradeCountRef.current = botBuilderState.tradeCount;
-        consecLossesRef.current = botBuilderState.consecLosses;
-        setTimeout(() => { isSyncingFromParentRef.current = false; }, 100);
-      }
+    if (botBuilderState) {
+      console.log('Syncing from parent:', { parentRunning: botBuilderState.isRunning, localRunning: isRunning });
+      setIsRunning(botBuilderState.isRunning);
+      setTradeCount(botBuilderState.tradeCount);
+      setConsecLosses(botBuilderState.consecLosses);
+      setSessionStart(botBuilderState.sessionStart);
+      tradeCountRef.current = botBuilderState.tradeCount;
+      consecLossesRef.current = botBuilderState.consecLosses;
     }
-  }, [botBuilderState, isRunning]);
-  
-  // Notify parent of state changes (only on explicit start/stop to avoid infinite loop)
-  useEffect(() => {
-    if (onBotBuilderStateChange && !isSyncingFromParentRef.current) {
-      const prevState = prevStateRef.current;
-      const stateChanged = prevState.isRunning !== isRunning;
-      
-      if (stateChanged) {
-        console.log('Notifying parent of state change:', {
-          isRunning,
-          tradeCount,
-          consecLosses,
-          sessionStart,
-          configName: cfg.name
-        });
-        onBotBuilderStateChange({
-          isRunning,
-          tradeCount,
-          consecLosses,
-          sessionStart,
-          config: cfg
-        });
-        prevStateRef.current = { isRunning, tradeCount, consecLosses, sessionStart };
-      }
-    }
-  }, [isRunning, tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange]);
+  }, [botBuilderState]);
 
   // Keep tick ref updated
   useEffect(() => {
@@ -1143,23 +1109,23 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     if (!derivConnected) { setNotice('Connect a Deriv account before running your bot.'); return; }
     if (warningsRef.current.length > 0) { setNotice(`Fix ${warningsRef.current.length} validation issue(s) before starting.`); return; }
     
-    tradeCountRef.current = 0;
-    consecLossesRef.current = 0;
+    // Set local state first
     setTradeCount(0);
     setConsecLosses(0);
     setSessionStart(new Date().toISOString());
+    setIsRunning(true);
+    
+    tradeCountRef.current = 0;
+    consecLossesRef.current = 0;
     setShowPanel(true); // auto-open panel when bot starts
-    setIsRunning(true); // Set local state first
     setNotice(`Bot "${cfgRef.current.name}" started — now running in background even when you navigate away.`);
     
-    console.log('Bot Builder calling state change', { 
+    console.log('Bot Builder local state set, now notifying parent', { 
       hasCallback: !!onBotBuilderStateChange, 
-      config: cfg,
-      currentLocalRunning: isRunning
+      config: cfg
     });
     
-    // Bot execution is now handled by parent App.tsx
-    // Just update state to notify parent to start tracking this bot
+    // Directly notify parent after local state is set (no useEffect)
     if (onBotBuilderStateChange) {
       onBotBuilderStateChange({
         isRunning: true,
