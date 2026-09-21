@@ -1174,7 +1174,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
         direction,
         stake,
         source: 'bot-builder',
-        botName: currentCfg.name,
+        botName: currentCfg.name || 'Bot Builder',
         duration: currentCfg.duration,
       }).catch(err => {
         console.error('Bot Builder trade failed', err);
