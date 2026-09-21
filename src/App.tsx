@@ -352,7 +352,8 @@ const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { key: 'settings',  label: 'Settings',        icon: Settings2 },
 ];
 
-function priceFor(index: number, tick: number) { return Number((100 + Math.sin((tick + index * 7) / 4) * 2.5 + Math.cos((tick + index) / 8) * 1.4).toFixed(2)); }
+// Global functions for price simulation and formatting
+export const priceFor = (index: number, tick: number) => Number((100 + Math.sin((tick + index * 7) / 4) * 2.5 + Math.cos((tick + index) / 8) * 1.4).toFixed(2));
 function money(value: number) { return `${value < 0 ? '-' : ''}$${Math.abs(value || 0).toFixed(2)}`; }
 function timeAgo(date: string) { const minutes = Math.max(0, Math.round((Date.now() - new Date(date).getTime()) / 60000)); return minutes < 1 ? 'just now' : `${minutes}m ago`; }
 function getStatsContext(derivConnected: boolean, account: { loginid: string } | null): string {
@@ -1605,8 +1606,6 @@ function App() {
           deriv_loginid: deriv?.account?.loginid ?? null,
         };
 
-        console.log('DEBUG: Trade created with bot_name:', details.botName, 'tradeId:', tradeId);
-
         // Immediately persist to local user storage and React state
         persistTrade(trade);
 
@@ -1765,7 +1764,6 @@ function App() {
 
         // Return accurate Deriv payout data for manual trader to use
         const botName = details.botName || 'Manual';
-        console.log('DEBUG: Trade success - botName:', botName, 'details.botName:', details.botName);
         const successMsg = `${botName}: ${details.direction} contract purchased on Deriv (${deriv?.account.loginid} · ${deriv?.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`;
         setNotice(successMsg);
         if (details.botName) {
@@ -1854,7 +1852,6 @@ function App() {
 
       // Include Bot Builder bot if it's running
       if (bbState?.isRunning && bbState.config) {
-        console.log('DEBUG: Bot Builder is running with config:', bbState.config.name);
         activeBots.push({ name: bbState.config.name || 'Bot Builder', active: true, total_trades: bbState.tradeCount, wins: 0, pnl: 0, won_amount: 0, lost_amount: 0 });
       }
       const ws = workspaceRef.current;
@@ -1867,7 +1864,6 @@ function App() {
 
       // Only allow one bot at a time - process only the first active bot
       if (activeBots.length > 1) {
-        console.log('DEBUG: Multiple bots active, limiting to first:', activeBots[0].name);
         activeBots = [activeBots[0]];
       }
 

@@ -1169,15 +1169,12 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
 
       setScanStatus(`Placing ${direction} trade on ${currentCfg.market}…`);
 
-      const botNameToUse = currentCfg.name || 'Bot Builder';
-      console.log('DEBUG: Bot Builder calling runTrade with botName:', botNameToUse, 'config.name:', currentCfg.name);
-
       runTrade({
         instrument: currentCfg.market,
         direction,
         stake,
         source: 'bot-builder',
-        botName: botNameToUse,
+        botName: currentCfg.name || 'Bot Builder',
         duration: currentCfg.duration,
       }).catch(err => {
         console.error('Bot Builder trade failed', err);
