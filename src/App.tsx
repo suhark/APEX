@@ -1873,6 +1873,7 @@ function App() {
   };
 
   useEffect(() => {
+    console.log('Bot Loop useEffect mounted', { workspace: !!workspace, bots: bots.length });
     const interval = window.setInterval(() => {
       const activeBots = botsRef.current.filter((bot) => bot.active);
       const bbState = botBuilderStateRef.current;
@@ -1882,7 +1883,8 @@ function App() {
         activeBotsCount: activeBots.length,
         botBuilderState: bbState,
         isRunning: bbState?.isRunning,
-        hasConfig: !!bbState?.config
+        hasConfig: !!bbState?.config,
+        workspaceAvailable: !!workspaceRef.current
       });
       
       // Include Bot Builder bot if it's running
@@ -1892,7 +1894,7 @@ function App() {
       }
       const ws = workspaceRef.current;
       if (!activeBots.length || !ws) {
-        console.log('No active bots or workspace');
+        console.log('No active bots or workspace', { activeBotsLength: activeBots.length, workspaceAvailable: !!ws });
         return;
       }
 
@@ -2359,7 +2361,10 @@ function App() {
           });
       });
     }, 3000); // Reduced from 5000ms to 3000ms for faster response
-    return () => window.clearInterval(interval);
+    return () => {
+      console.log('Bot Loop useEffect cleanup');
+      window.clearInterval(interval);
+    };
   }, []);
 
   const runTradeRef = useRef(runTrade);
