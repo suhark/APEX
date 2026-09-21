@@ -1069,11 +1069,11 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   // Use refs for mutable counters so interval closure always reads fresh values
   const tradeCountRef = useRef(botBuilderState?.tradeCount ?? 0);
   const consecLossesRef = useRef(botBuilderState?.consecLosses ?? 0);
+  const prevStateRef = useRef({ isRunning: false, tradeCount: 0, consecLosses: 0, sessionStart: null as string | null });
   
   // Sync state with parent when it changes from props
   useEffect(() => {
     if (botBuilderState) {
-      console.log('Syncing bot builder state from parent:', botBuilderState);
       setIsRunning(botBuilderState.isRunning);
       setTradeCount(botBuilderState.tradeCount);
       setConsecLosses(botBuilderState.consecLosses);
@@ -1083,25 +1083,31 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     }
   }, [botBuilderState]);
   
-  // Notify parent of state changes
+  // Notify parent of state changes (only on explicit start/stop to avoid infinite loop)
   useEffect(() => {
     if (onBotBuilderStateChange) {
-      console.log('Notifying parent of state change:', {
-        isRunning,
-        tradeCount,
-        consecLosses,
-        sessionStart,
-        configName: cfg.name
-      });
-      onBotBuilderStateChange({
-        isRunning,
-        tradeCount,
-        consecLosses,
-        sessionStart,
-        config: cfg
-      });
+      const prevState = prevStateRef.current;
+      const stateChanged = prevState.isRunning !== isRunning;
+      
+      if (stateChanged) {
+        console.log('Notifying parent of state change:', {
+          isRunning,
+          tradeCount,
+          consecLosses,
+          sessionStart,
+          configName: cfg.name
+        });
+        onBotBuilderStateChange({
+          isRunning,
+          tradeCount,
+          consecLosses,
+          sessionStart,
+          config: cfg
+        });
+        prevStateRef.current = { isRunning, tradeCount, consecLosses, sessionStart };
+      }
     }
-  }, [isRunning, tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange]);
+  }, [isRunning, onBotBuilderStateChange]);
 
   // Keep tick ref updated
   useEffect(() => {
