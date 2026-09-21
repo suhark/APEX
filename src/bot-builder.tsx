@@ -1070,31 +1070,32 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   const tradeCountRef = useRef(botBuilderState?.tradeCount ?? 0);
   const consecLossesRef = useRef(botBuilderState?.consecLosses ?? 0);
   const prevStateRef = useRef({ isRunning: false, tradeCount: 0, consecLosses: 0, sessionStart: null as string | null });
+  const isSyncingFromParentRef = useRef(false);
   
   // Sync state with parent when it changes from props (one-way sync: parent -> child)
+  // Only sync on initial mount or when explicitly stopped by parent, not during normal operation
   useEffect(() => {
-    if (botBuilderState) {
-      console.log('Syncing from parent:', { parentRunning: botBuilderState.isRunning, localRunning: isRunning });
-      setIsRunning(botBuilderState.isRunning);
-      setTradeCount(botBuilderState.tradeCount);
-      setConsecLosses(botBuilderState.consecLosses);
-      setSessionStart(botBuilderState.sessionStart);
-      tradeCountRef.current = botBuilderState.tradeCount;
-      consecLossesRef.current = botBuilderState.consecLosses;
+    if (botBuilderState && !isSyncingFromParentRef.current) {
+      // Only sync if parent has different running state and we're not already syncing
+      if (botBuilderState.isRunning !== isRunning) {
+        console.log('Syncing from parent:', { parentRunning: botBuilderState.isRunning, localRunning: isRunning });
+        isSyncingFromParentRef.current = true;
+        setIsRunning(botBuilderState.isRunning);
+        setTradeCount(botBuilderState.tradeCount);
+        setConsecLosses(botBuilderState.consecLosses);
+        setSessionStart(botBuilderState.sessionStart);
+        tradeCountRef.current = botBuilderState.tradeCount;
+        consecLossesRef.current = botBuilderState.consecLosses;
+        setTimeout(() => { isSyncingFromParentRef.current = false; }, 100);
+      }
     }
-  }, [botBuilderState]);
+  }, [botBuilderState, isRunning]);
   
   // Notify parent of state changes (only on explicit start/stop to avoid infinite loop)
   useEffect(() => {
-    if (onBotBuilderStateChange) {
+    if (onBotBuilderStateChange && !isSyncingFromParentRef.current) {
       const prevState = prevStateRef.current;
       const stateChanged = prevState.isRunning !== isRunning;
-      
-      console.log('State change check:', { 
-        prevState: prevState.isRunning, 
-        currentState: isRunning, 
-        stateChanged 
-      });
       
       if (stateChanged) {
         console.log('Notifying parent of state change:', {
@@ -1114,7 +1115,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
         prevStateRef.current = { isRunning, tradeCount, consecLosses, sessionStart };
       }
     }
-  }, [isRunning, onBotBuilderStateChange]);
+  }, [isRunning, tradeCount, consecLosses, sessionStart, cfg, onBotBuilderStateChange]);
 
   // Keep tick ref updated
   useEffect(() => {
