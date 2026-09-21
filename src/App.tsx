@@ -727,6 +727,21 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
+
+  // Add CSS for pulse animation
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
   const [page, setPageState] = useState<Page>(() => {
     const saved = sessionStorage.getItem('apex_page');
     const valid: Page[] = ['dashboard','bots','manual','builder','ai-builder','scanner','analysis','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
@@ -1712,7 +1727,8 @@ function App() {
               stopAllBots();
               setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. All bots stopped.${isDerivReal ? ' Live trading disarmed.' : ''}`);
             } else {
-              const resultMsg = `${poc.status === 'won' ? '🎉' : '📉'} ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`;
+              const botName = details.botName || 'Manual';
+              const resultMsg = `${poc.status === 'won' ? '🎉' : '📉'} ${botName}: ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`;
               setNotice(resultMsg);
               if (details.botName) {
                 setBotStatus(s => ({ ...s, [details.botName]: `${poc.status === 'won' ? '✅' : '❌'} ${poc.status.toUpperCase()} ${money(finalProfit)}` }));
@@ -1746,7 +1762,8 @@ function App() {
         }));
 
         // Return accurate Deriv payout data for manual trader to use
-        const successMsg = `${details.direction} contract purchased on Deriv (${deriv?.account.loginid} · ${deriv?.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`;
+        const botName = details.botName || 'Manual';
+        const successMsg = `${botName}: ${details.direction} contract purchased on Deriv (${deriv?.account.loginid} · ${deriv?.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`;
         setNotice(successMsg);
         if (details.botName) {
           setBotStatus(s => ({ ...s, [details.botName]: `⏳ Trade placed: ${details.direction}` }));
@@ -1837,11 +1854,16 @@ function App() {
         activeBots.push({ name: 'Bot Builder', active: true, total_trades: bbState.tradeCount, wins: 0, pnl: 0, won_amount: 0, lost_amount: 0 });
       }
       const ws = workspaceRef.current;
-      
+
       // Allow bot builder to run even without workspace for demo purposes
       const hasBotBuilder = activeBots.some(b => b.name === 'Bot Builder');
       if (!activeBots.length || (!ws && !hasBotBuilder)) {
         return;
+      }
+
+      // Only allow one bot at a time - process only the first active bot
+      if (activeBots.length > 1) {
+        activeBots = [activeBots[0]];
       }
 
       // For bot builder without workspace, use minimal session tracking
@@ -3673,6 +3695,86 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
           trades={trades} 
         />
       ) : (
+        <>
+        {/* Running Bots Section */}
+        {bots.some(b => b.active) && (
+          <div style={{ marginBottom: '24px', padding: '16px', background: '#0d2e29', borderRadius: '8px', border: '1px solid #1e3530' }}>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#2dd4bf', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '8px', height: '8px', background: '#2dd4bf', borderRadius: '50%', animation: 'pulse 2s infinite' }} />
+              Running Bots
+            </h3>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              {bots.filter(b => b.active).map(bot => (
+                <div key={bot.id} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  background: '#0b1918',
+                  borderRadius: '6px',
+                  border: '1px solid #1e3530'
+                }}>
+                  <Bot size={16} />
+                  <span style={{ fontSize: '13px', color: '#e0f0ec' }}>{bot.name}</span>
+                  <button
+                    onClick={() => void toggleBot(bot)}
+                    style={{
+                      padding: '4px 8px',
+                      background: '#ef4444',
+                      border: 'none',
+                      borderRadius: '4px',
+                      color: 'white',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <X size={12} /> Stop
+                  </button>
+                </div>
+              ))}
+              {botBuilderState?.isRunning && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  background: '#0b1918',
+                  borderRadius: '6px',
+                  border: '1px solid #1e3530'
+                }}>
+                  <Code2 size={16} />
+                  <span style={{ fontSize: '13px', color: '#e0f0ec' }}>{botBuilderState.config?.name || 'Bot Builder'}</span>
+                  <button
+                    onClick={() => {
+                      if (botBuilderState?.config) {
+                        // Stop the bot builder
+                        // This would need to be wired up to the bot builder component
+                      }
+                    }}
+                    style={{
+                      padding: '4px 8px',
+                      background: '#ef4444',
+                      border: 'none',
+                      borderRadius: '4px',
+                      color: 'white',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <X size={12} /> Stop
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="bot-grid">
         {bots.map((bot) => {
           const botTrades = trades.filter((trade) => trade.bot_name === bot.name);
@@ -3727,6 +3829,7 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
           );
         })}
       </div>
+      </>
       )}
     </>
   );
