@@ -653,6 +653,11 @@ function resolveDirection(cfg: BotConfig, callPut: 'CALL' | 'PUT'): string {
   }
 }
 
+/** Deterministic synthetic price for a given instrument index and tick */
+function priceFor(index: number, tick: number) {
+  return Number((100 + Math.sin((tick + index * 7) / 4) * 2.5 + Math.cos((tick + index) / 8) * 1.4).toFixed(2));
+}
+
 /** Evaluate purchase conditions against current tick data */
 function evaluateConditions(conditions: ConditionNode[], currentTick: number): boolean {
   if (conditions.length === 0) return true; // No conditions = always trade
