@@ -1893,21 +1893,32 @@ function App() {
         console.log('Bot Builder added to active bots');
       }
       const ws = workspaceRef.current;
-      if (!activeBots.length || !ws) {
-        console.log('No active bots or workspace', { activeBotsLength: activeBots.length, workspaceAvailable: !!ws });
+      
+      // Allow bot builder to run even without workspace for demo purposes
+      const hasBotBuilder = activeBots.some(b => b.name === 'Bot Builder');
+      if (!activeBots.length || (!ws && !hasBotBuilder)) {
+        console.log('No active bots or workspace', { activeBotsLength: activeBots.length, workspaceAvailable: !!ws, hasBotBuilder });
         return;
+      }
+      
+      // For bot builder without workspace, use minimal session tracking
+      if (!ws && hasBotBuilder) {
+        console.log('Bot Builder running without workspace - using minimal session tracking');
       }
 
       // Stop all bots immediately if the session loss limit has been reached
-      const loopStartBal = sessionStartingBalRef.current ?? ws.starting_balance;
+      const loopStartBal = sessionStartingBalRef.current ?? (ws?.starting_balance ?? 0);
       const loopCurrentBal = derivConnectedRef.current && derivAccountRef.current
         ? derivAccountRef.current.balance
-        : 0; // no balance without Deriv — bots will be blocked by runTrade guard
+        : (ws?.balance ?? 0); // fallback to workspace balance if no Deriv
       // Use Deriv loginid context for loop session loss check
-      const loopLoginid = derivAccountRef.current?.loginid ?? ws.deriv_loginid ?? null;
+      const loopLoginid = derivAccountRef.current?.loginid ?? ws?.deriv_loginid ?? null;
       const loopContext = loopLoginid ? `deriv_${loopLoginid}` : 'synthetic';
       const loopLossUsed = computeSessionLoss(loopStartBal, loopCurrentBal, filterTradesByContext(tradesRef.current, loopContext), sessionStartAtRef.current);
-      if (loopLossUsed >= ws.loss_limit) {
+      const lossLimit = ws?.loss_limit ?? 1000; // fallback loss limit
+      
+      if (loopLossUsed >= lossLimit) {
+        console.log('Session loss limit reached', { loopLossUsed, lossLimit });
         stopAllBots();
         return;
       }
@@ -1915,7 +1926,7 @@ function App() {
       const currentTick = tickRef.current;
       const currentSetBotStatus = setBotStatusRef.current;
       
-      console.log('Processing active bots:', activeBots.map(b => b.name));
+      console.log('Processing active bots:', activeBots.map(b => b.name), { hasWorkspace: !!ws });
       
       activeBots.forEach((bot, i) => {
         if (botPendingTradesRef.current.has(bot.name)) {
