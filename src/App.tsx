@@ -1878,27 +1878,21 @@ function App() {
       const bbState = botBuilderStateRef.current;
       
       // Debug logging
-      if (import.meta.env.DEV) {
-        console.log('Bot Loop Debug:', {
-          activeBotsCount: activeBots.length,
-          botBuilderState: bbState,
-          isRunning: bbState?.isRunning,
-          hasConfig: !!bbState?.config
-        });
-      }
+      console.log('Bot Loop Debug:', {
+        activeBotsCount: activeBots.length,
+        botBuilderState: bbState,
+        isRunning: bbState?.isRunning,
+        hasConfig: !!bbState?.config
+      });
       
       // Include Bot Builder bot if it's running
       if (bbState?.isRunning && bbState.config) {
         activeBots.push({ name: 'Bot Builder', active: true, total_trades: bbState.tradeCount, wins: 0, pnl: 0, won_amount: 0, lost_amount: 0 });
-        if (import.meta.env.DEV) {
-          console.log('Bot Builder added to active bots');
-        }
+        console.log('Bot Builder added to active bots');
       }
       const ws = workspaceRef.current;
       if (!activeBots.length || !ws) {
-        if (import.meta.env.DEV) {
-          console.log('No active bots or workspace');
-        }
+        console.log('No active bots or workspace');
         return;
       }
 
@@ -1919,13 +1913,11 @@ function App() {
       const currentTick = tickRef.current;
       const currentSetBotStatus = setBotStatusRef.current;
       
-      if (import.meta.env.DEV) {
-        console.log('Processing active bots:', activeBots.map(b => b.name));
-      }
+      console.log('Processing active bots:', activeBots.map(b => b.name));
       
       activeBots.forEach((bot, i) => {
         if (botPendingTradesRef.current.has(bot.name)) {
-          if (import.meta.env.DEV && bot.name === 'Bot Builder') {
+          if (bot.name === 'Bot Builder') {
             console.log('Bot Builder has pending trade, skipping');
           }
           return;
@@ -2167,16 +2159,14 @@ function App() {
           const cfg = bbState.config;
           
           // Debug logging
-          if (import.meta.env.DEV) {
-            console.log('Bot Builder Execution Debug:', {
-              botName: cfg.name,
-              market: cfg.market,
-              isRunning: bbState.isRunning,
-              tradeCount: bbState.tradeCount,
-              consecLosses: bbState.consecLosses,
-              currentTick
-            });
-          }
+          console.log('Bot Builder Execution Debug:', {
+            botName: cfg.name,
+            market: cfg.market,
+            isRunning: bbState.isRunning,
+            tradeCount: bbState.tradeCount,
+            consecLosses: bbState.consecLosses,
+            currentTick
+          });
           
           // Ensure purchaseConditions is always an array
           const purchaseConditions = cfg.purchaseConditions || [];
@@ -2223,17 +2213,15 @@ function App() {
           }
           
           // Debug logging for stake calculation
-          if (import.meta.env.DEV) {
-            console.log('Bot Builder Stake Calculation:', {
-              stakeMode: cfg.stakeMode,
-              baseStake: cfg.stake,
-              stakePercent: cfg.stakePercent,
-              currentBalance,
-              calculatedStake: stake,
-              consecLosses: cl,
-              isValid: !isNaN(stake) && stake > 0
-            });
-          }
+          console.log('Bot Builder Stake Calculation:', {
+            stakeMode: cfg.stakeMode,
+            baseStake: cfg.stake,
+            stakePercent: cfg.stakePercent,
+            currentBalance,
+            calculatedStake: stake,
+            consecLosses: cl,
+            isValid: !isNaN(stake) && stake > 0
+          });
           
           // Check consecutive loss limit
           if (cl >= cfg.maxConsecLosses) {
@@ -2246,16 +2234,14 @@ function App() {
           botDuration = cfg.durationUnit === 'ticks' ? cfg.duration : undefined;
           
           // Debug logging before trade execution
-          if (import.meta.env.DEV) {
-            console.log('Bot Builder Trade Execution:', {
-              instrument,
-              direction,
-              stake,
-              botDuration,
-              market: cfg.market,
-              tradeType: cfg.tradeType
-            });
-          }
+          console.log('Bot Builder Trade Execution:', {
+            instrument,
+            direction,
+            stake,
+            botDuration,
+            market: cfg.market,
+            tradeType: cfg.tradeType
+          });
           
           currentSetBotStatus(s => ({ ...s, [bot.name]: `🔄 ${dir} on ${cfg.market} (${money(stake)})` }));
         } else {

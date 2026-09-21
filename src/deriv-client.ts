@@ -523,6 +523,7 @@ export async function getProposal(params: {
   };
   
   console.log('getProposal payload:', payload);
+  console.log('Account info:', { currency: accountInfo?.currency, balance: accountInfo?.balance });
 
   if (params.contract_type === 'ACCU') {
     // Accumulators use seconds not ticks, and need a growth_rate
