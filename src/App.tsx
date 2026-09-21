@@ -1840,10 +1840,10 @@ function App() {
   };
 
   const handleBotBuilderStateChange = (state: { isRunning: boolean; tradeCount: number; consecLosses: number; sessionStart: string | null; config: BotConfig | null }) => {
-    if (import.meta.env.DEV) {
-      console.log('Bot Builder State Change:', state);
-    }
+    console.log('Parent received state change:', state);
+    console.log('Current parent state:', botBuilderState);
     setBotBuilderState(state);
+    console.log('Parent state after set:', state);
   };
 
   const toggleBot = async (bot: BotRow) => {

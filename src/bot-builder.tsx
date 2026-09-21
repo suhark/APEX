@@ -1150,7 +1150,8 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     
     console.log('Bot Builder calling state change', { 
       hasCallback: !!onBotBuilderStateChange, 
-      config: cfg 
+      config: cfg,
+      currentLocalRunning: isRunning
     });
     
     // Bot execution is now handled by parent App.tsx
@@ -1167,7 +1168,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
       console.error('Bot Builder state change failed - no callback available');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [derivConnected, onBotBuilderStateChange, cfg]);
+  }, [derivConnected, onBotBuilderStateChange, cfg, isRunning]);
 
   // Stop bot when component unmounts or Deriv disconnects
   useEffect(() => {
