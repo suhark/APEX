@@ -2131,7 +2131,7 @@ function App() {
           }
           
           // Stake computation
-          let stake = cfg.stake;
+          stake = cfg.stake;
           const cl = bbState.consecLosses;
           const currentBalance = derivConnected && deriv?.account ? deriv.account.balance : (workspace?.balance ?? 0);
           
