@@ -1605,6 +1605,8 @@ function App() {
           deriv_loginid: deriv?.account?.loginid ?? null,
         };
 
+        console.log('DEBUG: Trade created with bot_name:', details.botName, 'tradeId:', tradeId);
+
         // Immediately persist to local user storage and React state
         persistTrade(trade);
 
@@ -1763,6 +1765,7 @@ function App() {
 
         // Return accurate Deriv payout data for manual trader to use
         const botName = details.botName || 'Manual';
+        console.log('DEBUG: Trade success - botName:', botName, 'details.botName:', details.botName);
         const successMsg = `${botName}: ${details.direction} contract purchased on Deriv (${deriv?.account.loginid} · ${deriv?.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`;
         setNotice(successMsg);
         if (details.botName) {
@@ -1851,18 +1854,20 @@ function App() {
 
       // Include Bot Builder bot if it's running
       if (bbState?.isRunning && bbState.config) {
-        activeBots.push({ name: 'Bot Builder', active: true, total_trades: bbState.tradeCount, wins: 0, pnl: 0, won_amount: 0, lost_amount: 0 });
+        console.log('DEBUG: Bot Builder is running with config:', bbState.config.name);
+        activeBots.push({ name: bbState.config.name || 'Bot Builder', active: true, total_trades: bbState.tradeCount, wins: 0, pnl: 0, won_amount: 0, lost_amount: 0 });
       }
       const ws = workspaceRef.current;
 
       // Allow bot builder to run even without workspace for demo purposes
-      const hasBotBuilder = activeBots.some(b => b.name === 'Bot Builder');
+      const hasBotBuilder = activeBots.some(b => b.name === 'Bot Builder' || b.name === bbState?.config?.name);
       if (!activeBots.length || (!ws && !hasBotBuilder)) {
         return;
       }
 
       // Only allow one bot at a time - process only the first active bot
       if (activeBots.length > 1) {
+        console.log('DEBUG: Multiple bots active, limiting to first:', activeBots[0].name);
         activeBots = [activeBots[0]];
       }
 
