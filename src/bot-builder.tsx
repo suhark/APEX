@@ -1145,7 +1145,11 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     
     tradeCountRef.current = 0;
     consecLossesRef.current = 0;
+    setTradeCount(0);
+    setConsecLosses(0);
+    setSessionStart(new Date().toISOString());
     setShowPanel(true); // auto-open panel when bot starts
+    setIsRunning(true); // Set local state first
     setNotice(`Bot "${cfgRef.current.name}" started — now running in background even when you navigate away.`);
     
     console.log('Bot Builder calling state change', { 
@@ -1168,7 +1172,7 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
       console.error('Bot Builder state change failed - no callback available');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [derivConnected, onBotBuilderStateChange, cfg, isRunning]);
+  }, [derivConnected, onBotBuilderStateChange, cfg]);
 
   // Stop bot when component unmounts or Deriv disconnects
   useEffect(() => {
