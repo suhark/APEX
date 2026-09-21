@@ -1070,18 +1070,8 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   const tradeCountRef = useRef(botBuilderState?.tradeCount ?? 0);
   const consecLossesRef = useRef(botBuilderState?.consecLosses ?? 0);
   
-  // Sync state with parent when it changes from props (one-way sync: parent -> child)
-  useEffect(() => {
-    if (botBuilderState) {
-      console.log('Syncing from parent:', { parentRunning: botBuilderState.isRunning, localRunning: isRunning });
-      setIsRunning(botBuilderState.isRunning);
-      setTradeCount(botBuilderState.tradeCount);
-      setConsecLosses(botBuilderState.consecLosses);
-      setSessionStart(botBuilderState.sessionStart);
-      tradeCountRef.current = botBuilderState.tradeCount;
-      consecLossesRef.current = botBuilderState.consecLosses;
-    }
-  }, [botBuilderState]);
+  // Disable parent-to-child sync to prevent infinite loop
+  // Child controls all state, parent only receives notifications
 
   // Keep tick ref updated
   useEffect(() => {
