@@ -1071,9 +1071,10 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
   const consecLossesRef = useRef(botBuilderState?.consecLosses ?? 0);
   const prevStateRef = useRef({ isRunning: false, tradeCount: 0, consecLosses: 0, sessionStart: null as string | null });
   
-  // Sync state with parent when it changes from props
+  // Sync state with parent when it changes from props (one-way sync: parent -> child)
   useEffect(() => {
     if (botBuilderState) {
+      console.log('Syncing from parent:', { parentRunning: botBuilderState.isRunning, localRunning: isRunning });
       setIsRunning(botBuilderState.isRunning);
       setTradeCount(botBuilderState.tradeCount);
       setConsecLosses(botBuilderState.consecLosses);
@@ -1088,6 +1089,12 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     if (onBotBuilderStateChange) {
       const prevState = prevStateRef.current;
       const stateChanged = prevState.isRunning !== isRunning;
+      
+      console.log('State change check:', { 
+        prevState: prevState.isRunning, 
+        currentState: isRunning, 
+        stateChanged 
+      });
       
       if (stateChanged) {
         console.log('Notifying parent of state change:', {
@@ -1134,18 +1141,14 @@ export function BotBuilder({ setNotice, derivConnected, runTrade, trades = [], t
     console.log('Bot Builder startBot called', { derivConnected, warnings: warningsRef.current.length });
     if (!derivConnected) { setNotice('Connect a Deriv account before running your bot.'); return; }
     if (warningsRef.current.length > 0) { setNotice(`Fix ${warningsRef.current.length} validation issue(s) before starting.`); return; }
+    
     tradeCountRef.current = 0;
     consecLossesRef.current = 0;
-    setTradeCount(0);
-    setConsecLosses(0);
-    setSessionStart(new Date().toISOString());
     setShowPanel(true); // auto-open panel when bot starts
-    setIsRunning(true);
     setNotice(`Bot "${cfgRef.current.name}" started — now running in background even when you navigate away.`);
     
     console.log('Bot Builder calling state change', { 
       hasCallback: !!onBotBuilderStateChange, 
-      botBuilderStateDefined: botBuilderState !== undefined,
       config: cfg 
     });
     
