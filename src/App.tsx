@@ -2890,7 +2890,7 @@ function PageView({
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
   if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv?.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} />;
-  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} botConfig={botConfig} onSaveBotConfig={onSaveBotConfig} setPage={setPage} />;
+  if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} botConfig={botConfig} onSaveBotConfig={onSaveBotConfig} setPage={setPage} botBuilderState={botBuilderState} onBotBuilderStateChange={onBotBuilderStateChange} />;
   if (page === 'manual') {
     return (
       <ManualTrader
@@ -3633,7 +3633,7 @@ function EquityChart({
   );
 }
 
-function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onSaveBotConfig, setPage }: {
+function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onSaveBotConfig, setPage, botBuilderState, onBotBuilderStateChange }: {
   bots: BotRow[];
   toggleBot: (bot: BotRow) => Promise<void>;
   runTrade: (details: { instrument: string; direction: string; stake: number; source: string; botName?: string }) => Promise<void>;
@@ -3642,6 +3642,14 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
   botConfig: Record<string, BotConfig>;
   onSaveBotConfig: (botName: string, cfg: BotConfig) => void;
   setPage: (page: Page) => void;
+  botBuilderState?: {
+    isRunning: boolean;
+    tradeCount: number;
+    consecLosses: number;
+    sessionStart: string | null;
+    config: BotConfig | null;
+  } | null;
+  onBotBuilderStateChange?: (state: any) => void;
 }) {
   const [showPerformanceDashboard, setShowPerformanceDashboard] = useState(false);
   // Local stake overrides per bot — seeded from botConfig (safe against empty/undefined)
