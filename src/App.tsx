@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient, type User } from '@supabase/supabase-js';
 import { Activity, AlertCircle, AlertTriangle, ArrowDownRight, ArrowUpRight, ChartBar as BarChart3, Bell, Bot, CandlestickChart, Check, CheckCircle2, ChevronRight, Clock3, Code as Code2, FileText, FolderOpen, Ghost, Globe, Hash, LayoutDashboard, ChartLine as LineChart, ListFilter, LogOut, Menu, MessageSquare, Pause, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp, User as UserIcon, Wallet, X, Zap } from 'lucide-react';
 import { useDerivConnection } from './use-deriv';
@@ -11,12 +11,21 @@ import { BotBuilder, type BotConfig } from './bot-builder';
 import { DigitsAnalyser } from './digits-analyser';
 import { LandingPage } from './landing-page';
 import { PolicyModal, getPolicyConsent, recordPolicyConsent, type PolicyTab } from './policy-modal';
-import { AnalysisLab } from './analysis-lab';
 import { BulkTrader } from './bulk-trader';
 import { useNotificationSystem, NotificationPanel, NotificationSettings } from './notification-system';
 import { BotPerformanceDashboard } from './bot-performance-dashboard';
 import { StrategyExportImport, StrategyTemplateLibrary } from './strategy-export-import';
 import { AIBotBuilder } from './ai-bot-builder';
+import { ALL_PAGES, NAV_SECTIONS, getPageLabel, isNavItemActive, type Page } from './navigation';
+import {
+  dismissOnboarding,
+  getOnboardingProgress,
+  getRecommendedBot,
+  greetingForHour,
+  markLossLimitReviewed,
+  markOnboardingComplete,
+} from './onboarding';
+import { DemoModeBanner, OnboardingChecklist } from './onboarding-checklist';
 
 const DEFAULT_APP_ID = '34mV1HDCcx9gNO0aCEQMg';
 
@@ -25,15 +34,15 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY ?? '',
 );
 
-type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'scanner' | 'analysis' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift' | 'ai-builder';
+type Page = 'dashboard' | 'bots' | 'manual' | 'builder' | 'bulk' | 'quick' | 'apex' | 'phantom' | 'stpv3' | 'digits' | 'record' | 'settings' | 'digitsurge' | 'boomcrash' | 'asiandrift' | 'ai-builder';
 type Trade = { id: string; user_id?: string | null; instrument: string; direction: string; stake: number; result: string; profit: number; source: string; bot_name?: string; batch_id?: string | null; entry_price: number; exit_price?: number; created_at: string; execution_context?: 'synthetic' | 'deriv'; deriv_loginid?: string | null };
 type BotRow = { id: string; name: string; description: string; risk: string; active: boolean; demo_only: boolean; total_trades: number; wins: number; pnl: number; won_amount: number; lost_amount: number; benchmark_win_rate?: number; benchmark_trades?: number };
 
 // Per-bot user-configurable parameters. Stored in localStorage per user.
 interface PhantomConfig {
   baseStake: number;           // normal-conditions stake
-  rsiOverbought: number;       // 0–1 scale, default 0.72
-  rsiOversold: number;         // 0–1 scale, default 0.28
+  rsiOverbought: number;       // 0"“1 scale, default 0.72
+  rsiOversold: number;         // 0"“1 scale, default 0.28
   lossFadeAt: number;          // consecutive losses before fading direction, default 2
   winStepAt: number;           // consecutive wins before stepping up to V100, default 3
   sessionFilter: boolean;      // respect UTC prime-window filter, default true
@@ -43,28 +52,28 @@ interface StpConfig {
   stakeValue: number;             // $ amount (fixed) or % (percent), default 1 (1%)
   stakeMin: number;               // minimum stake when percent mode, default 5
   stakeMax: number;               // maximum stake when percent mode, default 50
-  scoreThreshold: number;         // 0–100, default 75
+  scoreThreshold: number;         // 0"“100, default 75
   adxMin: number;                 // minimum ADX, default 22
   cooldownMinutes: number;        // cooldown after 3 losses, default 15
 }
 interface DefaultBotConfig {
   stake: number;                  // fixed stake, default 10
 }
-// ── Digit Surge config ────────────────────────────────────────────────────────
+// â”€â”€ Digit Surge config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface DigitSurgeConfig {
   stake: number;                  // fixed stake, default 5
   lookback: number;               // ticks to analyse parity pattern, default 8
-  biasThreshold: number;          // parity imbalance needed to fire, 0–1, default 0.75
+  biasThreshold: number;          // parity imbalance needed to fire, 0"“1, default 0.75
   maxConsecLosses: number;        // consecutive losses before pause, default 3
 }
-// ── Boom/Crash Rider config ───────────────────────────────────────────────────
+// â”€â”€ Boom/Crash Rider config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface BoomCrashConfig {
   stake: number;                  // fixed stake, default 8
   spikeThreshold: number;         // % move in last tick to confirm spike, default 0.30
   trendTicks: number;             // ticks used for pre-spike trend, default 10
   cooldownMs: number;             // ms cooldown after a spike trade, default 20000
 }
-// ── Asian Drift config ────────────────────────────────────────────────────────
+// â”€â”€ Asian Drift config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface AsianDriftConfig {
   stake: number;                  // fixed stake, default 6
   maPeriod: number;               // moving-average period for drift, default 12
@@ -337,20 +346,21 @@ function evaluateBotBuilderConditions(conditions: any[], currentTick: number): b
   return allConditionsMet;
 }
 const nav: { key: Page; label: string; icon: typeof LayoutDashboard }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { key: 'bots',      label: 'Free Bots',      icon: Bot },
+const nav: { key: Page; label: string; icon: typeof LayoutDashboard; group?: string }[] = [
+  // ── Core ──────────────────────────────────────────────────────────────
+  { key: 'dashboard', label: 'Dashboard',       icon: LayoutDashboard },
   { key: 'manual',    label: 'Manual Trader',   icon: Target },
-  { key: 'builder',   label: 'Bot Builder',     icon: Code2 },
-  { key: 'ai-builder', label: 'AI Bot Builder',  icon: MessageSquare },
-  { key: 'scanner',   label: 'Market Scanner',  icon: Activity },
-  { key: 'analysis',  label: 'Analysis Lab',    icon: CandlestickChart },
-  { key: 'bulk',      label: 'Bulk Trader',     icon: ListFilter },
-  { key: 'quick',     label: 'Quick Bot',       icon: Zap },
-  { key: 'apex',      label: 'Apex Bot',        icon: Rocket },
-  { key: 'digits',    label: 'Digits Analyser', icon: Hash },
+  { key: 'bots',      label: 'Trading Bots',    icon: Bot },
   { key: 'record',    label: 'Track Record',    icon: LineChart },
+  { key: 'digits',    label: 'Digits Analyser', icon: Hash },
+  // ── Build ─────────────────────────────────────────────────────────────
+  { key: 'builder',   label: 'Bot Builder',     icon: Code2 },
+  // ── Account ───────────────────────────────────────────────────────────
   { key: 'settings',  label: 'Settings',        icon: Settings2 },
 ];
+
+// Hidden pages — reachable via links/buttons within the app but not in sidebar
+// 'quick', 'apex', 'bulk', 'ai-builder', 'phantom', 'stpv3', 'digitsurge', 'boomcrash', 'asiandrift'
 
 function priceFor(index: number, tick: number) { return Number((100 + Math.sin((tick + index * 7) / 4) * 2.5 + Math.cos((tick + index) / 8) * 1.4).toFixed(2)); }
 function money(value: number) { return `${value < 0 ? '-' : ''}$${Math.abs(value || 0).toFixed(2)}`; }
@@ -401,7 +411,7 @@ function restoreSessionBaseline(userId: string) {
     saved = sessionStorage.getItem(`apex_session_start_bal_${userId}_undefined`);
     savedAt = savedAt || sessionStorage.getItem(`apex_session_start_at_${userId}_undefined`);
   }
-  // Fallback: localStorage (survives tab close — cleared when user resets baseline)
+  // Fallback: localStorage (survives tab close "” cleared when user resets baseline)
   if (!saved) {
     saved = localStorage.getItem(getSessionStartKey(userId));
     savedAt = savedAt || localStorage.getItem(getSessionStartAtKey(userId));
@@ -516,14 +526,14 @@ function saveUserSettings(userId: string, settings: { allowBotLiveTrading: boole
   } catch { /* ignore */ }
 }
 
-// ─── STP-V3 Indicator Engine ──────────────────────────────────────────────────
+// â”€â”€â”€ STP-V3 Indicator Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface Candle { open: number; high: number; low: number; close: number }
 
 /** Build N synthetic 1-minute OHLC candles for the given instrument index ending at currentTick.
  *  priceFor() is deterministic so any past tick can be reconstructed without storing history. */
 function buildSyntheticCandles(instrIdx: number, currentTick: number, count: number): Candle[] {
-  const TICKS_PER_MIN = 37; // ~1 600 ms per tick → ~37.5 ticks/minute
+  const TICKS_PER_MIN = 37; // ~1 600 ms per tick â†’ ~37.5 ticks/minute
   const candles: Candle[] = [];
   for (let c = count - 1; c >= 0; c--) {
     const startTick = currentTick - (c + 1) * TICKS_PER_MIN;
@@ -592,7 +602,7 @@ interface StpIndicators {
   prevCandle: Candle;
 }
 
-/** Compute all STP-V3 indicators from a candle array (needs ≥ 60 candles). */
+/** Compute all STP-V3 indicators from a candle array (needs â‰¥ 60 candles). */
 function calcStpIndicators(candles: Candle[]): StpIndicators | null {
   if (candles.length < 60) return null;
   const closes = candles.map(c => c.close);
@@ -660,10 +670,10 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
   const { ema20, ema50, ema20Prev5, atr14, atr50Avg, adx14, lastCandle, prevCandle } = ind;
   const atrRatio = atr14 / (atr50Avg || 1);
 
-  // ── Hard filter: Volatility regime ──────────────────────────────────────────
+  // â”€â”€ Hard filter: Volatility regime â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (atrRatio > 1.50) return null;
 
-  // ── Stage 1: Trend detection ─────────────────────────────────────────────────
+  // â”€â”€ Stage 1: Trend detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const bullish = ema20 > ema50;
   const bearish = ema20 < ema50;
   const emaSlopeUp   = ema20 > ema20Prev5;
@@ -675,18 +685,18 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
   const isBear = bearish && emaSlopeDown;
   if (!isBull && !isBear) return null;              // slope disagrees with crossover
 
-  // ── Stage 2: Pullback to EMA20 ───────────────────────────────────────────────
+  // â”€â”€ Stage 2: Pullback to EMA20 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const pullDist = isBull
     ? Math.abs(lastCandle.low  - ema20)
     : Math.abs(lastCandle.high - ema20);
   if (pullDist > 0.60 * atr14) return null;         // pullback too deep (relaxed for synthetic)
 
-  // ── Stage 3: Structure — swing high/low must stay intact ────────────────────
+  // â”€â”€ Stage 3: Structure "” swing high/low must stay intact â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Approximate: previous candle must form a higher low (bull) or lower high (bear)
   if (isBull && lastCandle.low < prevCandle.low - 0.20 * atr14) return null;
   if (isBear && lastCandle.high > prevCandle.high + 0.20 * atr14) return null;
 
-  // ── Stage 4: Confirmation candle ────────────────────────────────────────────
+  // â”€â”€ Stage 4: Confirmation candle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const bodySize = Math.abs(lastCandle.close - lastCandle.open);
   if (bodySize < 0.20 * atr14) return null;         // body too small (relaxed for synthetic)
   const bullConf = lastCandle.close > lastCandle.open && lastCandle.close > ema20;
@@ -694,10 +704,10 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
   if (isBull && !bullConf) return null;
   if (isBear && !bearConf) return null;
 
-  // ── Stage 5: ADX ────────────────────────────────────────────────────────────
+  // â”€â”€ Stage 5: ADX â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (adx14 < adxMin) return null;
 
-  // ── Scoring (100 pts) ────────────────────────────────────────────────────────
+  // â”€â”€ Scoring (100 pts) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Trend quality (25 pts)
   const emaSlope5 = Math.abs(ema20 - ema20Prev5);
   const trendScore = emaGap >= 0.30 * atr14 && emaSlope5 >= 0.05 * atr14 ? 25
@@ -722,7 +732,7 @@ function evalStpV3Signal(ind: StpIndicators, scoreThreshold = 75, adxMin = 22): 
   return { direction: isBull ? 'CALL' : 'PUT', score: totalScore };
 }
 
-// ─── End STP-V3 Indicator Engine ─────────────────────────────────────────────
+// â”€â”€â”€ End STP-V3 Indicator Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -744,7 +754,7 @@ function App() {
   }, []);
   const [page, setPageState] = useState<Page>(() => {
     const saved = sessionStorage.getItem('apex_page');
-    const valid: Page[] = ['dashboard','bots','manual','builder','ai-builder','scanner','analysis','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
+    const valid: Page[] = ['dashboard','bots','manual','builder','ai-builder','bulk','quick','apex','phantom','stpv3','digits','record','settings','digitsurge','boomcrash','asiandrift'];
     return (saved && valid.includes(saved as Page)) ? saved as Page : 'dashboard';
   });
   const setPage = (p: Page) => { sessionStorage.setItem('apex_page', p); setPageState(p); };
@@ -756,7 +766,7 @@ function App() {
   const [botsLoadError, setBotsLoadError] = useState(false);
   const [notice, setNotice] = useState('');
   const [tradeAlert, setTradeAlert] = useState<TradeAlert | null>(null);
-  // Live P&L for open (pending) contracts — keyed by trade id
+  // Live P&L for open (pending) contracts "” keyed by trade id
   const [openContractPnl, setOpenContractPnl] = useState<Record<string, { profit: number; entryPrice: number; instrument: string; direction: string; stake: number }>>({});
   
   // Notification system
@@ -809,13 +819,13 @@ function App() {
     consecutiveLosses: 0,
     lastLossTime: 0,
   });
-  // Boom/Crash Rider runtime state — tracks last trade time for cooldown
+  // Boom/Crash Rider runtime state "” tracks last trade time for cooldown
   const boomCrashStateRef = useRef<{ lastTradeTime: number }>({ lastTradeTime: 0 });
-  // Digit Surge — tracks consecutive losses in a ref so it resets when bot is restarted
+  // Digit Surge "” tracks consecutive losses in a ref so it resets when bot is restarted
   const digitSurgeLossRef = useRef<number>(0);
   // Per-bot live-readable config (read in the setInterval closure)
   const botConfigRef = useRef<Record<string, BotConfig>>({});
-  // Live signal status per bot — shown on the dedicated pages
+  // Live signal status per bot "” shown on the dedicated pages
   const [botStatus, setBotStatus] = useState<Record<string, string>>({});
   const setBotStatusRef = useRef(setBotStatus);
   useEffect(() => {
@@ -910,7 +920,7 @@ function App() {
 
   // Seed a baseline only when there genuinely is none yet (first-ever login, or after reset)
   useEffect(() => {
-    if (sessionStartingBalRef.current !== null) return; // already set — do not overwrite
+    if (sessionStartingBalRef.current !== null) return; // already set "” do not overwrite
     if (deriv?.account) {
       syncSessionStartBalance(deriv?.account.balance);
     } else if (workspace && user) {
@@ -1023,7 +1033,7 @@ function App() {
         }
       } else if (error) {
         if (import.meta.env.DEV) console.warn('Workspace user_id query fallback:', error.message);
-        // Column may not exist yet — try legacy single-workspace query
+        // Column may not exist yet "” try legacy single-workspace query
         const legacy = await supabase.from('trading_workspace').select('*').limit(1).maybeSingle();
         if (!legacy.error && legacy.data) {
           ws = legacy.data as Workspace;
@@ -1047,7 +1057,7 @@ function App() {
         };
         wsLoaded = true;
       } else {
-        // Fallback to hardcoded default workspace (legacy query removed — RLS blocks it anyway)
+        // Fallback to hardcoded default workspace (legacy query removed "” RLS blocks it anyway)
         ws = {
           id: `ws_${currentUser.id}`,
           user_id: currentUser.id,
@@ -1082,7 +1092,7 @@ function App() {
 
       const fetchedTrades: Trade[] | null = (!error && Array.isArray(data))
         ? data as Trade[]
-        // Column not yet added — fall back to all trades (pre-migration compatibility)
+        // Column not yet added "” fall back to all trades (pre-migration compatibility)
         : (!error ? null : await supabase
             .from('trading_trades')
             .select('*')
@@ -1132,7 +1142,7 @@ function App() {
       }
 
       botsData = (botsResult.data as BotRow[]).map((bot) => {
-        // Always compute bot stats from Deriv trades only — filter by loginid if known.
+        // Always compute bot stats from Deriv trades only "” filter by loginid if known.
         // This ensures stats persist across disconnect/reconnect for the same account.
         const derivLoginid = ws?.deriv_loginid ?? null;
         const botContext = derivLoginid ? `deriv_${derivLoginid}` : null;
@@ -1196,7 +1206,7 @@ function App() {
     }
   };
 
-  // ── Deriv OAuth 2.0 + PKCE callback handler ──────────────────────────────
+  // â”€â”€ Deriv OAuth 2.0 + PKCE callback handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Fires when Deriv redirects back to /callback?code=...&state=...
   useEffect(() => {
     if (window.location.pathname !== '/callback') return;
@@ -1228,7 +1238,7 @@ function App() {
         }
         localStorage.setItem('apex_deriv_token', token);
 
-        // Connect — oauthConnectingRef prevents load() from stomping this
+        // Connect "” oauthConnectingRef prevents load() from stomping this
         await handleDerivConnect(token, DEFAULT_APP_ID);
       } catch (err) {
         setNotice(`Deriv login error: ${err instanceof Error ? err.message : String(err)}`);
@@ -1253,7 +1263,7 @@ function App() {
         }
       })
       .catch(() => {
-        // Supabase unreachable — unblock the app and show the landing/auth screen
+        // Supabase unreachable "” unblock the app and show the landing/auth screen
         setAuthChecking(false);
       });
 
@@ -1348,7 +1358,7 @@ function App() {
   };
 
   const handleDerivConnect = async (token: string, _appId?: string, isAutoReconnect = false) => {
-    if (!isAutoReconnect) setNotice('Connecting to Deriv…');
+    if (!isAutoReconnect) setNotice('Connecting to Deriv"¦');
     setLiveArmed(false); // ALWAYS start in safe demo mode!
     // Always use owner's registered App ID to route commissions
     const result = await deriv.connect(token, DEFAULT_APP_ID);
@@ -1382,7 +1392,7 @@ function App() {
       });
 
       if (!isAutoReconnect) {
-        setNotice(`Connected to Deriv (${result.account.loginid}) [${result.account.is_virtual ? 'Demo' : 'Real'}]. All active bots have been stopped for safety — you can restart them manually.`);
+        setNotice(`Connected to Deriv (${result.account.loginid}) [${result.account.is_virtual ? 'Demo' : 'Real'}]. All active bots have been stopped for safety "” you can restart them manually.`);
       }
     } else {
       if (!isAutoReconnect) {
@@ -1398,7 +1408,7 @@ function App() {
 
   const handleDerivSwitchAccount = async (loginid: string) => {
     setLiveArmed(false); // Always disarm on switch!
-    setNotice(`Switching to account ${loginid}…`);
+    setNotice(`Switching to account ${loginid}"¦`);
     const result = await deriv.switchAccount(loginid);
     if (result.ok && result.account) {
       syncSessionStartBalance(result.account.balance);
@@ -1484,7 +1494,7 @@ function App() {
 
     const sessionStartBal = sessionStartingBalRef.current ?? (derivConnected && deriv?.account ? deriv?.account.balance : ws.starting_balance);
     const sessionCurrentBal = derivConnected && deriv?.account ? deriv?.account.balance : ws.balance;
-    // Use Deriv loginid context for session loss — single source of truth
+    // Use Deriv loginid context for session loss "” single source of truth
     const activeLoginid = derivAccountRef.current?.loginid ?? ws.deriv_loginid ?? null;
     const tradeContext = activeLoginid ? `deriv_${activeLoginid}` : 'synthetic';
     const sessionLossUsed = computeSessionLoss(
@@ -1499,7 +1509,7 @@ function App() {
       console.error('runTrade:', errorMsg);
       setNotice(errorMsg);
       if (details.botName) {
-        setBotStatus(s => ({ ...s, [details.botName]: `🛑 Loss limit reached` }));
+        setBotStatus(s => ({ ...s, [details.botName]: `ðŸ›‘ Loss limit reached` }));
       }
       return {};
     }
@@ -1514,7 +1524,7 @@ function App() {
           console.error('runTrade:', errorMsg);
           setNotice(errorMsg);
           if (details.botName) {
-            setBotStatus(s => ({ ...s, [details.botName]: `🔒 Disarmed` }));
+            setBotStatus(s => ({ ...s, [details.botName]: `ðŸ”’ Disarmed` }));
           }
           return {};
         }
@@ -1524,7 +1534,7 @@ function App() {
           console.error('runTrade:', errorMsg);
           setNotice(errorMsg);
           if (details.botName) {
-            setBotStatus(s => ({ ...s, [details.botName]: `🔒 Bot trading blocked` }));
+            setBotStatus(s => ({ ...s, [details.botName]: `ðŸ”’ Bot trading blocked` }));
           }
           return {};
         }
@@ -1536,7 +1546,7 @@ function App() {
           console.error('runTrade:', errorMsg);
           setNotice(errorMsg);
           if (details.botName) {
-            setBotStatus(s => ({ ...s, [details.botName]: `💰 Stake too high` }));
+            setBotStatus(s => ({ ...s, [details.botName]: `ðŸ’° Stake too high` }));
           }
           return {};
         }
@@ -1548,7 +1558,7 @@ function App() {
         console.error('runTrade:', errorMsg, { stake: details.stake, balance: deriv?.account.balance });
         setNotice(errorMsg);
         if (details.botName) {
-          setBotStatus(s => ({ ...s, [details.botName]: `💰 Invalid stake` }));
+          setBotStatus(s => ({ ...s, [details.botName]: `ðŸ’° Invalid stake` }));
         }
         return {};
       }
@@ -1559,7 +1569,7 @@ function App() {
         console.error('runTrade:', errorMsg);
         setNotice(errorMsg);
         if (details.botName) {
-          setBotStatus(s => ({ ...s, [details.botName]: `❓ Unknown instrument` }));
+          setBotStatus(s => ({ ...s, [details.botName]: `â“ Unknown instrument` }));
         }
         return {};
       }
@@ -1730,10 +1740,10 @@ function App() {
               setNotice(`Session loss limit (${money(ws.loss_limit)}) reached after this trade. All bots stopped.${isDerivReal ? ' Live trading disarmed.' : ''}`);
             } else {
               const botName = details.botName || 'Manual';
-              const resultMsg = `${poc.status === 'won' ? '🎉' : '📉'} ${botName}: ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`;
+              const resultMsg = `${poc.status === 'won' ? 'ðŸŽ‰' : 'ðŸ“‰'} ${botName}: ${details.direction} trade ${poc.status.toUpperCase()} ${poc.status === 'won' ? '+' : ''}${money(finalProfit)}`;
               setNotice(resultMsg);
               if (details.botName) {
-                setBotStatus(s => ({ ...s, [details.botName]: `${poc.status === 'won' ? '✅' : '❌'} ${poc.status.toUpperCase()} ${money(finalProfit)}` }));
+                setBotStatus(s => ({ ...s, [details.botName]: `${poc.status === 'won' ? 'âœ…' : 'âŒ'} ${poc.status.toUpperCase()} ${money(finalProfit)}` }));
               }
             }
           }
@@ -1766,10 +1776,10 @@ function App() {
         // Return accurate Deriv payout data for manual trader to use
         const botName = details.botName || 'Manual';
         console.log('DEBUG: Trade success - botName:', botName, 'details.botName:', details.botName);
-        const successMsg = `${botName}: ${details.direction} contract purchased on Deriv (${deriv?.account.loginid} · ${deriv?.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result…`;
+        const successMsg = `${botName}: ${details.direction} contract purchased on Deriv (${deriv?.account.loginid} · ${deriv?.account.is_virtual ? 'Demo' : 'Real'}). Waiting for result"¦`;
         setNotice(successMsg);
         if (details.botName) {
-          setBotStatus(s => ({ ...s, [details.botName]: `⏳ Trade placed: ${details.direction}` }));
+          setBotStatus(s => ({ ...s, [details.botName]: `â³ Trade placed: ${details.direction}` }));
         }
 
         return { contractId: result.contractId, derivPayout: result.proposal.payout };
@@ -1778,24 +1788,24 @@ function App() {
         console.error(errorMsg, err);
         if (details.botName) {
           botPendingTradesRef.current.delete(details.botName);
-          setBotStatus(s => ({ ...s, [details.botName]: `❌ Trade failed` }));
+          setBotStatus(s => ({ ...s, [details.botName]: `âŒ Trade failed` }));
         }
         setNotice(errorMsg);
         return {};
       }
     }
 
-    // ── Deriv is NOT connected — block all trading ─────────────────────────
+    // â”€â”€ Deriv is NOT connected "” block all trading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Synthetic simulation has been removed. Users must connect a Deriv account
     // to place any trade (demo or real). The chart is still fully functional.
     const msg = details.source === 'bot' || details.source === 'quick_bot' || details.source === 'bulk'
-      ? 'Connect a Deriv account to run bots. Go to Settings → Connect Deriv.'
-      : 'Connect your Deriv account to place trades. Go to Settings → Connect Deriv.';
+      ? 'Connect a Deriv account to run bots. Go to Settings â†’ Connect Deriv.'
+      : 'Connect your Deriv account to place trades. Go to Settings â†’ Connect Deriv.';
     setNotice(msg);
     return {};
   };
 
-  // Deactivates every running bot — called when the session loss limit is hit
+  // Deactivates every running bot "” called when the session loss limit is hit
   const stopAllBots = () => {
     setBots((current) => {
       const anyActive = current.some((b) => b.active);
@@ -1905,7 +1915,7 @@ function App() {
         let botDuration: number | undefined = undefined;
 
         if (bot.name === 'Phantom Scalper') {
-          // ── Phantom Scalper: multi-signal strategy ──────────────────────────
+          // â”€â”€ Phantom Scalper: multi-signal strategy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           const cfg = (botConfigRef.current['Phantom Scalper'] ?? PHANTOM_DEFAULTS) as PhantomConfig;
 
           // Signal 1: EMA trend bias via tick oscillator
@@ -1913,7 +1923,7 @@ function App() {
           const longEma  = Math.cos(currentTick / 8);
           const emaBullish = shortEma > longEma;
 
-          // Signal 2: RSI-like momentum — thresholds from user config
+          // Signal 2: RSI-like momentum "” thresholds from user config
           let gains = 0; let losses = 0;
           for (let t = 1; t <= 6; t++) {
             const delta = priceFor(3, currentTick - t + 1) - priceFor(3, currentTick - t);
@@ -1935,23 +1945,23 @@ function App() {
           const inPrimeWindow = !cfg.sessionFilter ||
             ((hour >= 7 && hour < 11) || (hour >= 13 && hour < 17) || (hour >= 19 && hour < 23));
 
-          // Instrument + stake — scale from base stake
+          // Instrument + stake "” scale from base stake
           if (recentLosses >= cfg.lossFadeAt && recentWins === 0) {
             instrument = 'Volatility 50 Index';
             stake      = Math.max(1, cfg.baseStake - 4);
-            setBotStatus(s => ({ ...s, 'Phantom Scalper': '⚠️ Recovery mode — V50' }));
+            setBotStatus(s => ({ ...s, 'Phantom Scalper': 'âš ï¸ Recovery mode "” V50' }));
           } else if (recentWins >= cfg.winStepAt) {
             instrument = 'Volatility 100 Index';
             stake      = cfg.baseStake + 3;
-            setBotStatus(s => ({ ...s, 'Phantom Scalper': '🔥 Hot streak — V100' }));
+            setBotStatus(s => ({ ...s, 'Phantom Scalper': 'ðŸ”¥ Hot streak "” V100' }));
           } else if (inPrimeWindow) {
             instrument = 'Volatility 75 Index';
             stake      = cfg.baseStake;
-            setBotStatus(s => ({ ...s, 'Phantom Scalper': '✅ Prime window — V75' }));
+            setBotStatus(s => ({ ...s, 'Phantom Scalper': 'âœ… Prime window "” V75' }));
           } else {
             instrument = 'Volatility 25 Index';
             stake      = Math.max(1, cfg.baseStake - 4);
-            setBotStatus(s => ({ ...s, 'Phantom Scalper': '😴 Off-peak — V25' }));
+            setBotStatus(s => ({ ...s, 'Phantom Scalper': 'ðŸ˜´ Off-peak "” V25' }));
           }
 
           // Direction
@@ -1967,16 +1977,16 @@ function App() {
           }
 
           // Add status update for Phantom Scalper
-          setBotStatus(s => ({ ...s, 'Phantom Scalper': `🔄 ${direction} on ${instrument} (${money(stake)})` }));
+          setBotStatus(s => ({ ...s, 'Phantom Scalper': `ðŸ”„ ${direction} on ${instrument} (${money(stake)})` }));
         } else if (bot.name === 'Trend Pullback V3') {
-          // ── STP-V3: Six-stage Trend Pullback strategy on V75 ─────────────
+          // â”€â”€ STP-V3: Six-stage Trend Pullback strategy on V75 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           const cfg = (botConfigRef.current['Trend Pullback V3'] ?? STP_DEFAULTS) as StpConfig;
           const STP_COOLDOWN_MS = cfg.cooldownMinutes * 60 * 1000;
           const stpState = stpV3StateRef.current;
           const msSinceLoss = Date.now() - stpState.lastLossTime;
           if (stpState.consecutiveLosses >= 3 && msSinceLoss < STP_COOLDOWN_MS) {
             const remaining = Math.ceil((STP_COOLDOWN_MS - msSinceLoss) / 60000);
-            setBotStatus(s => ({ ...s, 'Trend Pullback V3': `⏸ Cooldown — ${remaining}m remaining` }));
+            setBotStatus(s => ({ ...s, 'Trend Pullback V3': `â¸ Cooldown "” ${remaining}m remaining` }));
             return;
           }
           if (stpState.consecutiveLosses >= 3 && msSinceLoss >= STP_COOLDOWN_MS) {
@@ -1987,23 +1997,23 @@ function App() {
           const candles = buildSyntheticCandles(3, currentTick, 60);
           const ind = calcStpIndicators(candles);
           if (!ind) {
-            setBotStatus(s => ({ ...s, 'Trend Pullback V3': '⏳ Building candle history…' }));
+            setBotStatus(s => ({ ...s, 'Trend Pullback V3': 'â³ Building candle history"¦' }));
             return;
           }
 
           // Pass user-configured thresholds into the signal evaluator
           const signal = evalStpV3Signal(ind, cfg.scoreThreshold, cfg.adxMin);
           if (!signal) {
-            setBotStatus(s => ({ ...s, 'Trend Pullback V3': `🔍 Scanning — score ${ind ? '' : '—'} below ${cfg.scoreThreshold}` }));
+            setBotStatus(s => ({ ...s, 'Trend Pullback V3': `ðŸ” Scanning "” score ${ind ? '' : '"”'} below ${cfg.scoreThreshold}` }));
             return;
           }
 
-          setBotStatus(s => ({ ...s, 'Trend Pullback V3': `✅ Signal: ${signal.direction} (score ${signal.score})` }));
+          setBotStatus(s => ({ ...s, 'Trend Pullback V3': `âœ… Signal: ${signal.direction} (score ${signal.score})` }));
           instrument = 'Volatility 75 Index';
           direction  = signal.direction;
           const stpBal = derivConnectedRef.current && derivAccountRef.current
             ? derivAccountRef.current.balance
-            : 1000; // fallback — runTrade will block this if Deriv isn't connected
+            : 1000; // fallback "” runTrade will block this if Deriv isn't connected
           if (cfg.stakeMode === 'percent') {
             stake = Math.min(cfg.stakeMax, Math.max(cfg.stakeMin, Number((stpBal * cfg.stakeValue / 100).toFixed(2))));
           } else {
@@ -2011,13 +2021,13 @@ function App() {
           }
 
           // Add execution status
-          setBotStatus(s => ({ ...s, 'Trend Pullback V3': `🔄 ${signal.direction} V75 (${money(stake)})` }));
+          setBotStatus(s => ({ ...s, 'Trend Pullback V3': `ðŸ”„ ${signal.direction} V75 (${money(stake)})` }));
         } else if (bot.name === 'Digit Surge') {
           const cfg = (botConfigRef.current['Digit Surge'] ?? DIGIT_SURGE_DEFAULTS) as DigitSurgeConfig;
 
           // Use a ref-based counter so it resets cleanly when the bot is restarted
           if (digitSurgeLossRef.current >= cfg.maxConsecLosses) {
-            setBotStatus(s => ({ ...s, 'Digit Surge': `🛑 Stopped — ${digitSurgeLossRef.current} consecutive losses. Restart to resume.` }));
+            setBotStatus(s => ({ ...s, 'Digit Surge': `ðŸ›‘ Stopped "” ${digitSurgeLossRef.current} consecutive losses. Restart to resume.` }));
             // Deactivate the bot so the UI shows Start instead of Pause
             setBots(prev => prev.map(b => b.name === 'Digit Surge' ? { ...b, active: false } : b));
             botPendingTradesRef.current.delete('Digit Surge');
@@ -2036,31 +2046,31 @@ function App() {
           const oddBias  = oddCount / total;
 
           if (Math.max(evenBias, oddBias) < cfg.biasThreshold) {
-            setBotStatus(s => ({ ...s, 'Digit Surge': `🔍 Scanning — bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% < ${(cfg.biasThreshold * 100).toFixed(0)}%` }));
+            setBotStatus(s => ({ ...s, 'Digit Surge': `ðŸ” Scanning "” bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% < ${(cfg.biasThreshold * 100).toFixed(0)}%` }));
             return;
           }
 
           const digitDir = evenBias >= oddBias ? 'DIGITEVEN' : 'DIGITODD';
-          setBotStatus(s => ({ ...s, 'Digit Surge': `✅ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% — losses: ${digitSurgeLossRef.current}/${cfg.maxConsecLosses}` }));
+          setBotStatus(s => ({ ...s, 'Digit Surge': `âœ… ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} bias ${(Math.max(evenBias || 0, oddBias || 0) * 100).toFixed(0)}% "” losses: ${digitSurgeLossRef.current}/${cfg.maxConsecLosses}` }));
           instrument = 'Volatility 10 (1s) Index';
           direction  = digitDir;
           stake      = Math.max(0.35, cfg.stake);
 
           // Add execution status
-          setBotStatus(s => ({ ...s, 'Digit Surge': `🔄 ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} on V10 (${money(stake)})` }));
+          setBotStatus(s => ({ ...s, 'Digit Surge': `ðŸ”„ ${digitDir === 'DIGITEVEN' ? 'EVEN' : 'ODD'} on V10 (${money(stake)})` }));
 
         } else if (bot.name === 'Boom/Crash Rider') {
-          // ── Boom/Crash Rider: pre-spike setup on Boom/Crash indices ──────
+          // â”€â”€ Boom/Crash Rider: pre-spike setup on Boom/Crash indices â”€â”€â”€â”€â”€â”€
           // Boom 1000: periodic sharp upward spikes preceded by a quiet drift
-          // downward. We wait for ≥70% falling ticks + price compression
-          // (last move < threshold × avg move), then buy CALL on Boom 1000.
-          // Mirror logic for Crash 1000 with rising ticks → PUT.
+          // downward. We wait for â‰¥70% falling ticks + price compression
+          // (last move < threshold Ã— avg move), then buy CALL on Boom 1000.
+          // Mirror logic for Crash 1000 with rising ticks â†’ PUT.
           const cfg = (botConfigRef.current['Boom/Crash Rider'] ?? BOOM_CRASH_DEFAULTS) as BoomCrashConfig;
 
           const bcState = boomCrashStateRef.current;
           if (Date.now() - bcState.lastTradeTime < cfg.cooldownMs) {
             const remain = Math.ceil((cfg.cooldownMs - (Date.now() - bcState.lastTradeTime)) / 1000);
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `⏸ Cooldown — ${remain}s` }));
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `â¸ Cooldown "” ${remain}s` }));
             return;
           }
 
@@ -2071,21 +2081,21 @@ function App() {
             if (cur < prev) fallingTicks++; else if (cur > prev) risingTicks++;
           }
 
-          // Simplified: directional dominance only — compression check was too tight
-          // with synthetic priceFor() prices. ≥70% in one direction is the signal.
+          // Simplified: directional dominance only "” compression check was too tight
+          // with synthetic priceFor() prices. â‰¥70% in one direction is the signal.
           const strongFall = fallingTicks >= Math.ceil(cfg.trendTicks * 0.70);
           const strongRise = risingTicks  >= Math.ceil(cfg.trendTicks * 0.70);
 
           if (strongFall) {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ BOOM setup — ${fallingTicks}/${cfg.trendTicks} falling ticks` }));
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `âœ… BOOM setup "” ${fallingTicks}/${cfg.trendTicks} falling ticks` }));
             instrument = 'Boom 1000 Index';
             direction  = 'CALL';
           } else if (strongRise) {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `✅ CRASH setup — ${risingTicks}/${cfg.trendTicks} rising ticks` }));
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `âœ… CRASH setup "” ${risingTicks}/${cfg.trendTicks} rising ticks` }));
             instrument = 'Crash 1000 Index';
             direction  = 'PUT';
           } else {
-            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔍 Scanning — fall:${fallingTicks} rise:${risingTicks}/${cfg.trendTicks}` }));
+            setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `ðŸ” Scanning "” fall:${fallingTicks} rise:${risingTicks}/${cfg.trendTicks}` }));
             return;
           }
 
@@ -2093,14 +2103,14 @@ function App() {
           boomCrashStateRef.current.lastTradeTime = Date.now();
 
           // Add execution status
-          setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `🔄 ${direction} on ${instrument} (${money(stake)})` }));
+          setBotStatus(s => ({ ...s, 'Boom/Crash Rider': `ðŸ”„ ${direction} on ${instrument} (${money(stake)})` }));
 
         } else if (bot.name === 'Asian Drift') {
-          // ── Asian Drift: MA drift → Asian Up/Down on V50 ─────────────────
+          // â”€â”€ Asian Drift: MA drift â†’ Asian Up/Down on V50 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
           // Asian options settle on the average price of all ticks during the
           // contract. ASIANU wins if the final spot > average; ASIAND if below.
           // Signal: if current price is significantly above the MA the average
-          // will lag behind the close → back ASIANU. Below MA → ASIAND.
+          // will lag behind the close â†’ back ASIANU. Below MA â†’ ASIAND.
           const cfg = (botConfigRef.current['Asian Drift'] ?? ASIAN_DRIFT_DEFAULTS) as AsianDriftConfig;
 
           let maSum = 0;
@@ -2110,25 +2120,25 @@ function App() {
           const drift = (close - ma) / (ma || 1);
 
           if (Math.abs(drift) < cfg.driftThreshold) {
-            setBotStatus(s => ({ ...s, 'Asian Drift': `🔍 Scanning — drift ${((drift || 0) * 100).toFixed(3)}%` }));
+            setBotStatus(s => ({ ...s, 'Asian Drift': `ðŸ” Scanning "” drift ${((drift || 0) * 100).toFixed(3)}%` }));
             return;
           }
 
           const asianDir = drift > 0 ? 'ASIANU' : 'ASIAND';
-          setBotStatus(s => ({ ...s, 'Asian Drift': `✅ ASIAN ${drift > 0 ? 'UP' : 'DOWN'} drift ${(Math.abs(drift || 0) * 100).toFixed(3)}%` }));
+          setBotStatus(s => ({ ...s, 'Asian Drift': `âœ… ASIAN ${drift > 0 ? 'UP' : 'DOWN'} drift ${(Math.abs(drift || 0) * 100).toFixed(3)}%` }));
           instrument = 'Volatility 50 Index';
           direction  = asianDir;
           stake      = Math.max(0.35, cfg.stake);
           botDuration = cfg.durationTicks;
 
           // Add execution status
-          setBotStatus(s => ({ ...s, 'Asian Drift': `🔄 ${asianDir} on V50 (${money(stake)})` }));
+          setBotStatus(s => ({ ...s, 'Asian Drift': `ðŸ”„ ${asianDir} on V50 (${money(stake)})` }));
 
         } else if (bot.name === 'Bot Builder') {
           // Bot Builder bot - use the config from botBuilderState
           const bbState = botBuilderStateRef.current;
           if (!bbState || !bbState.isRunning || !bbState.config) {
-            setBotStatus(s => ({ ...s, [bot.name]: '⏸ Not configured or not running' }));
+            setBotStatus(s => ({ ...s, [bot.name]: 'â¸ Not configured or not running' }));
             return;
           }
 
@@ -2144,7 +2154,7 @@ function App() {
             const conditionInfo = purchaseConditions && purchaseConditions.length > 0 
               ? ` (${purchaseConditions.length} conditions)` 
               : ' (no conditions set)';
-            setBotStatus(s => ({ ...s, [bot.name]: `🔍 Scanning — conditions not met${conditionInfo} (trades: ${bbState.tradeCount})` }));
+            setBotStatus(s => ({ ...s, [bot.name]: `ðŸ” Scanning "” conditions not met${conditionInfo} (trades: ${bbState.tradeCount})` }));
             return;
           }
           
@@ -2180,7 +2190,7 @@ function App() {
 
           // Check consecutive loss limit
           if (cl >= cfg.maxConsecLosses) {
-            setBotStatus(s => ({ ...s, [bot.name]: `⏸ Paused — ${cl} consecutive losses` }));
+            setBotStatus(s => ({ ...s, [bot.name]: `â¸ Paused "” ${cl} consecutive losses` }));
             return;
           }
           
@@ -2188,9 +2198,9 @@ function App() {
           direction = dir;
           botDuration = cfg.durationUnit === 'ticks' ? cfg.duration : undefined;
 
-          setBotStatus(s => ({ ...s, [bot.name]: `🔄 ${dir} on ${cfg.market} (${money(stake)})` }));
+          setBotStatus(s => ({ ...s, [bot.name]: `ðŸ”„ ${dir} on ${cfg.market} (${money(stake)})` }));
         } else {
-          // Default strategy for all other bots — with basic condition checking
+          // Default strategy for all other bots "” with basic condition checking
           const cfg = (botConfigRef.current[bot.name] ?? DEFAULT_BOT_DEFAULTS) as DefaultBotConfig;
           
           // Enhanced condition checking based on bot name
@@ -2211,9 +2221,9 @@ function App() {
             if (Math.abs(momentum) > 0.3 && volatility > 0.5 && volatility < 2.0) {
               shouldTrade = true;
               tradeDirection = momentum > 0 ? 'CALL' : 'PUT';
-              setBotStatus(s => ({ ...s, [bot.name]: `✅ Momentum ${momentum > 0 ? 'UP' : 'DOWN'} (${(Math.abs(momentum) * 100).toFixed(0)}%) Vol: ${(volatility * 100).toFixed(1)}%` }));
+              setBotStatus(s => ({ ...s, [bot.name]: `âœ… Momentum ${momentum > 0 ? 'UP' : 'DOWN'} (${(Math.abs(momentum) * 100).toFixed(0)}%) Vol: ${(volatility * 100).toFixed(1)}%` }));
             } else {
-              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Momentum ${(momentum * 100).toFixed(0)}% Vol: ${(volatility * 100).toFixed(1)}% — waiting` }));
+              setBotStatus(s => ({ ...s, [bot.name]: `ðŸ” Momentum ${(momentum * 100).toFixed(0)}% Vol: ${(volatility * 100).toFixed(1)}% "” waiting` }));
               return;
             }
           } else if (bot.name === 'Reverse Signal') {
@@ -2228,7 +2238,7 @@ function App() {
             // Trade against the recent trend
             shouldTrade = true;
             tradeDirection = recentTrend === 'UP' ? 'PUT' : 'CALL';
-            setBotStatus(s => ({ ...s, [bot.name]: `✅ Reversing ${recentTrend} trend` }));
+            setBotStatus(s => ({ ...s, [bot.name]: `âœ… Reversing ${recentTrend} trend` }));
           } else if (bot.name === 'Momentum Pulse') {
             // Momentum Pulse: strong directional move
             let gains = 0; let losses = 0;
@@ -2242,9 +2252,9 @@ function App() {
             if (Math.abs(momentum) > 0.4) {
               shouldTrade = true;
               tradeDirection = momentum > 0 ? 'CALL' : 'PUT';
-              setBotStatus(s => ({ ...s, [bot.name]: `✅ Strong ${momentum > 0 ? 'UP' : 'DOWN'} momentum (${(Math.abs(momentum) * 100).toFixed(0)}%)` }));
+              setBotStatus(s => ({ ...s, [bot.name]: `âœ… Strong ${momentum > 0 ? 'UP' : 'DOWN'} momentum (${(Math.abs(momentum) * 100).toFixed(0)}%)` }));
             } else {
-              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Weak momentum ${(Math.abs(momentum) * 100).toFixed(0)}% — waiting` }));
+              setBotStatus(s => ({ ...s, [bot.name]: `ðŸ” Weak momentum ${(Math.abs(momentum) * 100).toFixed(0)}% "” waiting` }));
               return;
             }
           } else if (bot.name === 'Range Scout') {
@@ -2262,9 +2272,9 @@ function App() {
             if (nearHigh || nearLow) {
               shouldTrade = true;
               tradeDirection = nearHigh ? 'PUT' : 'CALL';
-              setBotStatus(s => ({ ...s, [bot.name]: `✅ ${nearHigh ? 'Resistance' : 'Support'} level reached` }));
+              setBotStatus(s => ({ ...s, [bot.name]: `âœ… ${nearHigh ? 'Resistance' : 'Support'} level reached` }));
             } else {
-              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Mid-range — waiting for edges` }));
+              setBotStatus(s => ({ ...s, [bot.name]: `ðŸ” Mid-range "” waiting for edges` }));
               return;
             }
           } else {
@@ -2277,13 +2287,13 @@ function App() {
             const trendStrength = Math.abs(gains - losses) / 10;
             
             if (trendStrength < 0.2) {
-              setBotStatus(s => ({ ...s, [bot.name]: `🔍 Weak trend ${((trendStrength || 0) * 100).toFixed(0)}% — waiting` }));
+              setBotStatus(s => ({ ...s, [bot.name]: `ðŸ” Weak trend ${((trendStrength || 0) * 100).toFixed(0)}% "” waiting` }));
               return;
             }
             
             shouldTrade = true;
             tradeDirection = gains > losses ? 'CALL' : 'PUT';
-            setBotStatus(s => ({ ...s, [bot.name]: `✅ Trend ${tradeDirection === 'CALL' ? 'UP' : 'DOWN'} (${((trendStrength || 0) * 100).toFixed(0)}%)` }));
+            setBotStatus(s => ({ ...s, [bot.name]: `âœ… Trend ${tradeDirection === 'CALL' ? 'UP' : 'DOWN'} (${((trendStrength || 0) * 100).toFixed(0)}%)` }));
           }
           
           if (!shouldTrade) return;
@@ -2293,14 +2303,14 @@ function App() {
           stake      = Math.max(1, cfg.stake);
 
           // Add execution status for default bots
-          setBotStatus(s => ({ ...s, [bot.name]: `🔄 ${direction} on ${instrument} (${money(stake)})` }));
+          setBotStatus(s => ({ ...s, [bot.name]: `ðŸ”„ ${direction} on ${instrument} (${money(stake)})` }));
         }
 
         // Execute trade and handle errors properly
         runTradeRef.current({ instrument, direction, stake, source: 'bot', botName: bot.name, duration: botDuration })
           .catch((err) => {
             console.error(`Bot ${bot.name} trade failed:`, err);
-            setBotStatus(s => ({ ...s, [bot.name]: `❌ Error: ${err instanceof Error ? err.message : 'Unknown error'}` }));
+            setBotStatus(s => ({ ...s, [bot.name]: `âŒ Error: ${err instanceof Error ? err.message : 'Unknown error'}` }));
           });
       });
     }, 3000); // Reduced from 5000ms to 3000ms for faster response
@@ -2323,8 +2333,8 @@ function App() {
   const activeBalance = derivConnected && deriv?.account ? deriv?.account.balance : (workspace?.balance ?? 0);
   const sessionStartBalance = sessionStartingBalance ?? activeBalance;
 
-  // ── Single source of truth for context & session loss ─────────────────────
-  // statsContext is ALWAYS keyed to the Deriv loginid — this ensures trade
+  // â”€â”€ Single source of truth for context & session loss â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // statsContext is ALWAYS keyed to the Deriv loginid "” this ensures trade
   // history, bot stats, and session loss are consistent across disconnect/reconnect.
   // Falls back to workspace.deriv_loginid during reconnect so the UI never flickers.
   const activeDerivLoginid = deriv?.account?.loginid ?? workspace?.deriv_loginid ?? null;
@@ -2426,7 +2436,7 @@ function App() {
   );
 
   const content = loading ? (
-    <div className="loading"><RefreshCw className="spin" size={18} /> Loading workspace…</div>
+    <div className="loading"><RefreshCw className="spin" size={18} /> Loading workspace"¦</div>
   ) : (
     <PageView
       page={page}
@@ -2488,7 +2498,7 @@ function App() {
           alt="APEX Trading Lab"
           className="auth-loading-logo"
         />
-        <p>Initializing APEX Trading Lab…</p>
+        <p>Initializing APEX Trading Lab"¦</p>
       </div>
     );
   }
@@ -2684,16 +2694,21 @@ function App() {
             </div>
             <div className="balance topbar-balance">
               {derivConnected ? (
+                <div className="topbar-account-pill">
+                  <span className={`topbar-account-type-badge ${isDerivReal ? (liveArmed ? 'live' : 'real') : 'demo'}`}>
+                    {isDerivReal ? (liveArmed ? '⚡ LIVE' : 'Real') : 'Demo'}
+                  </span>
+                  <strong>{money(deriv?.account?.balance ?? 0)}</strong>
+                  <span className="balance-label hide-mobile">{deriv?.account?.currency ?? 'USD'}</span>
+                </div>
+              ) : (
                 <button
                   className="connect-deriv-topbar-btn"
                   onClick={() => setPage('settings')}
                 >
-                  <span className="balance-label hide-mobile">
-                    {isDerivReal ? (liveArmed ? 'Deriv live' : 'Deriv real') : 'Deriv demo'}
-                  </span>
-                  <strong>{money(deriv?.account?.balance ?? 0)}</strong>
+                  Connect Deriv
                 </button>
-              ) : null}
+              )}
             </div>
           </div>
         </header>
@@ -2756,7 +2771,7 @@ function App() {
           onClearAll={notificationSystem?.clearAll}
         />
       )}
-      {/* Consent banner — shown once until user clicks "I Agree" */}
+      {/* Consent banner "” shown once until user clicks "I Agree" */}
       {!consentGiven && (
         <div style={{
           position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 150,
@@ -2889,7 +2904,7 @@ function PageView({
   onBotBuilderStateChange: (state: { isRunning: boolean; tradeCount: number; consecLosses: number; sessionStart: string | null; config: BotConfig | null }) => void;
 }) {
   if (!workspace) return <EmptyState title="Workspace unavailable" text="The demo workspace could not be loaded." />;
-  if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv?.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} />;
+  if (page === 'dashboard') return <Dashboard workspace={workspace} bots={bots} trades={trades} tick={tick} toggleBot={toggleBot} setPage={setPage} derivConnected={derivConnected} isDerivReal={isDerivReal} derivAccount={deriv?.account} sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} sessionStartedAt={sessionStartedAt} stopAllBots={stopAllBots} />;
   if (page === 'bots') return <Bots bots={bots} toggleBot={toggleBot} runTrade={runTrade} trades={trades} botsLoadError={botsLoadError} botConfig={botConfig} onSaveBotConfig={onSaveBotConfig} setPage={setPage} botBuilderState={botBuilderState} onBotBuilderStateChange={onBotBuilderStateChange} />;
   if (page === 'manual') {
     return (
@@ -2920,8 +2935,6 @@ function PageView({
     onBotBuilderStateChange={onBotBuilderStateChange}
   />;
   if (page === 'ai-builder') return <AIBotBuilder onPageChange={setPage} />;
-  if (page === 'scanner') return <MarketScanner />;
-  if (page === 'analysis') return <AnalysisLab />;
   if (page === 'bulk') return <BulkTrader runTrade={runTrade} trades={trades} />;
   if (page === 'quick') return <Quick tick={tick} runTrade={runTrade} />;
   if (page === 'apex') return <Apex bots={bots} toggleBot={toggleBot} trades={trades} />;
@@ -3145,7 +3158,7 @@ function LossGuardRail({
       <div className="guard-footer">
         <span>
           <i className={`live-dot ${lossLimitReached ? 'danger-dot' : ''}`} />
-          {lossLimitReached ? 'Limit reached — trades blocked' : `${money(remaining)} remaining`}
+          {lossLimitReached ? 'Limit reached "” trades blocked' : `${money(remaining)} remaining`}
         </span>
         {onAdjust && (
           <button type="button" className="text-button" onClick={onAdjust}>
@@ -3162,8 +3175,8 @@ function LossGuardRail({
   );
 }
 
-function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivConnected, isDerivReal, derivAccount, sessionLossUsed, lossLimit, guardPercent, lossLimitReached, sessionStartedAt }: { workspace: Workspace; bots: BotRow[]; trades: Trade[]; tick: number; toggleBot: (bot: BotRow) => Promise<void>; setPage: (page: Page) => void; derivConnected: boolean; isDerivReal: boolean; derivAccount: { loginid: string; balance: number; is_virtual: boolean } | null; sessionLossUsed: number; lossLimit: number; guardPercent: number; lossLimitReached: boolean; sessionStartedAt: string | null }) {
-  // Only count trades since this session's baseline was set — consistent with the guardrail
+function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivConnected, isDerivReal, derivAccount, sessionLossUsed, lossLimit, guardPercent, lossLimitReached, sessionStartedAt, stopAllBots }: { workspace: Workspace; bots: BotRow[]; trades: Trade[]; tick: number; toggleBot: (bot: BotRow) => Promise<void>; setPage: (page: Page) => void; derivConnected: boolean; isDerivReal: boolean; derivAccount: { loginid: string; balance: number; is_virtual: boolean } | null; sessionLossUsed: number; lossLimit: number; guardPercent: number; lossLimitReached: boolean; sessionStartedAt: string | null; stopAllBots: () => void }) {
+  // Only count trades since this session's baseline was set "” consistent with the guardrail
   const sessionStartMs = sessionStartedAt ? new Date(sessionStartedAt).getTime() - 1000 : 0;
   const sessionTrades = trades.filter(
     (t) => (t.result === 'won' || t.result === 'lost') && new Date(t.created_at).getTime() >= sessionStartMs
@@ -3173,15 +3186,28 @@ function Dashboard({ workspace, bots, trades, tick, toggleBot, setPage, derivCon
   const balanceLabel = derivConnected && derivAccount ? (isDerivReal ? 'Deriv live account' : 'Deriv demo account') : null;
   const headerDesc = derivConnected
     ? (isDerivReal ? "You're connected to a real Deriv account. Trades will execute with real funds." : "You're connected to a Deriv demo account. Trades execute on Deriv with virtual funds.")
-    : "Connect your Deriv account to start trading. Go to Settings to connect.";
-  return <><PageHeader eyebrow="Overview / Today" title="Good morning, trader." description={headerDesc} action={derivConnected ? <button className="primary" onClick={() => setPage('manual')}><Plus size={16} /> New trade</button> : <button className="primary" onClick={() => setPage('settings')}><Wallet size={16} /> Connect Deriv</button>} /><div className="stats-grid"><Stat label="Available balance" value={balanceValue !== null ? money(balanceValue) : '—'} detail={balanceLabel ?? 'Connect Deriv'} tone={balanceValue !== null ? 'success' : undefined} icon={Wallet} /><Stat label="Session P/L" value={derivConnected ? money(pnl) : '—'} detail={derivConnected ? `${trades.filter((trade) => trade.profit > 0).length} winning trades` : 'No active session'} tone={pnl >= 0 ? 'success' : 'danger'} icon={pnl >= 0 ? TrendingUp : TrendingDown} /><Stat label="Active bots" value={String(active.length)} detail={`${bots.length} in library`} icon={Bot} /><Stat label="Market status" value="Open" detail={derivConnected ? "Deriv feeds online" : "Connect Deriv to trade"} tone={derivConnected ? 'success' : undefined} icon={Activity} /></div><div className="grid-2"><section className="panel"><div className="panel-title"><div><span className="eyebrow">Live automation</span><h2>Active bots</h2></div><button className="text-button" onClick={() => setPage('bots')}>View library <ChevronRight size={15} /></button></div>{active.length ? active.map((bot) => {
+    : "Connect your Deriv account to start trading.";
+  return <><PageHeader eyebrow="Overview / Today" title={(() => { const h = new Date().getHours(); return h < 12 ? "Good morning, trader." : h < 17 ? "Good afternoon, trader." : "Good evening, trader."; })()} description={headerDesc} action={derivConnected ? <button className="primary" onClick={() => setPage('manual')}><Plus size={16} /> New trade</button> : <button className="primary" onClick={() => setPage('settings')}><Wallet size={16} /> Connect Deriv</button>} />
+{active.length > 0 && (
+  <div className="dashboard-emergency-banner">
+    <div className="dashboard-emergency-left">
+      <span className="live-dot" />
+      <strong>{active.length} bot{active.length > 1 ? "s" : ""} running</strong>
+      <span className="hide-mobile">{active.map(b => b.name).join(", ")}</span>
+    </div>
+    <button type="button" className="dashboard-stop-all-btn" onClick={stopAllBots}>
+      ⏹ Stop all bots
+    </button>
+  </div>
+)}
+<div className="stats-grid"><Stat label="Available balance" value={balanceValue !== null ? money(balanceValue) : '"”'} detail={balanceLabel ?? 'Connect Deriv to see balance'} tone={balanceValue !== null ? 'success' : undefined} icon={Wallet} /><Stat label="Session P/L" value={derivConnected ? money(pnl) : '"”'} detail={derivConnected ? `${trades.filter((trade) => trade.profit > 0).length} winning trades` : 'No active session'} tone={pnl >= 0 ? 'success' : 'danger'} icon={pnl >= 0 ? TrendingUp : TrendingDown} /><Stat label="Active bots" value={String(active.length)} detail={`${bots.length} in library`} icon={Bot} /><Stat label="Account type" value={derivConnected ? (isDerivReal ? "Real" : "Demo") : "—"} detail={derivConnected ? (isDerivReal ? "Live account" : "Demo account") : "Not connected"} tone={derivConnected ? 'success' : undefined} icon={Activity} /></div><div className="grid-2"><section className="panel"><div className="panel-title"><div><span className="eyebrow">Live automation</span><h2>Active bots</h2></div><button className="text-button" onClick={() => setPage('bots')}>View library <ChevronRight size={15} /></button></div>{active.length ? active.map((bot) => {
     const botTrades = trades.filter((trade) => trade.bot_name === bot.name);
     const closed = botTrades.filter((t) => t.result === 'won' || t.result === 'lost');
     const hasTrades = closed.length > 0;
     const wins = closed.filter((t) => t.result === 'won').length;
     const winRate = hasTrades ? Math.round((wins / closed.length) * 100) : 0;
     const botPnl = closed.reduce((sum, t) => sum + Number(t.profit), 0);
-    return <div className="bot-row" key={bot.id}><div className="bot-avatar"><Bot size={18} /></div><div className="bot-copy"><strong>{bot.name}</strong><span><i className="live-dot" /> {bot.active ? 'Running — trading every 5s' : 'Paused'}</span></div><div className="bot-metric"><span>{hasTrades ? `${winRate}% win · ${closed.length} trades` : '0 trades · Not run yet'}</span><b className={botPnl > 0 ? 'positive' : botPnl < 0 ? 'negative' : 'muted'}>{money(botPnl)}</b></div><button className="icon-button" onClick={() => void toggleBot(bot)}><Pause size={16} /></button></div>;
+    return <div className="bot-row" key={bot.id}><div className="bot-avatar"><Bot size={18} /></div><div className="bot-copy"><strong>{bot.name}</strong><span><i className="live-dot" /> {bot.active ? 'Running "” trading every 5s' : 'Paused'}</span></div><div className="bot-metric"><span>{hasTrades ? `${winRate}% win · ${closed.length} trades` : '0 trades · Not run yet'}</span><b className={botPnl > 0 ? 'positive' : botPnl < 0 ? 'negative' : 'muted'}>{money(botPnl)}</b></div><button className="icon-button" onClick={() => void toggleBot(bot)}><Pause size={16} /></button></div>;
   }) : <EmptyState title="No active bots" text="Activate a free bot and it will watch synthetic markets for you." action={<button className="secondary" onClick={() => setPage('bots')}>Browse free bots</button>} />}</section><section className="panel guard-panel"><div className="panel-title"><div><span className="eyebrow">Risk controls</span><h2>Loss-limit guardrail</h2></div><ShieldCheck className={lossLimitReached ? 'danger-icon' : 'success-icon'} size={22} /></div><LossGuardRail sessionLossUsed={sessionLossUsed} lossLimit={lossLimit} guardPercent={guardPercent} lossLimitReached={lossLimitReached} onAdjust={() => setPage('settings')} /></section></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Equity curve</h2></div><button className="text-button" onClick={() => setPage('record')}>Full track record <ChevronRight size={15} /></button></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><div><span className="eyebrow">Latest activity</span><h2>Trade history</h2></div></div><TradeTable trades={trades.slice(0, 5)} /></section></>;
 }
 
@@ -3199,7 +3225,7 @@ function BotStats({ bot, userTrades }: { bot: BotRow; userTrades: Trade[] }) {
           <div className="bot-stat"><span>Your trades</span><b>0</b></div>
           <div className="bot-stat"><span>Wins</span><b>0</b></div>
           <div className="bot-stat"><span>Losses</span><b>0</b></div>
-          <div className="bot-stat"><span>Win rate</span><b className="muted">—</b></div>
+          <div className="bot-stat"><span>Win rate</span><b className="muted">"”</b></div>
           <div className="bot-stat"><span>Net P/L</span><b>$0.00</b></div>
           <div className="bot-stat"><span>Expected risk</span><b>{bot.risk}</b></div>
         </div>
@@ -3529,7 +3555,7 @@ function EquityChart({
                 fontWeight="700"
                 textAnchor="middle"
               >
-                ▲ ATH {fmt(peakPt.cumulative)}
+                â–² ATH {fmt(peakPt.cumulative)}
               </text>
             </g>
           )}
@@ -3554,7 +3580,7 @@ function EquityChart({
                 fontWeight="700"
                 textAnchor="middle"
               >
-                ▼ LOW {fmt(minPt.cumulative)}
+                â–¼ LOW {fmt(minPt.cumulative)}
               </text>
             </g>
           )}
@@ -3652,7 +3678,7 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
   onBotBuilderStateChange?: (state: any) => void;
 }) {
   const [showPerformanceDashboard, setShowPerformanceDashboard] = useState(false);
-  // Local stake overrides per bot — seeded from botConfig (safe against empty/undefined)
+  // Local stake overrides per bot "” seeded from botConfig (safe against empty/undefined)
   const [stakeMap, setStakeMap] = useState<Record<string, number>>(() => {
     const m: Record<string, number> = {};
     bots.forEach(b => {
@@ -3848,307 +3874,6 @@ function Bots({ bots, toggleBot, runTrade, trades, botsLoadError, botConfig, onS
   );
 }
 
-function MarketScanner() {
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'>('ALL');
-  const [quickFilter, setQuickFilter] = useState<'ALL' | 'GAINERS' | 'VOLUME' | 'MOMENTUM' | 'OVERSOLD' | 'OVERBOUGHT'>('ALL');
-  const [marketFilter, setMarketFilter] = useState<'ALL' | 'VOLATILITY' | 'FOREX'>('ALL');
-  const [timeframeFilter, setTimeframeFilter] = useState<'ALL' | '1m' | '5m' | '15m'>('ALL');
-  const [lastRefresh, setLastRefresh] = useState(() => new Date());
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [runMessage, setRunMessage] = useState('');
-  const [marketLive, setMarketLive] = useState<{ quote: number; updatedAt: string } | null>(null);
-  const [scanPulse, setScanPulse] = useState(0);
-  const [scannerConnected, setScannerConnected] = useState(false);
-  const [scannerRunning, setScannerRunning] = useState(false);
-  const scannerTicksRef = useRef<DerivTick[]>([]);
-  const [rows, setRows] = useState<Array<{ symbol: string; market_family: string; contract_type: string; duration: number; status: 'QUALIFIED' | 'WATCH' | 'NO SIGNAL'; score: number; estimated_probability: number; break_even_probability: number; edge: number; sample_size: number; price: number; change24h: number; volume: number; rsi: number }>>([]);
-  const updateRowsFromTicks = (ticks: DerivTick[]) => {
-    if (ticks.length < 2) return;
-    const quotes = ticks.map((tick) => Number(tick.quote));
-    const latest = quotes[quotes.length - 1];
-    const previous = quotes[quotes.length - 2];
-    const direction = latest >= previous ? 'CALL' : 'PUT';
-    const movement = previous ? Math.abs(latest - previous) / previous : 0;
-    const ema = (period: number) => {
-      if (quotes.length < period) return null;
-      const multiplier = 2 / (period + 1);
-      let value = quotes.slice(0, period).reduce((sum, quote) => sum + quote, 0) / period;
-      quotes.slice(period).forEach((quote) => { value = (quote - value) * multiplier + value; });
-      return value;
-    };
-    const fast = ema(9); const slow = ema(20);
-    const returns = quotes.slice(1).map((quote, index) => (quote - quotes[index]) / Math.max(quotes[index], Number.EPSILON));
-    const candleBuckets = new Map<number, { open: number; high: number; low: number; close: number }>();
-    ticks.forEach((tick) => {
-      const bucket = Math.floor(Number(tick.epoch) / 60) * 60;
-      const existing = candleBuckets.get(bucket);
-      candleBuckets.set(bucket, existing ? { ...existing, high: Math.max(existing.high, tick.quote), low: Math.min(existing.low, tick.quote), close: tick.quote } : { open: tick.quote, high: tick.quote, low: tick.quote, close: tick.quote });
-    });
-    const candles = Array.from(candleBuckets.values());
-    const trueRanges = candles.slice(1).map((candle, index) => Math.max(candle.high - candle.low, Math.abs(candle.high - candles[index].close), Math.abs(candle.low - candles[index].close)));
-    const atr = trueRanges.length ? trueRanges.reduce((sum, value) => sum + value, 0) / trueRanges.length : 0;
-    const gains = returns.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
-    const losses = Math.abs(returns.filter((value) => value < 0).reduce((sum, value) => sum + value, 0));
-    const rsi = losses === 0 ? 100 : 100 - (100 / (1 + (gains / Math.max(returns.length, 1)) / Math.max(losses / Math.max(returns.length, 1), Number.EPSILON)));
-    const meanReturn = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : 0;
-    const variance = returns.length ? returns.reduce((sum, value) => sum + ((value - meanReturn) ** 2), 0) / returns.length : 0;
-    const volatility = Math.sqrt(variance);
-    const adxProxy = volatility > 0 ? Math.min(50, Math.abs(meanReturn) / volatility * 25) : 0;
-    const rsiBonus = rsi > 55 && direction === 'CALL' ? 0.015 : rsi < 45 && direction === 'PUT' ? 0.015 : 0;
-    const trendQuality = adxProxy >= 18 ? 0.01 : -0.005;
-    const recentRange = quotes.length >= 20 ? Math.max(...quotes.slice(-20)) - Math.min(...quotes.slice(-20)) : 0;
-    const recentHigh = quotes.length >= 20 ? Math.max(...quotes.slice(-20)) : latest;
-    const recentLow = quotes.length >= 20 ? Math.min(...quotes.slice(-20)) : latest;
-    const pullbackQuality = recentRange > 0 ? Math.min(1, Math.abs(latest - (direction === 'CALL' ? recentLow : recentHigh)) / recentRange) : 0;
-    const pullbackBonus = pullbackQuality > 0.35 && pullbackQuality < 0.8 ? 0.01 : 0;
-    const structure = latest > Math.max(...quotes.slice(-10)) ? 'BREAKOUT_UP' : latest < Math.min(...quotes.slice(-10)) ? 'BREAKOUT_DOWN' : 'RANGE';
-    setRows([5, 10, 15].map((duration, index) => {
-      const structureBonus = structure === 'RANGE' ? 0 : ((structure === 'BREAKOUT_UP' && direction === 'CALL') || (structure === 'BREAKOUT_DOWN' && direction === 'PUT') ? 0.02 : -0.02);
-      const atrPenalty = latest ? Math.min(0.025, (atr / latest) * 4) : 0;
-            const trendBonus = fast !== null && slow !== null && fast !== slow ? 0.025 : 0;
-                  const probability = Math.min(0.7, Math.max(0.3, 0.5 + trendBonus + rsiBonus + trendQuality + pullbackBonus + structureBonus + Math.min(0.04, movement * 6) - Math.min(0.03, volatility * 20) - atrPenalty - index * 0.01));
-      const breakEven = 0.55; const edge = probability - breakEven;
-      return { symbol: 'Volatility 75 Index', market_family: 'Volatility', contract_type: direction, duration, status: ticks.length < 20 ? 'NO SIGNAL' : edge >= 0.05 ? 'QUALIFIED' : edge > 0 ? 'WATCH' : 'NO SIGNAL', score: Math.min(100, Math.round((ticks.length / 12) + (fast !== null && slow !== null ? 20 : 0) + Math.min(20, adxProxy) + (structure === 'RANGE' ? 0 : 10))), estimated_probability: probability, break_even_probability: breakEven, edge, sample_size: ticks.length, price: latest, change24h: (latest - quotes[0]) / quotes[0] * 100, volume: scanPulse, rsi };
-    }));
-    setLastRefresh(new Date());
-  };
-
-  const loadSnapshot = async () => {
-    setLoading(true); setError('');
-    try {
-      const response = await fetch('/api/scanner-snapshot', { cache: 'no-store' });
-      const responseText = await response.text();
-      let data: { error?: string; rows?: typeof rows; generated_at?: string; version?: string; warning?: string };
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        // If API fails, use mock data for demo
-        setRunMessage('Scanner API unavailable. Using demo mode - connect Deriv for live data.');
-        setError('Scanner API unavailable. Connect Deriv for live market data.');
-        setRows([5, 10, 15].map((duration) => ({
-          symbol: 'Volatility 75 Index',
-          market_family: 'Volatility',
-          contract_type: 'CALL',
-          duration,
-          status: 'NO SIGNAL',
-          score: 0,
-          estimated_probability: 0.5,
-          break_even_probability: 0.55,
-          edge: -0.05,
-          sample_size: 0,
-          price: 1000,
-          change24h: 0,
-          volume: 0,
-          rsi: 50,
-        })));
-        setLastRefresh(new Date());
-        return;
-      }
-      if (!response.ok) throw new Error(data.error || `Scanner request failed (${response.status})`);
-      if (!Array.isArray(data.rows) || !data.generated_at) throw new Error('Scanner endpoint returned an incomplete snapshot.');
-      if (scannerTicksRef.current.length < 2) setRows(data.rows);
-      setLastRefresh(new Date(data.generated_at));
-      if (data.version && data.version !== 'v1-research-fixture') setError(data.warning ? `${data.version}: ${data.warning}` : `Data source: ${data.version}`);
-    } catch (loadError) { 
-      setError(loadError instanceof Error ? loadError.message : 'Unable to load scanner snapshot.');
-      setRunMessage('Scanner unavailable. Connect Deriv for live market data.');
-    }
-    finally { setLoading(false); }
-  };
-  const runScanner = () => {
-    if (!scannerConnected) {
-      setRunMessage('Connect Deriv first, then start the scanner.');
-      return;
-    }
-    setScannerRunning((running) => !running);
-    setRunMessage(scannerRunning ? 'Scanner stopped. Live ticks are no longer being processed.' : 'Scanner started. Processing live Deriv ticks.');
-    if (!scannerRunning) updateRowsFromTicks(scannerTicksRef.current);
-  };
-  useEffect(() => {
-    void loadSnapshot();
-    const subscribe = () => subscribeTicks('R_75' as DerivSymbol, (tick) => {
-      scannerTicksRef.current = [...scannerTicksRef.current.slice(-119), tick];
-      setScannerConnected(true);
-      if (!scannerRunning) return;
-      setMarketLive({ quote: tick.quote, updatedAt: new Date().toISOString() });
-      setScanPulse((value) => value + 1);
-      updateRowsFromTicks(scannerTicksRef.current);
-    });
-    const unsubscribe = subscribe();
-    return unsubscribe;
-  }, [scannerRunning]);
-  const visible = rows.filter((row) => {
-    const statusMatch = statusFilter === 'ALL' || row.status === statusFilter;
-    const quickMatch = quickFilter === 'ALL' || 
-      (quickFilter === 'GAINERS' && row.change24h > 0) ||
-      (quickFilter === 'VOLUME' && row.volume > 100) ||
-      (quickFilter === 'MOMENTUM' && row.score > 50) ||
-      (quickFilter === 'OVERSOLD' && row.rsi < 30) ||
-      (quickFilter === 'OVERBOUGHT' && row.rsi > 70);
-    return statusMatch && quickMatch;
-  });
-
-  const marketSentiment = rows.length > 0 ? {
-    bullish: rows.filter(r => r.contract_type === 'CALL').length / rows.length * 100,
-    bearish: rows.filter(r => r.contract_type === 'PUT').length / rows.length * 100,
-    neutral: rows.filter(r => r.status === 'NO SIGNAL').length / rows.length * 100
-  } : { bullish: 0, bearish: 0, neutral: 100 };
-
-  const topGainers = [...rows].sort((a, b) => b.change24h - a.change24h).slice(0, 5);
-  const mostActive = [...rows].sort((a, b) => b.volume - a.volume).slice(0, 5);
-
-  return <><PageHeader eyebrow="Research-first scanner" title="APEX Market Scanner" description="V1 scope: Volatility 75 Rise/Fall only. This dashboard ranks compact research snapshots; it does not use an LLM or execute trades." action={<div style={{ display: 'flex', gap: 8 }}><button className="secondary" disabled={loading || !scannerConnected} onClick={runScanner}><Activity size={16} /> {!scannerConnected ? 'Waiting for Deriv' : scannerRunning ? 'Stop scanner' : 'Start scanner'}</button><button className="primary" disabled={loading} onClick={() => void loadSnapshot()}>{loading ? <><RefreshCw className="spin" size={16} /> Loading…</> : <><RefreshCw size={16} /> Refresh</>}</button></div>} />{(error || runMessage) && <div className="scanner-error">{runMessage || error}</div>}
-  
-  {/* Feature Cards */}
-  <div className="scanner-features">
-    <div className="feature-card">
-      <Activity size={20} />
-      <h3>Real-time Scans</h3>
-      <p>Live market analysis powered by Deriv tick data</p>
-    </div>
-    <div className="feature-card">
-      <Settings2 size={20} />
-      <h3>Advanced Filters</h3>
-      <p>Customize scan parameters for your strategy</p>
-    </div>
-    <div className="feature-card">
-      <Target size={20} />
-      <h3>AI Insights</h3>
-      <p>Machine learning powered signal detection</p>
-    </div>
-    <div className="feature-card">
-      <Bell size={20} />
-      <h3>Smart Alerts</h3>
-      <p>Get notified when opportunities arise</p>
-    </div>
-  </div>
-
-  {/* Scanner Filters */}
-  <section className="panel scanner-filters">
-    <div className="filter-row">
-      <label>Market
-        <select value={marketFilter} onChange={(e) => setMarketFilter(e.target.value as any)}>
-          <option value="ALL">All Markets</option>
-          <option value="VOLATILITY">Volatility Indices</option>
-          <option value="FOREX">Forex</option>
-        </select>
-      </label>
-      <label>Timeframe
-        <select value={timeframeFilter} onChange={(e) => setTimeframeFilter(e.target.value as any)}>
-          <option value="ALL">All Timeframes</option>
-          <option value="1m">1 Minute</option>
-          <option value="5m">5 Minutes</option>
-          <option value="15m">15 Minutes</option>
-        </select>
-      </label>
-      <label>Strategy
-        <select>
-          <option>Momentum</option>
-          <option>Mean Reversion</option>
-          <option>Breakout</option>
-        </select>
-      </label>
-    </div>
-    <div className="filter-actions">
-      <button className="secondary">Save Preset</button>
-      <button className="secondary">Custom Scan</button>
-      <button className="primary" onClick={runScanner}>Scan Markets</button>
-    </div>
-  </section>
-
-  {/* Quick Filter Tabs */}
-  <div className="scanner-quick-filters">
-    <button className={quickFilter === 'ALL' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('ALL')}>All</button>
-    <button className={quickFilter === 'GAINERS' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('GAINERS')}>Top Gainers</button>
-    <button className={quickFilter === 'VOLUME' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('VOLUME')}>High Volume</button>
-    <button className={quickFilter === 'MOMENTUM' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('MOMENTUM')}>Strong Momentum</button>
-    <button className={quickFilter === 'OVERSOLD' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('OVERSOLD')}>Oversold</button>
-    <button className={quickFilter === 'OVERBOUGHT' ? 'secondary active-filter' : 'secondary'} onClick={() => setQuickFilter('OVERBOUGHT')}>Overbought</button>
-  </div>
-
-  <div className="scanner-layout">
-    {/* Main Scanner Area */}
-    <div className="scanner-main">
-      <div className={`scanner-command-center ${scannerConnected ? 'scanner-active' : 'scanner-idle'}`}>
-        <div className="scanner-radar"><span className="radar-ring ring-one" /><span className="radar-ring ring-two" /><span className="radar-sweep" /><span className="radar-core"><Activity size={18} /></span></div>
-        <div className="scanner-command-copy"><span className="eyebrow">LIVE RESEARCH ENGINE</span><h2>{scannerConnected ? 'Scanning Volatility 75' : 'Scanner on standby'}</h2><p>{scannerConnected ? 'Incoming Deriv ticks are being evaluated against the active V1 model.' : 'Connect a Deriv account to begin live analysis.'}</p></div>
-        <div className="scanner-readout"><span>Ticks processed</span><strong>{scanPulse?.toLocaleString() ?? '0'}</strong><small>{marketLive ? `Last quote ${marketLive.quote}` : 'Standby'}</small></div>
-      </div>
-      
-      <div className="scanner-toolbar"><span className="eyebrow">Opportunity state</span>{(['ALL', 'QUALIFIED', 'WATCH', 'NO SIGNAL'] as const).map((status) => <button key={status} className={statusFilter === status ? 'secondary active-filter' : 'secondary'} onClick={() => setStatusFilter(status)}>{status}</button>)}</div>
-      
-      <section className="panel scanner-table-wrap">
-        <div className="panel-title"><div><span className="eyebrow">Current research configurations</span><h2>V75 directional evidence</h2></div><span className="muted">Updated {lastRefresh.toLocaleTimeString()}</span></div>
-        <div className="scanner-table">{visible.map((row) => <div className="scanner-row" key={`${row.duration}-${row.status}`}>
-          <div><b>{row.symbol}</b><span>{row.market_family} · {row.contract_type === 'CALL' ? 'Rise/Fall' : 'Rise/Fall'} · {row.duration} ticks</span></div>
-          <span className={`scanner-status ${row.status.toLowerCase().replace(' ', '-')}`}>{row.status}</span>
-          <div><span>Price</span><strong>{row.price?.toFixed(2) ?? '0.00'}</strong></div>
-          <div><span>24h Change</span><strong className={row.change24h >= 0 ? 'positive' : 'negative'}>{row.change24h >= 0 ? '+' : ''}{row.change24h?.toFixed(2) ?? '0.00'}%</strong></div>
-          <div><span>Volume</span><strong>{row.volume?.toLocaleString() ?? '0'}</strong></div>
-          <div><span>RSI</span><strong>{row.rsi?.toFixed(1) ?? '0.0'}</strong></div>
-          <div><span>Score</span><strong>{Number(row.score ?? 0)}/100</strong></div>
-          <div><span>Probability</span><strong>{(Number(row.estimated_probability ?? 0) * 100).toFixed(1)}%</strong></div>
-          <div><span>Edge</span><strong className={row.edge > 0 ? 'positive' : 'negative'}>{row.edge > 0 ? '+' : ''}{(row.edge * 100).toFixed(1)}%</strong></div>
-        </div>)}{!visible.length && <EmptyState title="No matching opportunities" text="The scanner is behaving conservatively. No configuration currently meets this filter." />}</div>
-      </section>
-    </div>
-
-    {/* Right Sidebar */}
-    <div className="scanner-sidebar">
-      {/* Market Sentiment */}
-      <section className="panel">
-        <span className="eyebrow">Market Sentiment</span>
-        <h2>Overall Trend</h2>
-        <div className="sentiment-display">
-          <div className="sentiment-bar">
-            <div className="sentiment-segment bullish" style={{ width: `${marketSentiment.bullish}%` }} />
-            <div className="sentiment-segment bearish" style={{ width: `${marketSentiment.bearish}%` }} />
-            <div className="sentiment-segment neutral" style={{ width: `${marketSentiment.neutral}%` }} />
-          </div>
-          <div className="sentiment-legend">
-            <span><div className="legend-dot bullish" /> Bullish {marketSentiment.bullish.toFixed(0)}%</span>
-            <span><div className="legend-dot bearish" /> Bearish {marketSentiment.bearish.toFixed(0)}%</span>
-            <span><div className="legend-dot neutral" /> Neutral {marketSentiment.neutral.toFixed(0)}%</span>
-          </div>
-        </div>
-      </section>
-
-      {/* Top Gainers */}
-      <section className="panel">
-        <span className="eyebrow">Top Opportunities</span>
-        <h2>Top Gainers (24h)</h2>
-        <div className="top-list">
-          {topGainers.map((row, i) => (
-            <div key={i} className="top-item">
-              <span>{row.symbol}</span>
-              <strong className="positive">+{row.change24h?.toFixed(2) ?? '0.00'}%</strong>
-            </div>
-          ))}
-          {topGainers.length === 0 && <small className="muted">No data available</small>}
-        </div>
-      </section>
-
-      {/* Most Active */}
-      <section className="panel">
-        <span className="eyebrow">Activity</span>
-        <h2>Most Active Pairs</h2>
-        <div className="top-list">
-          {mostActive.map((row, i) => (
-            <div key={i} className="top-item">
-              <span>{row.symbol}</span>
-              <strong>{row.volume?.toLocaleString() ?? '0'}</strong>
-            </div>
-          ))}
-          {mostActive.length === 0 && <small className="muted">No data available</small>}
-        </div>
-      </section>
-    </div>
-  </div>
-
-  <div className="scanner-cards"><section className="panel"><span className="eyebrow">Methodology</span><h2>How qualification works</h2><p className="muted">Technical quality, statistical quality, historical validation, contract economics and data quality are tracked separately. The score is a ranking score, not a probability.</p></section><section className="panel"><span className="eyebrow">V1 boundaries</span><h2>Free-tier safe by design</h2><p className="muted">Rolling state stays in the scanner process. Supabase is reserved for compact opportunities, signal history and aggregated statistics — never raw tick storage.</p></section></div></>;
-}
-
 function Bulk({ tick, runTrade }: { tick: number; runTrade: (details: { instrument: string; direction: string; stake: number; source: string; batchId?: string; duration?: number }) => Promise<void> }) {
   return null;
 }
@@ -4211,7 +3936,7 @@ function Apex({ bots, toggleBot, trades }: { bots: BotRow[]; toggleBot: (bot: Bo
   const hasUserTrades = closedApex.length > 0;
   const userWins = closedApex.filter((t) => t.result === 'won').length;
   const userWinRate = hasUserTrades ? Math.round((userWins / closedApex.length) * 100) : null;
-  const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '—';
+  const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '"”';
 
   return (
     <>
@@ -4259,7 +3984,7 @@ function PhantomScalper({ bots, toggleBot, trades, botStatus, onSaveConfig, init
   const hasUserTrades = closed.length > 0;
   const userWins = closed.filter((t) => t.result === 'won').length;
   const userWinRate = hasUserTrades ? Math.round((userWins / closed.length) * 100) : null;
-  const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '—';
+  const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '"”';
   const totalPnl = closed.reduce((sum, t) => sum + Number(t.profit), 0);
 
   const [cfg, setCfg] = useState<PhantomConfig>(initialConfig ?? PHANTOM_DEFAULTS);
@@ -4276,7 +4001,7 @@ function PhantomScalper({ bots, toggleBot, trades, botStatus, onSaveConfig, init
     setTimeout(() => setCfgSaved(false), 2500);
   };
 
-  const currentStatus = botStatus?.['Phantom Scalper'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
+  const currentStatus = botStatus?.['Phantom Scalper'] ?? (bot?.active ? 'ðŸ” Scanning"¦' : 'â¸ Paused');
 
   if (!bot) {
     return (
@@ -4293,7 +4018,7 @@ function PhantomScalper({ bots, toggleBot, trades, botStatus, onSaveConfig, init
               <h2 style={{ margin: '0 0 0.4rem' }}>Migration not applied yet</h2>
               <p className="muted" style={{ margin: '0 0 1.2rem', fontSize: '0.875rem', lineHeight: 1.6 }}>
                 The Phantom Scalper bot needs to be seeded into your Supabase database.
-                Go to your <strong>Supabase project → SQL Editor</strong> and run the following query:
+                Go to your <strong>Supabase project â†’ SQL Editor</strong> and run the following query:
               </p>
               <pre style={{
                 background: 'rgba(0,0,0,0.35)',
@@ -4328,7 +4053,7 @@ VALUES (
     { label: 'EMA Trend Filter', detail: 'Short vs long EMA crossover sets the directional bias on every bar.' },
     { label: 'RSI Momentum Gate', detail: 'Only trades when RSI confirms overbought or oversold extremes, avoiding choppy midrange entries.' },
     { label: 'Streak-Fade Logic', detail: 'After 2+ consecutive losses in the same direction, reverses bias to avoid chasing a losing streak.' },
-    { label: 'Volatility-Weighted Sizing', detail: 'Scales stake and instrument (V25→V100) based on recent win streak and session window.' },
+    { label: 'Volatility-Weighted Sizing', detail: 'Scales stake and instrument (V25â†’V100) based on recent win streak and session window.' },
   ];
 
   return (
@@ -4360,7 +4085,7 @@ VALUES (
       {/* Bot stats strip */}
       <div className="bot-stats wide"><BotStats bot={bot} userTrades={phantomTrades} /></div>
 
-      {/* ── Start / Pause control card ───────────────────────────────────── */}
+      {/* â”€â”€ Start / Pause control card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <section className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
         <div>
           <span className="eyebrow">Bot control</span>
@@ -4385,7 +4110,7 @@ VALUES (
       </section>
       {bot.active && <div className="watching" style={{ marginBottom: '0.5rem' }}><i className="live-dot" /> {currentStatus}</div>}
 
-      {/* ── Settings panel ──────────────────────────────────────────────── */}
+      {/* â”€â”€ Settings panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <section className="panel" style={{ marginBottom: '1rem' }}>
         <div className="panel-title" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSettingsOpen(o => !o)}>
           <div><span className="eyebrow">Configuration</span><h2 style={{ margin: '0.2rem 0 0' }}>Bot parameters</h2></div>
@@ -4408,7 +4133,7 @@ VALUES (
             </label>
             {/* RSI thresholds */}
             <label style={{ fontSize: '11px', color: '#80948e' }}>
-              RSI overbought (0–1)
+              RSI overbought (0"“1)
               <input type="number" min="0.5" max="0.95" step="0.01"
                 value={cfg.rsiOverbought}
                 onChange={e => updateCfg('rsiOverbought', Math.min(0.95, Math.max(0.5, Number(e.target.value))))}
@@ -4416,7 +4141,7 @@ VALUES (
               />
             </label>
             <label style={{ fontSize: '11px', color: '#80948e' }}>
-              RSI oversold (0–1)
+              RSI oversold (0"“1)
               <input type="number" min="0.05" max="0.5" step="0.01"
                 value={cfg.rsiOversold}
                 onChange={e => updateCfg('rsiOversold', Math.min(0.5, Math.max(0.05, Number(e.target.value))))}
@@ -4527,10 +4252,10 @@ VALUES (
         </div>
         {[
           ['Primary instrument', 'Volatility 75 Index (prime window), Volatility 50 (recovery mode), Volatility 100 (hot streak)'],
-          ['Stake range', '$8 – $15 · scales with recent performance'],
+          ['Stake range', '$8 "“ $15 · scales with recent performance'],
           ['After 2 consecutive losses', 'Drops to V50, cuts stake to $8, reverses directional bias'],
           ['After 3 consecutive wins', 'Steps up to V100, increases stake to $15'],
-          ['Prime session window', 'UTC 07–11 h, 13–17 h, 19–23 h · avoids low-liquidity chop'],
+          ['Prime session window', 'UTC 07"“11 h, 13"“17 h, 19"“23 h · avoids low-liquidity chop'],
           ['Cooldown', 'Waits for current trade to settle before placing next (no overlap)'],
         ].map(([rule, val]) => (
           <div key={rule} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0.65rem 0', borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))', gap: '1rem', fontSize: '0.84rem' }}>
@@ -4563,7 +4288,7 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
   const hasUserTrades = closed.length > 0;
   const userWins = closed.filter((t) => t.result === 'won').length;
   const userWinRate = hasUserTrades ? Math.round((userWins / closed.length) * 100) : null;
-  const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '—';
+  const displayWinRate = userWinRate !== null ? `${userWinRate}%` : '"”';
   const totalPnl = closed.reduce((sum, t) => sum + Number(t.profit), 0);
 
   const [cfg, setCfg] = useState<StpConfig>(initialConfig ?? STP_DEFAULTS);
@@ -4580,7 +4305,7 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
     setTimeout(() => setCfgSaved(false), 2500);
   };
 
-  const currentStatus = botStatus?.['Trend Pullback V3'] ?? (bot?.active ? '🔍 Scanning…' : '⏸ Paused');
+  const currentStatus = botStatus?.['Trend Pullback V3'] ?? (bot?.active ? 'ðŸ” Scanning"¦' : 'â¸ Paused');
 
   if (!bot) {
     return (
@@ -4603,12 +4328,12 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
   }
 
   const pipeline = [
-    { stage: '01', label: 'Trend Detection', detail: 'EMA20 > EMA50 (bull) or EMA20 < EMA50 (bear). Slope must agree. EMA gap ≥ 0.10 × ATR14.' },
-    { stage: '02', label: 'Pullback to EMA20', detail: 'Price must approach EMA20 within 0.30 × ATR14. Deep retracements are rejected.' },
-    { stage: '03', label: 'Swing Structure', detail: 'Latest swing low (bull) or swing high (bear) must remain intact. Breach > 0.20 × ATR14 = no trade.' },
-    { stage: '04', label: 'Confirmation Candle', detail: 'Candle must close back in trend direction with body ≥ 0.50 × ATR14. Signal evaluated after candle close only.' },
-    { stage: '05', label: 'ADX Strength', detail: 'ADX14 ≥ 22. Confirms sufficient directional momentum. Direction comes from EMA — ADX only gates entry.' },
-    { stage: '06', label: 'Volatility Regime', detail: 'ATR14 / ATR50-avg ≤ 1.50. Blocks entry during abnormally aggressive volatility spikes.' },
+    { stage: '01', label: 'Trend Detection', detail: 'EMA20 > EMA50 (bull) or EMA20 < EMA50 (bear). Slope must agree. EMA gap â‰¥ 0.10 Ã— ATR14.' },
+    { stage: '02', label: 'Pullback to EMA20', detail: 'Price must approach EMA20 within 0.30 Ã— ATR14. Deep retracements are rejected.' },
+    { stage: '03', label: 'Swing Structure', detail: 'Latest swing low (bull) or swing high (bear) must remain intact. Breach > 0.20 Ã— ATR14 = no trade.' },
+    { stage: '04', label: 'Confirmation Candle', detail: 'Candle must close back in trend direction with body â‰¥ 0.50 Ã— ATR14. Signal evaluated after candle close only.' },
+    { stage: '05', label: 'ADX Strength', detail: 'ADX14 â‰¥ 22. Confirms sufficient directional momentum. Direction comes from EMA "” ADX only gates entry.' },
+    { stage: '06', label: 'Volatility Regime', detail: 'ATR14 / ATR50-avg â‰¤ 1.50. Blocks entry during abnormally aggressive volatility spikes.' },
   ];
 
   const scoring = [
@@ -4655,7 +4380,7 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
           <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Trend Pullback V3 is running' : 'Trend Pullback V3 is paused'}</h2>
           <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
             {bot.active
-              ? 'Scanning V75 every 5 s · Only trades when all 6 stages pass and score ≥ 75.'
+              ? 'Scanning V75 every 5 s · Only trades when all 6 stages pass and score â‰¥ 75.'
               : 'Start the bot to begin scanning Volatility 75 for high-quality pullback entries.'}
           </p>
         </div>
@@ -4665,7 +4390,7 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
       </section>
       {bot.active && <div className="watching" style={{ marginBottom: '0.5rem' }}><i className="live-dot" /> {currentStatus}</div>}
 
-      {/* ── Settings panel ──────────────────────────────────────────────── */}
+      {/* â”€â”€ Settings panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <section className="panel" style={{ marginBottom: '1rem' }}>
         <div className="panel-title" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setSettingsOpen(o => !o)}>
           <div><span className="eyebrow">Configuration</span><h2 style={{ margin: '0.2rem 0 0' }}>Bot parameters</h2></div>
@@ -4726,7 +4451,7 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
             )}
             {/* Score threshold */}
             <label style={{ fontSize: '11px', color: '#80948e' }}>
-              Score threshold (0–100)
+              Score threshold (0"“100)
               <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
                 {[60, 65, 70, 75, 80, 85, 90].map(v => (
                   <button key={v} type="button"
@@ -4811,7 +4536,7 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
 
       {/* Scoring table */}
       <section className="panel">
-        <div className="panel-title"><div><span className="eyebrow">Quality gate</span><h2>Signal scoring — threshold 75 / 100</h2></div></div>
+        <div className="panel-title"><div><span className="eyebrow">Quality gate</span><h2>Signal scoring "” threshold 75 / 100</h2></div></div>
         <div style={{ fontSize: '0.84rem' }}>
           {scoring.map(({ component, max, note }) => (
             <div key={component} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0', borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))', gap: '1rem' }}>
@@ -4834,10 +4559,10 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
         {[
           ['Instrument', 'Volatility 75 Index only'],
           ['Stake', '1% of balance · min $5 · max $50'],
-          ['Max concurrent trades', '1 — waits for settlement before next entry'],
-          ['Consecutive loss limit', '3 losses → 15-minute cooldown, then reset'],
-          ['Volatility block', 'ATR14 / ATR50-avg > 1.50 → no entry'],
-          ['Martingale', 'Disabled — stake never increases after a loss'],
+          ['Max concurrent trades', '1 "” waits for settlement before next entry'],
+          ['Consecutive loss limit', '3 losses â†’ 15-minute cooldown, then reset'],
+          ['Volatility block', 'ATR14 / ATR50-avg > 1.50 â†’ no entry'],
+          ['Martingale', 'Disabled "” stake never increases after a loss'],
         ].map(([rule, val]) => (
           <div key={rule} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '0.65rem 0', borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))', gap: '1rem', fontSize: '0.84rem' }}>
             <span style={{ color: 'var(--text-muted, #9ca3af)', flexShrink: 0 }}>{rule}</span>
@@ -4855,7 +4580,7 @@ function TrendPullbackV3({ bots, toggleBot, trades, botStatus, onSaveConfig, ini
   );
 }
 
-// ── Digit Surge page ──────────────────────────────────────────────────────────
+// â”€â”€ Digit Surge page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
   bots: BotRow[];
   toggleBot: (bot: BotRow) => Promise<void>;
@@ -4870,7 +4595,7 @@ function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
   const hasUserTrades = closed.length > 0;
   const displayWinRate = hasUserTrades
     ? `${Math.round((closed.filter(t => t.result === 'won').length / closed.length) * 100)}%`
-    : '—';
+    : '"”';
 
   const [cfg, setCfg] = useState<DigitSurgeConfig>(initialConfig ?? DIGIT_SURGE_DEFAULTS);
   const [cfgSaved, setCfgSaved] = useState(false);
@@ -4881,13 +4606,13 @@ function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
       <span className="eyebrow">Bot not found</span>
       <h2>Digit Surge not in database</h2>
       <p className="muted">Run the SQL below in your Supabase SQL Editor:</p>
-      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Digit Surge','Parity bias engine on Volatility 10 (1s) Index. Scans the last 8 ticks for even/odd imbalance — enters DIGITEVEN or DIGITODD when bias exceeds 75%. Pauses after 3 consecutive losses.','Low',true,68,420)\nON CONFLICT (name) DO NOTHING;`}</pre>
+      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Digit Surge','Parity bias engine on Volatility 10 (1s) Index. Scans the last 8 ticks for even/odd imbalance "” enters DIGITEVEN or DIGITODD when bias exceeds 75%. Pauses after 3 consecutive losses.','Low',true,68,420)\nON CONFLICT (name) DO NOTHING;`}</pre>
     </section>
   );
 
   return <>
     <PageHeader eyebrow="Digit strategy" title="Digit Surge"
-      description="Trades Even/Odd digits on Volatility 10 (1s) Index. Uses parity bias — when the last 8 ticks show 75%+ even or odd endings, enters the dominant side."
+      description="Trades Even/Odd digits on Volatility 10 (1s) Index. Uses parity bias "” when the last 8 ticks show 75%+ even or odd endings, enters the dominant side."
       action={<button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
         {bot.active ? <><Pause size={16} /> Pause</> : <><Hash size={16} /> Start</>}
       </button>} />
@@ -4912,7 +4637,7 @@ function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
       <div>
         <span className="eyebrow">Bot control</span>
         <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Digit Surge is running' : 'Digit Surge is paused'}</h2>
-        <p className="muted">{botStatus['Digit Surge'] || (bot.active ? 'Scanning parity…' : 'Start the bot to begin scanning.')}</p>
+        <p className="muted">{botStatus['Digit Surge'] || (bot.active ? 'Scanning parity"¦' : 'Start the bot to begin scanning.')}</p>
       </div>
       <button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
         {bot.active ? <><Pause size={16} /> Pause Digit Surge</> : <><Hash size={16} /> Start Digit Surge</>}
@@ -4923,8 +4648,8 @@ function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
       <section className="panel">
         <div className="panel-title"><div><span className="eyebrow">Strategy</span><h2>How it works</h2></div></div>
         {[
-          { s: '01', l: 'Scan parity', d: `Last ${cfg.lookback} ticks on V10 (1s) — count even/odd last digits.` },
-          { s: '02', l: 'Bias gate',   d: `Only enter if dominant side ≥ ${(cfg.biasThreshold*100).toFixed(0)}%. Below threshold = wait.` },
+          { s: '01', l: 'Scan parity', d: `Last ${cfg.lookback} ticks on V10 (1s) "” count even/odd last digits.` },
+          { s: '02', l: 'Bias gate',   d: `Only enter if dominant side â‰¥ ${(cfg.biasThreshold*100).toFixed(0)}%. Below threshold = wait.` },
           { s: '03', l: 'Enter digit', d: 'Buy DIGITEVEN or DIGITODD matching the dominant parity.' },
           { s: '04', l: 'Loss guard',  d: `Pause for one cycle after ${cfg.maxConsecLosses} consecutive losses.` },
         ].map(({ s, l, d }) => (
@@ -4946,7 +4671,7 @@ function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Bias threshold (0–1)</span>
+          <span className="eyebrow">Bias threshold (0"“1)</span>
           <input type="number" min={0.5} max={1} step={0.05} value={cfg.biasThreshold}
             onChange={e => setCfg({ ...cfg, biasThreshold: Math.min(1, Math.max(0.5, Number(e.target.value))) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
@@ -4970,7 +4695,7 @@ function DigitSurge({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
   </>;
 }
 
-// ── Boom/Crash Rider page ─────────────────────────────────────────────────────
+// â”€â”€ Boom/Crash Rider page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
   bots: BotRow[];
   toggleBot: (bot: BotRow) => Promise<void>;
@@ -4985,7 +4710,7 @@ function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, init
   const hasUserTrades = closed.length > 0;
   const displayWinRate = hasUserTrades
     ? `${Math.round((closed.filter(t => t.result === 'won').length / closed.length) * 100)}%`
-    : '—';
+    : '"”';
 
   const [cfg, setCfg] = useState<BoomCrashConfig>(initialConfig ?? BOOM_CRASH_DEFAULTS);
   const [cfgSaved, setCfgSaved] = useState(false);
@@ -5027,7 +4752,7 @@ function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, init
       <div>
         <span className="eyebrow">Bot control</span>
         <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Boom/Crash Rider is running' : 'Boom/Crash Rider is paused'}</h2>
-        <p className="muted">{botStatus['Boom/Crash Rider'] || (bot.active ? 'Watching for setup…' : 'Start the bot to begin watching.')}</p>
+        <p className="muted">{botStatus['Boom/Crash Rider'] || (bot.active ? 'Watching for setup"¦' : 'Start the bot to begin watching.')}</p>
       </div>
       <button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
         {bot.active ? <><Pause size={16} /> Pause Rider</> : <><Zap size={16} /> Start Rider</>}
@@ -5038,9 +4763,9 @@ function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, init
       <section className="panel">
         <div className="panel-title"><div><span className="eyebrow">Strategy</span><h2>How it works</h2></div></div>
         {[
-          { s: '01', l: 'Trend scan',      d: `Analyse last ${cfg.trendTicks} ticks — count falling vs rising.` },
-          { s: '02', l: 'Direction gate',  d: `≥70% falling → Boom CALL. ≥70% rising → Crash PUT.` },
-          { s: '03', l: 'Compression check', d: `Last tick move must be < ${(cfg.spikeThreshold*100).toFixed(0)}% of average move — confirms quiet accumulation.` },
+          { s: '01', l: 'Trend scan',      d: `Analyse last ${cfg.trendTicks} ticks "” count falling vs rising.` },
+          { s: '02', l: 'Direction gate',  d: `â‰¥70% falling â†’ Boom CALL. â‰¥70% rising â†’ Crash PUT.` },
+          { s: '03', l: 'Compression check', d: `Last tick move must be < ${(cfg.spikeThreshold*100).toFixed(0)}% of average move "” confirms quiet accumulation.` },
           { s: '04', l: 'Cooldown',        d: `${cfg.cooldownMs / 1000}s minimum between trades to avoid overlapping contracts.` },
         ].map(({ s, l, d }) => (
           <div className="step" key={s}><span>{s}</span><b>{l}</b><p className="muted" style={{ margin: 0, fontSize: '10px' }}>{d}</p></div>
@@ -5061,7 +4786,7 @@ function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, init
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
         </label>
         <label style={{ display: 'block', marginBottom: 12 }}>
-          <span className="eyebrow">Spike threshold (0–1, lower = tighter)</span>
+          <span className="eyebrow">Spike threshold (0"“1, lower = tighter)</span>
           <input type="number" min={0.1} max={0.9} step={0.05} value={cfg.spikeThreshold}
             onChange={e => setCfg({ ...cfg, spikeThreshold: Math.min(0.9, Math.max(0.1, Number(e.target.value))) })}
             style={{ width: '100%', marginTop: 6, padding: '7px 10px', background: '#0d1715', border: '1px solid #2a403b', borderRadius: 6, color: '#dbeae6', fontSize: 12 }} />
@@ -5085,7 +4810,7 @@ function BoomCrashRider({ bots, toggleBot, trades, botStatus, onSaveConfig, init
   </>;
 }
 
-// ── Asian Drift page ──────────────────────────────────────────────────────────
+// â”€â”€ Asian Drift page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialConfig }: {
   bots: BotRow[];
   toggleBot: (bot: BotRow) => Promise<void>;
@@ -5100,7 +4825,7 @@ function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
   const hasUserTrades = closed.length > 0;
   const displayWinRate = hasUserTrades
     ? `${Math.round((closed.filter(t => t.result === 'won').length / closed.length) * 100)}%`
-    : '—';
+    : '"”';
 
   const [cfg, setCfg] = useState<AsianDriftConfig>(initialConfig ?? ASIAN_DRIFT_DEFAULTS);
   const [cfgSaved, setCfgSaved] = useState(false);
@@ -5111,7 +4836,7 @@ function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
       <span className="eyebrow">Bot not found</span>
       <h2>Asian Drift not in database</h2>
       <p className="muted">Run the SQL below in your Supabase SQL Editor:</p>
-      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Asian Drift','Moving-average drift engine on Volatility 50 Index. When the current price drifts significantly above or below the 12-tick MA, it enters ASIANU or ASIAND — profiting from the gap between spot price and contract average.','Low',true,65,318)\nON CONFLICT (name) DO NOTHING;`}</pre>
+      <pre style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '1rem', fontSize: '0.8rem', lineHeight: 1.7, overflowX: 'auto', userSelect: 'all' }}>{`INSERT INTO trading_bots (name, description, risk, demo_only, benchmark_win_rate, benchmark_trades)\nVALUES ('Asian Drift','Moving-average drift engine on Volatility 50 Index. When the current price drifts significantly above or below the 12-tick MA, it enters ASIANU or ASIAND "” profiting from the gap between spot price and contract average.','Low',true,65,318)\nON CONFLICT (name) DO NOTHING;`}</pre>
     </section>
   );
 
@@ -5126,7 +4851,7 @@ function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
       <div>
         <span className="pro-tag">ASIAN BOT</span>
         <h2>Average price. Edge in drift.</h2>
-        <p>Asian contracts pay out based on the average tick price, not the final spot. When price drifts above the moving average, the contract average lags — ASIANU wins. Drift below MA → ASIAND wins. The further the drift the higher the edge.</p>
+        <p>Asian contracts pay out based on the average tick price, not the final spot. When price drifts above the moving average, the contract average lags "” ASIANU wins. Drift below MA â†’ ASIAND wins. The further the drift the higher the edge.</p>
       </div>
       <div className="apex-score">
         <strong>{displayWinRate}</strong>
@@ -5142,7 +4867,7 @@ function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
       <div>
         <span className="eyebrow">Bot control</span>
         <h2 style={{ margin: '0.2rem 0 0.3rem' }}>{bot.active ? 'Asian Drift is running' : 'Asian Drift is paused'}</h2>
-        <p className="muted">{botStatus['Asian Drift'] || (bot.active ? 'Measuring drift…' : 'Start the bot to begin measuring.')}</p>
+        <p className="muted">{botStatus['Asian Drift'] || (bot.active ? 'Measuring drift"¦' : 'Start the bot to begin measuring.')}</p>
       </div>
       <button className={bot.active ? 'secondary' : 'primary'} onClick={() => void toggleBot(bot)}>
         {bot.active ? <><Pause size={16} /> Pause Asian Drift</> : <><Globe size={16} /> Start Asian Drift</>}
@@ -5154,8 +4879,8 @@ function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
         <div className="panel-title"><div><span className="eyebrow">Strategy</span><h2>How it works</h2></div></div>
         {[
           { s: '01', l: 'Compute MA',     d: `Average of last ${cfg.maPeriod} ticks on V50.` },
-          { s: '02', l: 'Measure drift',  d: `drift = (close − MA) / MA. Must exceed ±${(cfg.driftThreshold*100).toFixed(2)}%.` },
-          { s: '03', l: 'Choose direction', d: 'Drift > 0 → ASIANU. Drift < 0 → ASIAND.' },
+          { s: '02', l: 'Measure drift',  d: `drift = (close âˆ’ MA) / MA. Must exceed Â±${(cfg.driftThreshold*100).toFixed(2)}%.` },
+          { s: '03', l: 'Choose direction', d: 'Drift > 0 â†’ ASIANU. Drift < 0 â†’ ASIAND.' },
           { s: '04', l: 'Contract',       d: `${cfg.durationTicks}-tick Asian contract. Settles on average price of all ticks.` },
         ].map(({ s, l, d }) => (
           <div className="step" key={s}><span>{s}</span><b>{l}</b><p className="muted" style={{ margin: 0, fontSize: '10px' }}>{d}</p></div>
@@ -5200,7 +4925,7 @@ function AsianDrift({ bots, toggleBot, trades, botStatus, onSaveConfig, initialC
   </>;
 }
 
-function Record({ trades }: { trades: Trade[] }) { const [filter, setFilter] = useState('all'); const filtered = filter === 'all' ? trades : trades.filter((trade) => trade.result === filter); const total = trades.reduce((sum, trade) => sum + Number(trade.profit), 0); const exportCsv = () => { const csv = ['Instrument,Direction,Stake,Result,P/L,Source,Time', ...trades.map((trade) => [trade.instrument, trade.direction, trade.stake, trade.result, trade.profit, trade.source, trade.created_at].join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'apex-track-record.csv'; link.click(); URL.revokeObjectURL(url); }; return <><PageHeader eyebrow="Public performance ledger" title="Track record" description="Every synthetic trade is timestamped and visible. Results cannot be edited after they close." action={<button className="secondary" onClick={exportCsv}><ArrowDownRight size={16} /> Export CSV</button>} /><div className="record-summary"><Stat label="Total trades" value={String(trades.length)} detail="All strategies" icon={BarChart3} /><Stat label="Win rate" value={trades.length ? `${Math.round(trades.filter((trade) => trade.result === 'won').length / trades.length * 100)}%` : '—'} detail="Closed trades" tone="success" icon={Target} /><Stat label="Cumulative P/L" value={money(total)} detail="Across this workspace" tone={total >= 0 ? 'success' : 'danger'} icon={total >= 0 ? TrendingUp : TrendingDown} /></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Cumulative equity curve</h2></div></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><h2>All trades</h2><div className="filter-tabs">{['all', 'won', 'lost'].map((item) => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div></div><TradeTable trades={filtered} /></section></>; }
+function Record({ trades }: { trades: Trade[] }) { const [filter, setFilter] = useState('all'); const filtered = filter === 'all' ? trades : trades.filter((trade) => trade.result === filter); const total = trades.reduce((sum, trade) => sum + Number(trade.profit), 0); const exportCsv = () => { const csv = ['Instrument,Direction,Stake,Result,P/L,Source,Time', ...trades.map((trade) => [trade.instrument, trade.direction, trade.stake, trade.result, trade.profit, trade.source, trade.created_at].join(','))].join('\n'); const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'apex-track-record.csv'; link.click(); URL.revokeObjectURL(url); }; return <><PageHeader eyebrow="Public performance ledger" title="Track record" description="Every synthetic trade is timestamped and visible. Results cannot be edited after they close." action={<button className="secondary" onClick={exportCsv}><ArrowDownRight size={16} /> Export CSV</button>} /><div className="record-summary"><Stat label="Total trades" value={String(trades.length)} detail="All strategies" icon={BarChart3} /><Stat label="Win rate" value={trades.length ? `${Math.round(trades.filter((trade) => trade.result === 'won').length / trades.length * 100)}%` : '"”'} detail="Closed trades" tone="success" icon={Target} /><Stat label="Cumulative P/L" value={money(total)} detail="Across this workspace" tone={total >= 0 ? 'success' : 'danger'} icon={total >= 0 ? TrendingUp : TrendingDown} /></div><section className="panel"><div className="panel-title"><div><span className="eyebrow">Performance</span><h2>Cumulative equity curve</h2></div></div><EquityChart trades={trades} /></section><section className="panel"><div className="panel-title"><h2>All trades</h2><div className="filter-tabs">{['all', 'won', 'lost'].map((item) => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div></div><TradeTable trades={filtered} /></section></>; }
 
 function TradeTable({ trades, pageSize = 8 }: { trades: Trade[]; pageSize?: number }) {
   const [page, setPage] = useState(0);
@@ -5278,7 +5003,7 @@ function TradeTable({ trades, pageSize = 8 }: { trades: Trade[]; pageSize?: numb
             <div className="page-numbers-group">
               {getPageNumbers().map((p, idx) =>
                 typeof p === 'string' ? (
-                  <span key={`ellipsis-${idx}`} className="page-ellipsis">…</span>
+                  <span key={`ellipsis-${idx}`} className="page-ellipsis">"¦</span>
                 ) : (
                   <button
                     key={p}
@@ -5589,7 +5314,7 @@ function Settings({
               </button>
             </div>
             <div className="guard-note">
-              Current session loss: <b>{money(sessionLossUsed)}</b> · {lossLimitReached ? 'Limit reached — trading blocked' : `${money(Math.max(0, parsedLimit - sessionLossUsed))} remaining at this limit`}
+              Current session loss: <b>{money(sessionLossUsed)}</b> · {lossLimitReached ? 'Limit reached "” trading blocked' : `${money(Math.max(0, parsedLimit - sessionLossUsed))} remaining at this limit`}
             </div>
           </div>
         </section>
